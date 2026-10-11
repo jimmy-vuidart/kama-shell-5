@@ -31,6 +31,7 @@ use crate::backend::Backend;
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
+use crate::input::Gesture;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::render::scene::Cursor;
 use crate::shell::{ScreenInfo, Shell};
@@ -93,8 +94,11 @@ pub struct State {
     pub painter: Painter,
     /// The title bar button under the pointer.
     pub hover: Option<(WindowId, TitlebarButton)>,
-    /// The title bar button the left mouse button went down on.
-    pub pressed: Option<(WindowId, TitlebarButton)>,
+    /// What the left mouse button is doing since it went down.
+    pub gesture: Option<Gesture>,
+    /// The left button went down for the shell: its release is not for a
+    /// client either.
+    pub swallowed_press: bool,
 
     /// Something changed: a frame is due.
     pub redraw_needed: bool,
@@ -191,7 +195,8 @@ impl State {
             theme: options.theme,
             painter: Painter::new(),
             hover: None,
-            pressed: None,
+            gesture: None,
+            swallowed_press: false,
             redraw_needed: true,
             full_redraw: true,
         })

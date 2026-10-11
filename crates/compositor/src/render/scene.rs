@@ -58,27 +58,31 @@ impl ShapeCache {
                 return element.clone();
             }
         }
-        let (outline, area) = (shape.outline, shape.area);
-        let element = PixelShaderElement::new(
-            program.clone(),
-            rectangle(area),
-            None,
-            1.0,
-            vec![
-                Uniform::new("shape_size", [outline.w as f32, outline.h as f32]),
-                Uniform::new(
-                    "shape_offset",
-                    [(area.x - outline.x) as f32, (area.y - outline.y) as f32],
-                ),
-                Uniform::new("color", shape.color.premultiplied()),
-                Uniform::new("radius", shape.radii.map(|radius| radius as f32)),
-                Uniform::new("border", shape.border as f32),
-            ],
-            Kind::Unspecified,
-        );
+        let element = shape_element(program, shape);
         self.0 = Some((shape, element.clone()));
         element
     }
+}
+
+fn shape_element(program: &GlesPixelProgram, shape: Shape) -> PixelShaderElement {
+    let (outline, area) = (shape.outline, shape.area);
+    PixelShaderElement::new(
+        program.clone(),
+        rectangle(area),
+        None,
+        1.0,
+        vec![
+            Uniform::new("shape_size", [outline.w as f32, outline.h as f32]),
+            Uniform::new(
+                "shape_offset",
+                [(area.x - outline.x) as f32, (area.y - outline.y) as f32],
+            ),
+            Uniform::new("color", shape.color.premultiplied()),
+            Uniform::new("radius", shape.radii.map(|radius| radius as f32)),
+            Uniform::new("border", shape.border as f32),
+        ],
+        Kind::Unspecified,
+    )
 }
 
 /// What the compositor draws around one window.
@@ -121,14 +125,15 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 }
 
 /// Every element seen through `view`, a part of the global space (one screen,
-/// or all of them nested), topmost first: cursor, popups, then windows from
-/// the top one down. Positions are relative to the view's corner.
+/// or all of them nested), topmost first: cursor, shell overlay, popups, then
+/// windows from the top one down. Positions are relative to the view's corner.
 pub fn build(
     renderer: &mut GlesRenderer,
     shaders: &Shaders,
     shell: &mut Shell,
     theme: &Theme,
     view: Rect,
+    overlay: &[Shape],
     cursor: Option<Cursor>,
 ) -> Vec<SceneElement> {
     let metrics = *shell.desk.metrics();
@@ -287,6 +292,17 @@ pub fn build(
             }
         }
         None => {}
+    }
+    // Shell hints (drop zones) sit above every window, in the global space.
+    for shape in overlay {
+        let shape = Shape {
+            outline: shape.outline.translated(shift),
+            area: shape.area.translated(shift),
+            ..*shape
+        };
+        if overlaps(shape.area, Rect::new(0, 0, view.w, view.h)) {
+            elements.push(SceneElement::Shape(shape_element(&shaders.rounded, shape)));
+        }
     }
     elements.extend(popups);
     elements.extend(windows);

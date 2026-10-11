@@ -1,6 +1,6 @@
 //! Input events: shortcuts, focus on click, title bar buttons.
 
-use coquille_model::{Placement, Point as ModelPoint, WindowId};
+use coquille_model::{DropTarget, Insets, Placement, Point as ModelPoint, Rect, WindowId};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
@@ -16,12 +16,20 @@ use tracing::{debug, info, warn};
 use crate::debug::Step;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
 use crate::outputs::constrain;
+use crate::render::scene::Shape;
 use crate::shell::ManagedWindow;
 use crate::shortcuts::{Action, KeyPress, action_for};
 use crate::state::State;
+use crate::theme::Rgba;
 
 /// Linux input code of the left mouse button.
 const BTN_LEFT: u32 = 0x110;
+/// Gap between a drop zone's outline and the slot it stands for.
+const ZONE_INSET: i32 = 4;
+
+/// How far the pointer must travel, button held, before a press on a title
+/// bar becomes a drag.
+const DRAG_THRESHOLD: f64 = 8.0;
 
 /// What lies under a point of the global space.
 #[derive(Debug, Default)]
@@ -29,7 +37,29 @@ struct Hit {
     window: Option<WindowId>,
     /// The client surface there, with its position.
     surface: Option<(WlSurface, Point<f64, Logical>)>,
+    /// The point is on the window's title bar.
+    titlebar: bool,
     button: Option<TitlebarButton>,
+}
+
+/// What the left mouse button is doing since it went down.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Gesture {
+    /// Down on a title bar, not moved yet: a click, or the start of a drag.
+    Pressed {
+        window: WindowId,
+        at: Point<f64, Logical>,
+        button: Option<TitlebarButton>,
+    },
+    /// Dragging a window by its title bar: drop zones are shown, and
+    /// releasing on one places the window.
+    Placing { window: WindowId },
+    /// Dragging with the shell modifier: the window floats and follows the
+    /// pointer. `grab` is where the pointer holds it, from its corner.
+    Moving {
+        window: WindowId,
+        grab: Point<f64, Logical>,
+    },
 }
 
 impl State {
@@ -90,6 +120,8 @@ impl State {
                 self.pointer_button(BTN_LEFT, ButtonState::Pressed, time);
                 self.pointer_button(BTN_LEFT, ButtonState::Released, time);
             }
+            Step::ButtonDown => self.pointer_button(BTN_LEFT, ButtonState::Pressed, time),
+            Step::ButtonUp => self.pointer_button(BTN_LEFT, ButtonState::Released, time),
             Step::Press(keycode) => self.key(Keycode::new(keycode), KeyState::Pressed, time),
             Step::Release(keycode) => self.key(Keycode::new(keycode), KeyState::Released, time),
         }
@@ -184,12 +216,19 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let hit = self.hit_test(location);
+        self.advance_gesture(location);
+        // While the shell drags a window, clients see no pointer at all.
+        let dragging = matches!(
+            self.gesture,
+            Some(Gesture::Placing { .. } | Gesture::Moving { .. })
+        );
+        let hit = if dragging {
+            Hit::default()
+        } else {
+            self.hit_test(location)
+        };
 
-        let hover = hit.window.zip(hit.button);
-        if hover != self.hover {
-            self.hover = hover;
-        }
+        self.hover = hit.window.zip(hit.button);
         // Over the shell's own chrome no client sets the cursor.
         if hit.surface.is_none() && !pointer.is_grabbed() {
             self.set_cursor(CursorImageStatus::default_named());
@@ -214,43 +253,215 @@ impl State {
         self.queue_redraw();
     }
 
+    /// Lets the gesture in progress react to the pointer moving.
+    fn advance_gesture(&mut self, location: Point<f64, Logical>) {
+        match self.gesture {
+            Some(Gesture::Pressed {
+                window,
+                at,
+                button: None,
+            }) => {
+                let travelled = (location - at).to_i32_round::<i32>();
+                let far = f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt();
+                if far > DRAG_THRESHOLD {
+                    self.gesture = Some(Gesture::Placing { window });
+                }
+            }
+            Some(Gesture::Moving { window, grab }) => {
+                self.move_floating(window, location, grab);
+            }
+            _ => {}
+        }
+    }
+
+    /// Makes `window` float with the pointer holding it at `grab`.
+    fn move_floating(
+        &mut self,
+        window: WindowId,
+        pointer: Point<f64, Logical>,
+        grab: Point<f64, Logical>,
+    ) {
+        let point = model_point(pointer);
+        let (Some(screen), Some(managed)) = (
+            self.shell.screen_at(point).copied(),
+            self.shell.by_id(window),
+        ) else {
+            return;
+        };
+        let size = managed.frame().size();
+        let corner = model_point(pointer - grab);
+        let rect = Rect::new(
+            corner.x - screen.rect.x,
+            corner.y - screen.rect.y,
+            size.w,
+            size.h,
+        );
+        // Refused on a screen held by a fullscreen window: the window then
+        // simply stays where it was.
+        if self
+            .shell
+            .desk
+            .float_window(window, screen.id, rect)
+            .is_ok()
+        {
+            self.apply_arrangement();
+        }
+    }
+
+    /// Places a window dragged by its title bar where it was released.
+    fn drop_window(&mut self, window: WindowId, location: Point<f64, Logical>) {
+        let point = model_point(location);
+        let zones = self.shell.drop_zones(window);
+        let Some((zone, target, _)) = zones.into_iter().find(|(rect, ..)| rect.contains(point))
+        else {
+            return;
+        };
+        let result = match target {
+            DropTarget::Slot(slot) => self.shell.desk.move_to_slot(window, slot),
+            // On a free screen the window lands with its title bar under the
+            // pointer.
+            DropTarget::Float(output) => {
+                let bar = self.shell.desk.metrics().titlebar_height;
+                let size = self
+                    .shell
+                    .by_id(window)
+                    .map_or_else(|| zone.size(), |managed| managed.frame().size());
+                let rect = Rect::new(
+                    point.x - zone.x - size.w / 2,
+                    point.y - zone.y - bar / 2,
+                    size.w,
+                    size.h,
+                );
+                self.shell.desk.float_window(window, output, rect)
+            }
+        };
+        if let Err(error) = result {
+            warn!(%error, "cannot place the window there");
+        }
+        self.apply_arrangement();
+    }
+
+    /// The hints drawn above the windows: while a window is dragged by its
+    /// title bar, every place it can go, the one under the pointer standing
+    /// out.
+    pub fn overlay(&self) -> Vec<Shape> {
+        let Some(Gesture::Placing { window }) = self.gesture else {
+            return Vec::new();
+        };
+        let point = model_point(self.pointer_location());
+        let radius = self.shell.desk.metrics().corner_radius;
+        let accent = self.theme.accent;
+        let tint = |alpha: u8| Rgba { a: alpha, ..accent };
+
+        let mut shapes = Vec::new();
+        for (rect, ..) in self.shell.drop_zones(window) {
+            let aimed = rect.contains(point);
+            let outline = rect.inset(Insets::uniform(ZONE_INSET));
+            let zone = Shape {
+                outline,
+                area: outline,
+                color: tint(if aimed { 0xff } else { 0x8c }),
+                radii: [radius; 4],
+                border: 2,
+            };
+            // Topmost first: the outline, then its fill.
+            shapes.push(zone);
+            shapes.push(Shape {
+                color: tint(if aimed { 0x4d } else { 0x1a }),
+                border: 0,
+                ..zone
+            });
+        }
+        shapes
+    }
+
     fn pointer_button(&mut self, button: u32, state: ButtonState, time: InputTime) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        let location = pointer.current_location();
+        let mut for_clients = true;
 
-        let hit = self.hit_test(pointer.current_location());
-        let on_button = hit.window.zip(hit.button);
         match state {
             // During a grab (a popup menu, a drag) clicks belong to the grab.
             ButtonState::Pressed if !pointer.is_grabbed() => {
+                let hit = self.hit_test(location);
                 if let Some(window) = hit.window {
                     self.focus_window(window);
                 }
                 if button == BTN_LEFT {
-                    self.pressed = on_button;
+                    for_clients = !self.start_gesture(&hit, location);
+                    self.swallowed_press = !for_clients;
                 }
             }
             ButtonState::Released if button == BTN_LEFT => {
-                // A click counts when it ends on the button it began on.
-                if let Some(pressed) = self.pressed.take().filter(|p| Some(*p) == on_button) {
-                    self.click_titlebar_button(pressed.0, pressed.1);
+                match self.gesture.take() {
+                    // A click counts when it ends on the button it began on.
+                    Some(Gesture::Pressed {
+                        window,
+                        button: Some(pressed),
+                        ..
+                    }) => {
+                        let hit = self.hit_test(location);
+                        if hit.window.zip(hit.button) == Some((window, pressed)) {
+                            self.click_titlebar_button(window, pressed);
+                        }
+                    }
+                    Some(Gesture::Placing { window }) => self.drop_window(window, location),
+                    Some(Gesture::Pressed { .. } | Gesture::Moving { .. }) | None => {}
                 }
+                for_clients = !std::mem::take(&mut self.swallowed_press);
+                self.queue_redraw();
             }
             _ => {}
         }
 
-        pointer.button(
-            self,
-            &ButtonEvent {
-                button,
-                state,
-                serial,
-                time,
-            },
-        );
-        pointer.frame(self);
+        if for_clients {
+            pointer.button(
+                self,
+                &ButtonEvent {
+                    button,
+                    state,
+                    serial,
+                    time,
+                },
+            );
+            pointer.frame(self);
+        }
+    }
+
+    /// Decides what a left press starts. Returns whether the shell keeps the
+    /// press for itself.
+    fn start_gesture(&mut self, hit: &Hit, location: Point<f64, Logical>) -> bool {
+        let Some(managed) = hit.window.and_then(|window| self.shell.by_id(window)) else {
+            return false;
+        };
+        let window = managed.id;
+        let frame = managed.frame();
+        let anchored = managed.geometry.anchored;
+        let mod_held = self
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| self.mod_key.is_held(&keyboard.modifier_state()));
+
+        if mod_held && !anchored {
+            // Anywhere on the window: it will follow the pointer.
+            let corner = Point::<f64, Logical>::from((f64::from(frame.x), f64::from(frame.y)));
+            self.gesture = Some(Gesture::Moving {
+                window,
+                grab: location - corner,
+            });
+            return true;
+        }
+        if hit.titlebar {
+            self.gesture = Some(Gesture::Pressed {
+                window,
+                at: location,
+                button: hit.button,
+            });
+        }
+        false
     }
 
     fn on_axis<I: InputBackend>(&mut self, event: I::PointerAxisEvent) {
@@ -341,12 +552,12 @@ impl State {
                 return Hit {
                     window: Some(managed.id),
                     surface: Some(surface),
-                    button: None,
+                    ..Hit::default()
                 };
             }
         }
 
-        let point = ModelPoint::new(location.x.floor() as i32, location.y.floor() as i32);
+        let point = model_point(location);
         for managed in visible() {
             if let Some(bar) = managed.titlebar().filter(|bar| bar.contains(point)) {
                 let layout = TitlebarLayout::new(bar.size(), managed.show_swap);
@@ -354,6 +565,7 @@ impl State {
                 return Hit {
                     window: Some(managed.id),
                     surface: None,
+                    titlebar: true,
                     button: layout.button_at(local),
                 };
             }
@@ -362,10 +574,15 @@ impl State {
                 return Hit {
                     window: Some(managed.id),
                     surface: surface_at(managed, kind),
-                    button: None,
+                    ..Hit::default()
                 };
             }
         }
         Hit::default()
     }
+}
+
+/// The pixel a position falls in.
+fn model_point(location: Point<f64, Logical>) -> ModelPoint {
+    ModelPoint::new(location.x.floor() as i32, location.y.floor() as i32)
 }

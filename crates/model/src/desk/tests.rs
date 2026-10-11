@@ -1074,56 +1074,98 @@ fn a_free_screen_is_a_single_floating_drop_zone() {
     );
 }
 
-// Provisional automatic tiling (phase 1 only).
+// Suggestions for the placement bar.
 
 #[test]
-fn automatic_tiling_fills_the_first_free_slot() {
+fn the_first_free_slot_of_the_screen_is_suggested() {
     let mut desk = desk();
     open(&mut desk, 1, "term", LEFT);
-    open(&mut desk, 2, "term", LEFT);
+    assert_eq!(desk.suggested_slot(WindowId(1)), Some(slot(LEFT, 0)));
 
-    let first = desk.tile_automatically(WindowId(1)).unwrap();
-    let second = desk.tile_automatically(WindowId(2)).unwrap();
+    desk.move_to_slot(WindowId(1), slot(LEFT, 0)).unwrap();
+    // Another application: the same one would reopen in its slot.
+    open(&mut desk, 2, "notes", LEFT);
 
-    assert_eq!(first, Placement::Slot(slot(LEFT, 0)));
-    assert_eq!(second, Placement::Slot(slot(LEFT, 1)));
+    assert_eq!(desk.suggested_slot(WindowId(2)), Some(slot(LEFT, 1)));
 }
 
 #[test]
-fn automatic_tiling_stacks_in_the_last_focused_slot_when_all_are_taken() {
+fn with_every_slot_taken_the_one_focused_last_is_suggested() {
     let mut desk = desk();
-    for id in 1..=2 {
-        open(&mut desk, id, "term", LEFT);
-        desk.tile_automatically(WindowId(id)).unwrap();
-    }
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
     desk.focus(WindowId(1)).unwrap();
-    open(&mut desk, 3, "term", LEFT);
+    open(&mut desk, 3, "browser", RIGHT);
 
-    let third = desk.tile_automatically(WindowId(3)).unwrap();
-
-    assert_eq!(third, Placement::Slot(slot(LEFT, 0)));
-    assert_eq!(tabs(&desk, LEFT, 0), [1, 3]);
+    assert_eq!(desk.suggested_slot(WindowId(3)), Some(slot(RIGHT, 0)));
 }
 
 #[test]
-fn automatic_tiling_creates_no_habit() {
-    let mut desk = desk();
-    open(&mut desk, 1, "term", LEFT);
-
-    desk.tile_automatically(WindowId(1)).unwrap();
-
-    assert!(desk.memory().is_empty());
-}
-
-#[test]
-fn automatic_tiling_leaves_windows_floating_on_a_free_screen() {
+fn nothing_is_suggested_on_a_screen_without_usable_slot() {
     let mut desk = desk();
     desk.set_layout(LEFT, LayoutKind::Free).unwrap();
-    open(&mut desk, 1, "term", LEFT);
+    open(&mut desk, 1, "blender", LEFT);
+    open(&mut desk, 2, "notes", CENTER);
+    anchor_game(&mut desk, 3);
 
-    let placement = desk.tile_automatically(WindowId(1)).unwrap();
+    assert_eq!(desk.suggested_slot(WindowId(1)), None);
+    assert_eq!(desk.suggested_slot(WindowId(2)), None);
+    assert_eq!(desk.suggested_slot(WindowId(9)), None);
+}
 
-    assert_eq!(floating_output(placement), LEFT);
+#[test]
+fn nothing_is_suggested_for_a_window_already_in_a_slot() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+
+    assert_eq!(desk.suggested_slot(WindowId(1)), None);
+}
+
+// Floating windows take the size their client chooses.
+
+#[test]
+fn a_floating_window_follows_its_client_without_taking_the_focus() {
+    let mut desk = desk();
+    open(&mut desk, 1, "gimp", LEFT);
+    open(&mut desk, 2, "notes", RIGHT);
+    let rect = Rect::new(300, 200, 640, 480);
+
+    desk.set_floating_rect(WindowId(1), rect).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Floating { output: LEFT, rect });
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+}
+
+#[test]
+fn a_floating_window_is_kept_inside_its_screen_when_its_client_resizes() {
+    let mut desk = desk();
+    open(&mut desk, 1, "gimp", LEFT);
+
+    desk.set_floating_rect(WindowId(1), Rect::new(1500, 900, 4000, 400))
+        .unwrap();
+
+    assert_eq!(
+        place(&desk, 1),
+        Placement::Floating {
+            output: LEFT,
+            rect: Rect::new(8, 672, 1904, 400),
+        }
+    );
+}
+
+#[test]
+fn only_floating_windows_follow_their_client() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+
+    assert_eq!(
+        desk.set_floating_rect(WindowId(1), Rect::new(0, 0, 100, 100)),
+        Err(ModelError::NotFloating(WindowId(1)))
+    );
+    assert_eq!(
+        desk.set_floating_rect(WindowId(7), Rect::new(0, 0, 100, 100)),
+        Err(ModelError::UnknownWindow(WindowId(7)))
+    );
 }
 
 // Invariants under arbitrary sequences of operations.
@@ -1165,7 +1207,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
             let index = rng.next(3) as usize;
 
             // Refusals are part of the contract; only consistency matters here.
-            let _outcome: Result<(), ModelError> = match rng.next(12) {
+            let _outcome: Result<(), ModelError> = match rng.next(13) {
                 0 | 1 => {
                     next_id += 1;
                     let app = AppKey::new(APPS[rng.next(4) as usize]);
@@ -1184,7 +1226,14 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                 7 => desk.set_ratio(output, Ratio::from_permille(rng.next(1000) as u16)),
                 8 => desk.focus(window),
                 9 => desk.set_anchored(window, rng.next(2) == 0),
-                10 => desk.tile_automatically(window).map(drop),
+                10 => match desk.suggested_slot(window) {
+                    Some(suggested) => desk.move_to_slot(window, suggested),
+                    None => Ok(()),
+                },
+                11 => {
+                    let x = rng.next(3000) as i32 - 400;
+                    desk.set_floating_rect(window, Rect::new(x, x / 3, 200 + x.abs(), 150))
+                }
                 _ => desk.cycle_tab(slot(output, index), rng.next(2) == 0),
             };
 

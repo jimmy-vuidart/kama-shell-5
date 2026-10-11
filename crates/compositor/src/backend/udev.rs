@@ -493,6 +493,7 @@ impl State {
         self.shell
             .refresh_chrome(&mut self.painter, &self.theme, self.hover);
         let cursor = self.cursor(true);
+        let overlay = self.overlay();
         let Backend::Udev(udev) = &mut self.backend else {
             return;
         };
@@ -509,6 +510,7 @@ impl State {
             &mut self.shell,
             &self.theme,
             view,
+            &overlay,
             cursor,
         );
         let clear = self.theme.backdrop.premultiplied();

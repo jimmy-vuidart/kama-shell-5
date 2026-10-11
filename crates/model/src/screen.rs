@@ -131,6 +131,13 @@ impl Screen {
         self.floating.push(FloatingWindow { id, rect });
     }
 
+    /// Changes the rectangle of a floating window, keeping its stacking.
+    pub(crate) fn set_floating_rect(&mut self, id: WindowId, rect: Rect) {
+        if let Some(window) = self.floating.iter_mut().find(|window| window.id == id) {
+            window.rect = rect;
+        }
+    }
+
     /// Puts `new` where the floating window `old` is, keeping its stacking.
     pub(crate) fn replace_floating(&mut self, old: WindowId, new: WindowId) {
         if let Some(window) = self.floating.iter_mut().find(|window| window.id == old) {

@@ -4,8 +4,8 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, Desk, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole, Point as ModelPoint,
-    Rect, WindowGeometry, WindowId,
+    AppKey, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole, Placement,
+    Point as ModelPoint, Rect, WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -46,6 +46,11 @@ pub struct ManagedWindow {
     pub origin: ModelPoint,
     /// The "swap with the center" button applies to this window.
     pub show_swap: bool,
+    /// Floating: the size its client chose has been taken once already.
+    pub sized: bool,
+    /// Floating: its client wants more room than the screen has, so the
+    /// compositor imposes the size instead of following it.
+    pub oversized: bool,
     pub chrome: Chrome,
 }
 
@@ -124,6 +129,21 @@ impl Shell {
 
     pub fn by_id(&self, id: WindowId) -> Option<&ManagedWindow> {
         self.windows.iter().find(|managed| managed.id == id)
+    }
+
+    /// Where a dragged window can be released, in the global space.
+    pub fn drop_zones(&self, dragged: WindowId) -> Vec<(Rect, DropTarget, bool)> {
+        let zones = self.desk.drop_zones(dragged).into_iter();
+        zones
+            .filter_map(|zone| {
+                let output = match zone.target {
+                    DropTarget::Slot(slot) => slot.output,
+                    DropTarget::Float(output) => output,
+                };
+                let origin = self.screen(output)?.rect.origin();
+                Some((zone.rect.translated(origin), zone.target, zone.occupied))
+            })
+            .collect()
     }
 
     /// What a window needs besides the model's geometry: where its screen is,
@@ -265,10 +285,6 @@ impl State {
             warn!(%error, "the model refused a new window");
             return;
         }
-        // Until windows can be dragged to slots, tile right away.
-        if let Err(error) = self.shell.desk.tile_automatically(id) {
-            warn!(%error, "cannot tile a new window");
-        }
         if let Err(error) = self.shell.desk.set_title(id, title.clone()) {
             warn!(%error, "cannot title a new window");
         }
@@ -292,6 +308,8 @@ impl State {
             geometry,
             origin,
             show_swap,
+            sized: false,
+            oversized: false,
             chrome: Chrome::default(),
         });
         self.apply_arrangement();
@@ -338,8 +356,11 @@ impl State {
             let Some(toplevel) = managed.window.toplevel() else {
                 continue;
             };
+            // A floating window has the size its client chooses, unless that
+            // is more than the screen offers.
+            let free_size = geometry.floating && !geometry.anchored && !managed.oversized;
             toplevel.with_pending_state(|state| {
-                state.size = Some((geometry.client.w, geometry.client.h).into());
+                state.size = (!free_size).then(|| (geometry.client.w, geometry.client.h).into());
                 state.decoration_mode = Some(DecorationMode::ServerSide);
 
                 let mut set = |flag: ToplevelState, on: bool| {
@@ -383,6 +404,54 @@ impl State {
         self.sync_keyboard_focus();
         self.full_redraw = true;
         self.queue_redraw();
+    }
+
+    /// A client drew: if its window floats, the frame takes the size the
+    /// client chose. The first time, the window stays centered where it
+    /// opened; later it keeps its top-left corner.
+    pub fn follow_client_size(&mut self, surface: &WlSurface) {
+        let bar = self.shell.desk.metrics().titlebar_height;
+        let Some(managed) = self.shell.by_surface_mut(surface) else {
+            return;
+        };
+        let geometry = managed.geometry;
+        let drawn = managed.window.geometry().size;
+        let (frame, client) = (geometry.frame, geometry.client);
+        if !geometry.floating || geometry.anchored || drawn.w <= 0 || drawn.h <= 0 {
+            return;
+        }
+        let first_time = !std::mem::replace(&mut managed.sized, true);
+        if (drawn.w, drawn.h) == (client.w, client.h) {
+            return;
+        }
+
+        let (w, h) = (drawn.w, drawn.h + bar);
+        let wanted = if first_time {
+            Rect::new(
+                frame.x + (frame.w - w) / 2,
+                frame.y + (frame.h - h) / 2,
+                w,
+                h,
+            )
+        } else {
+            Rect::new(frame.x, frame.y, w, h)
+        };
+        let id = managed.id;
+        let was_oversized = managed.oversized;
+        if let Err(error) = self.shell.desk.set_floating_rect(id, wanted) {
+            warn!(%error, "cannot resize a floating window");
+            return;
+        }
+        let Some(Placement::Floating { rect, .. }) = self.shell.desk.placement(id) else {
+            return;
+        };
+        let oversized = rect.w < w || rect.h < h;
+        if let Some(managed) = self.shell.windows.iter_mut().find(|m| m.id == id) {
+            managed.oversized = oversized;
+        }
+        if rect != frame || oversized != was_oversized {
+            self.apply_arrangement();
+        }
     }
 
     fn sync_keyboard_focus(&mut self) {

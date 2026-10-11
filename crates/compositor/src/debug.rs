@@ -5,6 +5,8 @@
 //!
 //! ```text
 //! 500 move 780 27; 100 click; 300 key alt+1
+//! 0 move 100 27; 0 down; 200 move 900 400; 100 up
+//! 0 press alt; 0 down; 100 move 500 500; 0 up; 0 release alt
 //! ```
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
@@ -30,6 +32,9 @@ pub enum Step {
     },
     /// Presses and releases the left mouse button.
     Click,
+    /// Holds the left mouse button down, to drag.
+    ButtonDown,
+    ButtonUp,
     Press(u32),
     Release(u32),
 }
@@ -58,6 +63,10 @@ pub fn parse(script: &str) -> Result<Vec<TimedStep>, String> {
 
         let parsed = match (command, arguments.as_slice()) {
             ("click", []) => vec![Step::Click],
+            ("down", []) => vec![Step::ButtonDown],
+            ("up", []) => vec![Step::ButtonUp],
+            ("press", [key]) => vec![Step::Press(keycode(key)?)],
+            ("release", [key]) => vec![Step::Release(keycode(key)?)],
             ("move", [x, y]) => match (x.parse(), y.parse()) {
                 (Ok(x), Ok(y)) => vec![Step::Move { x, y }],
                 _ => return Err(format!("`{text}`: a position is two numbers")),
@@ -81,17 +90,19 @@ pub fn parse(script: &str) -> Result<Vec<TimedStep>, String> {
 fn chord_steps(chord: &str) -> Result<Vec<Step>, String> {
     let keycodes = chord
         .split('+')
-        .map(|name| {
-            let name = name.to_lowercase();
-            KEYS.iter()
-                .find(|(known, _)| *known == name)
-                .map(|(_, keycode)| *keycode)
-                .ok_or_else(|| format!("unknown key `{name}`"))
-        })
+        .map(keycode)
         .collect::<Result<Vec<_>, _>>()?;
     let presses = keycodes.iter().copied().map(Step::Press);
     let releases = keycodes.iter().rev().copied().map(Step::Release);
     Ok(presses.chain(releases).collect())
+}
+
+fn keycode(name: &str) -> Result<u32, String> {
+    let name = name.to_lowercase();
+    KEYS.iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, keycode)| *keycode)
+        .ok_or_else(|| format!("unknown key `{name}`"))
 }
 
 #[cfg(test)]
@@ -171,6 +182,32 @@ mod tests {
             ]
         );
         assert_eq!(steps("0 key enter")[0], (0, Step::Press(36)));
+    }
+
+    #[test]
+    fn a_drag_is_a_button_held_between_two_moves() {
+        assert_eq!(
+            steps("0 move 10 20; 0 down; 50 move 300 20; 50 up"),
+            [
+                (0, Step::Move { x: 10.0, y: 20.0 }),
+                (0, Step::ButtonDown),
+                (50, Step::Move { x: 300.0, y: 20.0 }),
+                (50, Step::ButtonUp),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_key_can_be_held_across_steps() {
+        assert_eq!(
+            steps("0 press alt; 10 down; 10 up; 0 release alt"),
+            [
+                (0, Step::Press(64)),
+                (10, Step::ButtonDown),
+                (10, Step::ButtonUp),
+                (0, Step::Release(64)),
+            ]
+        );
     }
 
     #[test]

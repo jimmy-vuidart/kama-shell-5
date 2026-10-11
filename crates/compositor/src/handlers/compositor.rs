@@ -79,6 +79,7 @@ impl CompositorHandler for State {
 
         // First commit of a toplevel: the model places it, it gets configured.
         self.map_window(surface);
+        self.follow_client_size(surface);
 
         self.popups.commit(surface);
         if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface) {

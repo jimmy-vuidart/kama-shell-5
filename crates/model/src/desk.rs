@@ -32,6 +32,8 @@ pub enum ModelError {
     UnknownTab { slot: SlotId, index: usize },
     #[error("output {0:?} is anchored by a fullscreen window")]
     Anchored(OutputId),
+    #[error("window {0:?} is not floating")]
+    NotFloating(WindowId),
     #[error("window {0:?} is not on a side screen")]
     NotOnSideScreen(WindowId),
     #[error("there is no center screen")]
@@ -319,35 +321,41 @@ impl Desk {
         Ok(())
     }
 
-    /// Provisional phase 1 placement, until windows can be dragged to slots:
-    /// puts a floating window in the first empty slot of its screen, else
-    /// stacks it in the slot focused last. Creates no habit.
-    pub fn tile_automatically(&mut self, id: WindowId) -> Result<Placement, ModelError> {
-        let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+    /// Where tidying a floating window on its own screen would put it: the
+    /// first empty slot, else the slot focused last. `None` when the screen
+    /// has no usable slot, or when the window is already in one.
+    pub fn suggested_slot(&self, id: WindowId) -> Option<SlotId> {
+        let (index, spot) = self.locate(id)?;
         let screen = &self.screens[index];
-        let tileable = screen.anchored().is_none() && !screen.slots().is_empty();
-
-        if tileable && matches!(spot, Spot::Floating(_)) {
-            let slot = screen
-                .slots()
-                .iter()
-                .position(TabStack::is_empty)
-                .or_else(|| {
-                    let recent = self.focus_order.iter().rev();
-                    recent
-                        .filter(|window| **window != id)
-                        .find_map(|window| screen.slot_of(*window))
-                })
-                .unwrap_or(0);
-
-            let screen = &mut self.screens[index];
-            screen.remove(id);
-            if let Some(stack) = screen.slot_mut(slot) {
-                stack.push(id);
-            }
-            self.show_focused();
+        if matches!(spot, Spot::Slot(_)) || screen.anchored().is_some() {
+            return None;
         }
-        self.placement(id).ok_or(ModelError::UnknownWindow(id))
+        let slots = screen.slots();
+        let empty = slots.iter().position(TabStack::is_empty);
+        let recent = || {
+            let others = self
+                .focus_order
+                .iter()
+                .rev()
+                .filter(|window| **window != id);
+            others.clone().find_map(|window| screen.slot_of(*window))
+        };
+        let slot = empty.or_else(recent).or((!slots.is_empty()).then_some(0))?;
+        Some(SlotId::new(screen.id(), slot))
+    }
+
+    /// A floating window's client chose another size. Unlike
+    /// [`Desk::float_window`], this is not an action of the user: the focus
+    /// and the habits stay as they are.
+    pub fn set_floating_rect(&mut self, id: WindowId, rect: Rect) -> Result<(), ModelError> {
+        let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        if matches!(spot, Spot::Slot(_)) {
+            return Err(ModelError::NotFloating(id));
+        }
+        let screen = &mut self.screens[index];
+        let rect = rect.clamped_to(screen.floating_area(&self.metrics));
+        screen.set_floating_rect(id, rect);
+        Ok(())
     }
 
     /// The ⇄ button (rule 5): a side window goes to the center, and the

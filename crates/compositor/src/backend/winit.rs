@@ -183,6 +183,7 @@ impl State {
         self.shell
             .refresh_chrome(&mut self.painter, &self.theme, self.hover);
         let cursor = self.cursor(false);
+        let overlay = self.overlay();
         let full_redraw = std::mem::take(&mut self.full_redraw);
         let Backend::Winit(winit) = &mut self.backend else {
             return;
@@ -221,6 +222,7 @@ impl State {
                     &mut self.shell,
                     &self.theme,
                     view,
+                    &overlay,
                     cursor,
                 );
                 let clear = self.theme.backdrop.premultiplied();
