@@ -12,6 +12,7 @@ mod outputs;
 mod persist;
 mod placement;
 mod render;
+mod resize;
 mod shell;
 mod shortcuts;
 mod state;
@@ -88,10 +89,14 @@ impl From<Role> for OutputRole {
 /// et Alt en mode imbriqué.
 ///
 /// Souris : glisser une barre de titre montre les emplacements, relâcher
-/// range la fenêtre ; Mod+glisser la déplace librement. Clavier : Mod+Entrée
-/// terminal ; Mod+1 à 6 disposition de l'écran du pointeur (plein, côte à
-/// côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ;
-/// Mod+Page suiv./préc. onglet suivant/précédent ; Mod+Maj+E quitter.
+/// range la fenêtre ; Mod+glisser la déplace librement ; tirer un bord ou un
+/// coin d'une fenêtre flottante la redimensionne ; Mod+glisser sur la
+/// séparation de deux emplacements règle leur ratio.
+///
+/// Clavier : Mod+Entrée terminal ; Mod+1 à 6 disposition de l'écran du
+/// pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers +
+/// un tiers) ; Mod+Page suiv./préc. onglet suivant/précédent ; Mod+R
+/// restaure la dernière fenêtre réduite ; Mod+Maj+E quitter.
 /// Ctrl+Alt+Retour arrière quitte aussi, quoi qu'il arrive.
 #[derive(Debug, Parser)]
 #[command(version)]

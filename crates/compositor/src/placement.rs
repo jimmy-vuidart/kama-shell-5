@@ -95,7 +95,7 @@ impl State {
             let still_open = geometry.floating && geometry.visible && geometry.focused;
             let handled = matches!(
                 self.gesture,
-                Some(Gesture::Placing { .. } | Gesture::Moving { .. })
+                Some(Gesture::Placing { .. } | Gesture::Moving { .. } | Gesture::Resizing { .. })
             );
             (still_open && !handled).then(|| (window, managed.frame(), geometry.output))
         });

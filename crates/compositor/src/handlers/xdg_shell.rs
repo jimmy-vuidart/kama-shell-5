@@ -28,6 +28,12 @@ impl XdgShellHandler for State {
         self.unmap_window(surface.wl_surface());
     }
 
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(id) = self.shell.by_surface(surface.wl_surface()).map(|m| m.id) {
+            self.minimize_window(id);
+        }
+    }
+
     fn title_changed(&mut self, surface: ToplevelSurface) {
         self.refresh_names(&surface);
     }

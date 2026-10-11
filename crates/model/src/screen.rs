@@ -1,6 +1,6 @@
 //! One output and what it holds: a layout, its slots, floating windows.
 
-use crate::geometry::{Insets, Rect, Size};
+use crate::geometry::{Insets, Point, Rect, Size};
 use crate::ids::{OutputId, WindowId};
 use crate::layout::{LayoutKind, Ratio};
 use crate::metrics::Metrics;
@@ -76,6 +76,17 @@ impl Screen {
     pub fn slot_rects(&self, metrics: &Metrics) -> Vec<Rect> {
         self.layout
             .slot_rects(self.info.usable(), self.ratio, metrics.gap)
+    }
+
+    /// The gap between the two slots, if the layout has an adjustable one.
+    pub fn separator(&self, metrics: &Metrics) -> Option<Rect> {
+        self.layout
+            .separator(self.info.usable(), self.ratio, metrics.gap)
+    }
+
+    /// The ratio that puts the separation under `point`.
+    pub fn ratio_at(&self, metrics: &Metrics, point: Point) -> Option<Ratio> {
+        self.layout.ratio_at(self.info.usable(), metrics.gap, point)
     }
 
     /// Where floating windows may be: the usable area minus the gap.

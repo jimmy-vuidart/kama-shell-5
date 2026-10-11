@@ -30,6 +30,8 @@ pub enum Action {
     },
     /// Opens a terminal: the way to start anything until the launcher exists.
     SpawnTerminal,
+    /// Brings back the window minimized last.
+    RestoreWindow,
     /// Switches to another virtual terminal: the way out if all else fails.
     SwitchVt(i32),
 }
@@ -87,6 +89,7 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
         KEY_6 => Some(Action::SetLayout(LayoutKind::TwoThirdsOneThird)),
         _ if press.shift && has(Keysym::e) => Some(Action::Quit),
         _ if has(Keysym::Return) => Some(Action::SpawnTerminal),
+        _ if has(Keysym::r) => Some(Action::RestoreWindow),
         _ if has(Keysym::Next) => Some(Action::CycleTab { forward: true }),
         _ if has(Keysym::Prior) => Some(Action::CycleTab { forward: false }),
         _ => None,
@@ -117,6 +120,15 @@ mod tests {
         syms: &[],
         modified: Keysym::NoSymbol,
     };
+
+    #[test]
+    fn mod_r_restores_the_last_minimized_window() {
+        assert_eq!(
+            press(true, false, 27, &[Keysym::r]),
+            Some(Action::RestoreWindow)
+        );
+        assert_eq!(press(false, false, 27, &[Keysym::r]), None);
+    }
 
     #[test]
     fn mod_return_opens_a_terminal() {

@@ -5,7 +5,7 @@
 
 use coquille_model::{
     AppKey, AppMemory, Desk, DropTarget, LayoutKind, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole,
-    Placement, Point as ModelPoint, Rect, WindowGeometry, WindowId,
+    Placement, Point as ModelPoint, Rect, SlotId, WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -18,9 +18,10 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 use tracing::{debug, warn};
 
-use crate::decoration::layout::TitlebarButton;
+use crate::decoration::layout::{Buttons, TitlebarButton};
 use crate::decoration::naming::{badge_color, display_name};
 use crate::decoration::paint::{Painter, TabSpec, TitlebarSpec};
+use crate::input::Gesture;
 use crate::render::scene::Chrome;
 use crate::state::State;
 use crate::theme::Theme;
@@ -54,6 +55,8 @@ pub struct ManagedWindow {
     /// Floating: its client wants more room than the screen has, so the
     /// compositor imposes the size instead of following it.
     pub oversized: bool,
+    /// Floating: the user resized it, so the compositor imposes the size.
+    pub user_sized: bool,
     pub chrome: Chrome,
 }
 
@@ -69,6 +72,14 @@ impl ManagedWindow {
 
     pub fn client(&self) -> Rect {
         self.geometry.client.translated(self.origin)
+    }
+
+    /// The buttons its title bar shows.
+    pub fn buttons(&self) -> Buttons {
+        Buttons {
+            swap: self.show_swap,
+            add_tab: !self.geometry.floating,
+        }
     }
 }
 
@@ -205,10 +216,16 @@ impl Shell {
         painter: &mut Painter,
         theme: &Theme,
         hover: Option<(WindowId, TitlebarButton)>,
+        armed: Option<SlotId>,
     ) {
         let corner_radius = self.desk.metrics().corner_radius;
+        // The window whose add-tab button shows as armed.
+        let armed = armed.and_then(|slot| {
+            let screen = self.desk.screen(slot.output)?;
+            screen.slots().get(slot.index)?.active()
+        });
         // What each window is called, for the tabs of its neighbours.
-        let labels: Vec<(WindowId, String, [u8; 3])> = self
+        let labels: Vec<(WindowId, String, [u8; 3], bool)> = self
             .windows
             .iter()
             .map(|managed| {
@@ -217,7 +234,8 @@ impl Shell {
                 } else {
                     managed.title.clone()
                 };
-                (managed.id, label, badge_color(&managed.app_id))
+                let minimized = managed.geometry.minimized;
+                (managed.id, label, badge_color(&managed.app_id), minimized)
             })
             .collect();
 
@@ -236,10 +254,11 @@ impl Shell {
                 .tabs
                 .iter()
                 .filter_map(|id| labels.iter().find(|(known, ..)| known == id))
-                .map(|(id, label, badge)| TabSpec {
+                .map(|(id, label, badge, minimized)| TabSpec {
                     label: label.clone(),
                     badge: *badge,
                     active: *id == managed.id,
+                    minimized: *minimized,
                 })
                 .collect();
             let spec = TitlebarSpec {
@@ -251,7 +270,8 @@ impl Shell {
                 hovered: hover
                     .filter(|(id, _)| *id == managed.id)
                     .map(|(_, button)| button),
-                show_swap: managed.show_swap,
+                buttons: managed.buttons(),
+                armed: armed == Some(managed.id),
                 theme: theme.kind,
                 corner_radius,
                 tabs,
@@ -359,10 +379,19 @@ impl State {
             tabs: Vec::new(),
             sized: false,
             oversized: false,
+            user_sized: false,
             chrome: Chrome::default(),
         });
+        // An armed "add a tab" button takes the next window, whatever it is.
+        if let Some(slot) = self.armed_slot.take() {
+            match self.shell.desk.move_to_slot(id, slot) {
+                Ok(()) => self.shell.sync(),
+                Err(error) => warn!(%error, "cannot add the window as a tab"),
+            }
+        }
         // Rule 1: a window that opens floating comes with the offer to tidy it.
-        self.placement_offer = geometry.floating.then_some(id);
+        let floating = self.shell.by_id(id).is_some_and(|m| m.geometry.floating);
+        self.placement_offer = floating.then_some(id);
         self.apply_arrangement();
     }
 
@@ -409,7 +438,8 @@ impl State {
             };
             // A floating window has the size its client chooses, unless that
             // is more than the screen offers.
-            let free_size = geometry.floating && !geometry.anchored && !managed.oversized;
+            let imposed = managed.oversized || managed.user_sized;
+            let free_size = geometry.floating && !geometry.anchored && !imposed;
             toplevel.with_pending_state(|state| {
                 state.size = (!free_size).then(|| (geometry.client.w, geometry.client.h).into());
                 state.decoration_mode = Some(DecorationMode::ServerSide);
@@ -485,6 +515,11 @@ impl State {
         let drawn = managed.window.geometry().size;
         let (frame, client) = (geometry.frame, geometry.client);
         if !geometry.floating || geometry.anchored || drawn.w <= 0 || drawn.h <= 0 {
+            return;
+        }
+        // While the user drags an edge, the frame follows the pointer; the
+        // client catches up afterwards.
+        if matches!(self.gesture, Some(Gesture::Resizing { window, .. }) if window == managed.id) {
             return;
         }
         let first_time = !std::mem::replace(&mut managed.sized, true);

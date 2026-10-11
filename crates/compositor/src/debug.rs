@@ -10,7 +10,7 @@
 //! ```
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
-const KEYS: [(&str, u32); 10] = [
+const KEYS: [(&str, u32); 11] = [
     ("alt", 64),
     ("ctrl", 37),
     ("shift", 50),
@@ -19,6 +19,7 @@ const KEYS: [(&str, u32); 10] = [
     ("1", 10),
     ("2", 11),
     ("e", 26),
+    ("r", 27),
     ("pageup", 112),
     ("pagedown", 117),
 ];
@@ -182,6 +183,7 @@ mod tests {
             ]
         );
         assert_eq!(steps("0 key enter")[0], (0, Step::Press(36)));
+        assert_eq!(steps("0 key alt+r")[1], (0, Step::Press(27)));
     }
 
     #[test]

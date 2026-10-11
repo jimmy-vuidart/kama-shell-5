@@ -1,6 +1,8 @@
 //! Input events: shortcuts, focus on click, title bar buttons.
 
-use coquille_model::{DropTarget, Insets, Placement, Point as ModelPoint, Rect, WindowId};
+use coquille_model::{
+    DropTarget, Insets, OutputId, Placement, Point as ModelPoint, Rect, Size, WindowId,
+};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
@@ -8,7 +10,7 @@ use smithay::backend::input::{
 };
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::keyboard::{FilterResult, Keycode};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, CursorImageStatus, MotionEvent};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, MotionEvent};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use tracing::{debug, info, warn};
@@ -17,6 +19,7 @@ use crate::debug::Step;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
 use crate::outputs::constrain;
 use crate::render::scene::Shape;
+use crate::resize::Edges;
 use crate::shell::ManagedWindow;
 use crate::shortcuts::{Action, KeyPress, action_for};
 use crate::state::State;
@@ -26,6 +29,8 @@ use crate::theme::Rgba;
 const BTN_LEFT: u32 = 0x110;
 /// Gap between a drop zone's outline and the slot it stands for.
 const ZONE_INSET: i32 = 4;
+/// How far from the gap between two slots their separation can be grabbed.
+const SEPARATOR_REACH: i32 = 8;
 
 /// How far the pointer must travel, button held, before a press on a title
 /// bar becomes a drag.
@@ -44,6 +49,8 @@ struct Hit {
     tab: Option<(usize, WindowId)>,
     /// The point is on the placement bar, on this button of it if any.
     bar: Option<Option<usize>>,
+    /// The point is on these edges of a floating window.
+    resize: Option<Edges>,
 }
 
 /// What the left mouse button is doing since it went down.
@@ -61,6 +68,17 @@ pub enum Gesture {
     },
     /// Down on the placement bar, on this button of it if any.
     BarPressed { button: Option<usize> },
+    /// Dragging edges of a floating window. `from` is where the pointer went
+    /// down and `frame` what the window was then, in the global space.
+    Resizing {
+        window: WindowId,
+        edges: Edges,
+        from: Point<f64, Logical>,
+        frame: Rect,
+    },
+    /// Dragging the separation between the two slots of a screen, with the
+    /// shell modifier.
+    Splitting { output: OutputId },
     /// Dragging a window by its title bar: drop zones are shown, and
     /// releasing on one places the window.
     Placing { window: WindowId },
@@ -200,6 +218,12 @@ impl State {
                 self.spawn(&terminal);
                 return;
             }
+            Action::RestoreWindow => {
+                if desk.restore_last().is_some() {
+                    self.apply_arrangement();
+                }
+                return;
+            }
             Action::SwitchVt(vt) => {
                 self.backend.switch_vt(vt);
                 return;
@@ -230,7 +254,12 @@ impl State {
         // While the shell drags a window, clients see no pointer at all.
         let dragging = matches!(
             self.gesture,
-            Some(Gesture::Placing { .. } | Gesture::Moving { .. })
+            Some(
+                Gesture::Placing { .. }
+                    | Gesture::Moving { .. }
+                    | Gesture::Resizing { .. }
+                    | Gesture::Splitting { .. }
+            )
         );
         let hit = if dragging {
             Hit::default()
@@ -240,9 +269,20 @@ impl State {
 
         self.hover = hit.window.zip(hit.button);
         self.bar_hover = hit.bar.flatten();
-        // Over the shell's own chrome no client sets the cursor.
+        // Over the shell's own chrome no client sets the cursor: it shows
+        // what a press would grab.
         if hit.surface.is_none() && !pointer.is_grabbed() {
-            self.set_cursor(CursorImageStatus::default_named());
+            let shape = match self.gesture {
+                Some(Gesture::Resizing { edges, .. }) => edges.cursor(),
+                Some(Gesture::Splitting { output }) => self.split_cursor(output),
+                Some(_) => CursorIcon::Default,
+                None => match (hit.resize, self.separator_at(location)) {
+                    (Some(edges), _) => edges.cursor(),
+                    (None, Some(output)) if self.mod_held() => self.split_cursor(output),
+                    _ => CursorIcon::Default,
+                },
+            };
+            self.set_cursor(CursorImageStatus::Named(shape));
         }
 
         pointer.motion(
@@ -282,7 +322,89 @@ impl State {
             Some(Gesture::Moving { window, grab }) => {
                 self.move_floating(window, location, grab);
             }
+            Some(Gesture::Resizing {
+                window,
+                edges,
+                from,
+                frame,
+            }) => {
+                let moved = (location - from).to_i32_round::<i32>();
+                self.resize_floating(
+                    window,
+                    edges.apply(frame, moved.x, moved.y, self.min_size()),
+                );
+            }
+            Some(Gesture::Splitting { output }) => self.move_separation(output, location),
             _ => {}
+        }
+    }
+
+    /// The smallest a floating window may be dragged to.
+    fn min_size(&self) -> Size {
+        Size::new(160, self.shell.desk.metrics().titlebar_height + 60)
+    }
+
+    fn mod_held(&self) -> bool {
+        self.seat
+            .get_keyboard()
+            .is_some_and(|keyboard| self.mod_key.is_held(&keyboard.modifier_state()))
+    }
+
+    /// Gives a floating window the frame `wanted` (global space), on its own
+    /// screen. From then on the compositor imposes its size on the client.
+    fn resize_floating(&mut self, window: WindowId, wanted: Rect) {
+        let Some(managed) = self.shell.windows.iter_mut().find(|m| m.id == window) else {
+            return;
+        };
+        managed.user_sized = true;
+        managed.oversized = false;
+        let output = managed.geometry.output;
+        let local = wanted.translated(ModelPoint::new(-managed.origin.x, -managed.origin.y));
+        if self.shell.desk.float_window(window, output, local).is_ok() {
+            self.apply_arrangement();
+        }
+    }
+
+    /// The screen whose separation is close enough to `location` to be
+    /// grabbed.
+    fn separator_at(&self, location: Point<f64, Logical>) -> Option<OutputId> {
+        let point = model_point(location);
+        let screen = self.shell.screen_at(point)?;
+        let gap = self
+            .shell
+            .desk
+            .separator(screen.id)?
+            .translated(screen.rect.origin());
+        let reach = Rect::new(
+            gap.x - SEPARATOR_REACH,
+            gap.y - SEPARATOR_REACH,
+            gap.w + 2 * SEPARATOR_REACH,
+            gap.h + 2 * SEPARATOR_REACH,
+        );
+        reach.contains(point).then_some(screen.id)
+    }
+
+    /// The pointer shape for the separation of a screen: sideways between
+    /// columns, up and down between rows.
+    fn split_cursor(&self, output: OutputId) -> CursorIcon {
+        match self.shell.desk.separator(output) {
+            Some(gap) if gap.w > gap.h => CursorIcon::RowResize,
+            _ => CursorIcon::ColResize,
+        }
+    }
+
+    /// Puts the separation of a screen under the pointer.
+    fn move_separation(&mut self, output: OutputId, location: Point<f64, Logical>) {
+        let Some(origin) = self.shell.screen(output).map(|screen| screen.rect.origin()) else {
+            return;
+        };
+        let point = model_point(location);
+        let local = ModelPoint::new(point.x - origin.x, point.y - origin.y);
+        let desk = &mut self.shell.desk;
+        if let Some(ratio) = desk.ratio_at(output, local) {
+            if desk.set_ratio(output, ratio).is_ok() {
+                self.apply_arrangement();
+            }
         }
     }
 
@@ -433,9 +555,22 @@ impl State {
                         }
                     }
                     Some(Gesture::Placing { window }) => self.drop_window(window, location),
+                    // The client drew during the drag without the frame
+                    // following: settle on what it has now.
+                    Some(Gesture::Resizing { window, .. }) => {
+                        let surface = self
+                            .shell
+                            .by_id(window)
+                            .and_then(|managed| managed.window.toplevel())
+                            .map(|toplevel| toplevel.wl_surface().clone());
+                        if let Some(surface) = surface {
+                            self.follow_client_size(&surface);
+                        }
+                    }
                     Some(
                         Gesture::Pressed { .. }
                         | Gesture::Moving { .. }
+                        | Gesture::Splitting { .. }
                         | Gesture::BarPressed { button: None },
                     )
                     | None => {}
@@ -467,17 +602,28 @@ impl State {
             self.gesture = Some(Gesture::BarPressed { button });
             return true;
         }
+        let mod_held = self.mod_held();
+        // With the modifier, the separation wins over the windows next to it.
+        if let Some(output) = self.separator_at(location).filter(|_| mod_held) {
+            self.gesture = Some(Gesture::Splitting { output });
+            return true;
+        }
         let Some(managed) = hit.window.and_then(|window| self.shell.by_id(window)) else {
             return false;
         };
         let window = managed.id;
         let frame = managed.frame();
         let anchored = managed.geometry.anchored;
-        let mod_held = self
-            .seat
-            .get_keyboard()
-            .is_some_and(|keyboard| self.mod_key.is_held(&keyboard.modifier_state()));
 
+        if let Some(edges) = hit.resize.filter(|_| !mod_held) {
+            self.gesture = Some(Gesture::Resizing {
+                window,
+                edges,
+                from: location,
+                frame,
+            });
+            return true;
+        }
         if mod_held && !anchored {
             // Anywhere on the window: it will follow the pointer.
             let corner = Point::<f64, Logical>::from((f64::from(frame.x), f64::from(frame.y)));
@@ -560,11 +706,26 @@ impl State {
                 }
                 self.apply_arrangement();
             }
-            // Wired in the next steps (tabs, bar).
-            TitlebarButton::AddTab | TitlebarButton::Minimize => {
-                debug!(?button, "this button does nothing yet");
+            TitlebarButton::Minimize => self.minimize_window(window),
+            // Arms the slot: the next window that opens stacks there. A
+            // second click takes it back.
+            TitlebarButton::AddTab => {
+                let slot = match self.shell.desk.placement(window) {
+                    Some(Placement::Slot(slot)) => Some(slot),
+                    _ => None,
+                };
+                self.armed_slot = slot.filter(|slot| self.armed_slot != Some(*slot));
+                self.queue_redraw();
             }
         }
+    }
+
+    /// Hides a window until it is restored (its tab, or the shortcut).
+    pub fn minimize_window(&mut self, window: WindowId) {
+        if let Err(error) = self.shell.desk.minimize(window) {
+            warn!(%error, "cannot minimize this window");
+        }
+        self.apply_arrangement();
     }
 
     /// Finds what is under `location`: popups first, then windows from the
@@ -614,8 +775,16 @@ impl State {
         }
 
         for managed in visible() {
+            let resizable = managed.geometry.floating && !managed.geometry.anchored;
+            if let Some(edges) = Edges::at(managed.frame(), point).filter(|_| resizable) {
+                return Hit {
+                    window: Some(managed.id),
+                    resize: Some(edges),
+                    ..Hit::default()
+                };
+            }
             if let Some(bar) = managed.titlebar().filter(|bar| bar.contains(point)) {
-                let layout = TitlebarLayout::new(bar.size(), managed.show_swap);
+                let layout = TitlebarLayout::new(bar.size(), managed.buttons());
                 let local = ModelPoint::new(point.x - bar.x, point.y - bar.y);
                 let button = layout.button_at(local);
                 let tab = layout
@@ -628,7 +797,7 @@ impl State {
                     titlebar: true,
                     button,
                     tab,
-                    bar: None,
+                    ..Hit::default()
                 };
             }
             if managed.client().contains(point) {

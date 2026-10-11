@@ -11,7 +11,7 @@ use tiny_skia::{
     Stroke, Transform,
 };
 
-use super::layout::{TitlebarButton, TitlebarLayout};
+use super::layout::{Buttons, TitlebarButton, TitlebarLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
 
 const UI_FONT: &str = "Figtree";
@@ -33,7 +33,9 @@ pub struct TitlebarSpec {
     pub badge: [u8; 3],
     pub focused: bool,
     pub hovered: Option<TitlebarButton>,
-    pub show_swap: bool,
+    pub buttons: Buttons,
+    /// The add-tab button is armed: the next window opens in this stack.
+    pub armed: bool,
     pub theme: ThemeKind,
     pub corner_radius: i32,
     /// The windows stacked in the slot, when they are shown as tabs; they
@@ -47,6 +49,8 @@ pub struct TabSpec {
     pub label: String,
     pub badge: [u8; 3],
     pub active: bool,
+    /// Hidden by the user: shown dimmed, a click brings it back.
+    pub minimized: bool,
 }
 
 /// What the placement bar's look depends on.
@@ -95,7 +99,7 @@ impl Painter {
         let theme = Theme::new(spec.theme);
         let (width, height) = (spec.size.w as f32, spec.size.h as f32);
         let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
-        let layout = TitlebarLayout::new(spec.size, spec.show_swap);
+        let layout = TitlebarLayout::new(spec.size, spec.buttons);
 
         let radius = spec.corner_radius as f32;
         let background = rounded_rect(0.0, 0.0, width, height, [radius, radius, 0.0, 0.0])?;
@@ -125,35 +129,26 @@ impl Painter {
 
         for (button, cell) in &layout.buttons {
             let hovered = spec.hovered == Some(*button);
-            let mut color = match button {
-                TitlebarButton::Close | TitlebarButton::Swap => theme.text,
-                // Not wired yet: shown, but visibly unavailable.
-                TitlebarButton::AddTab | TitlebarButton::Minimize => theme.disabled,
+            let armed = spec.armed && *button == TitlebarButton::AddTab;
+            let highlight = match (button, hovered, armed) {
+                (TitlebarButton::Close, true, _) => Some(theme.close_hover),
+                (_, _, true) => Some(theme.accent),
+                (_, true, false) => Some(theme.button_hover),
+                (_, false, false) => None,
             };
-            if hovered && *button == TitlebarButton::Close {
-                let highlight = rounded_rect(
-                    cell.x as f32 + 4.0,
-                    5.0,
-                    cell.w as f32 - 8.0,
-                    height - 10.0,
-                    [7.0; 4],
-                );
-                if let Some(highlight) = highlight {
-                    fill(&mut pixmap, &highlight, theme.close_hover);
-                }
-                color = Rgba::WHITE;
-            } else if hovered {
-                let highlight = rounded_rect(
-                    cell.x as f32 + 4.0,
-                    5.0,
-                    cell.w as f32 - 8.0,
-                    height - 10.0,
-                    [7.0; 4],
-                );
-                if let Some(highlight) = highlight {
-                    fill(&mut pixmap, &highlight, theme.button_hover);
-                }
+            let pill = rounded_rect(
+                cell.x as f32 + 4.0,
+                5.0,
+                cell.w as f32 - 8.0,
+                height - 10.0,
+                [7.0; 4],
+            );
+            if let (Some(highlight), Some(pill)) = (highlight, pill) {
+                fill(&mut pixmap, &pill, highlight);
             }
+            // White on the two colored highlights, the text color otherwise.
+            let on_color = armed || (hovered && *button == TitlebarButton::Close);
+            let color = if on_color { Rgba::WHITE } else { theme.text };
             if let Some(icon) = button_icon(*button, *cell) {
                 stroke(&mut pixmap, &icon, color);
             }
@@ -195,10 +190,11 @@ impl Painter {
             fill(pixmap, &badge, Rgba::from_array(tab.badge));
         }
 
-        let (weight, color) = match (tab.active, focused) {
-            (true, true) => (Weight::SEMIBOLD, theme.text),
-            (true, false) => (Weight::SEMIBOLD, theme.text_muted),
-            (false, _) => (Weight::NORMAL, theme.text_muted),
+        let (weight, color) = match (tab.active, focused, tab.minimized) {
+            (_, _, true) => (Weight::NORMAL, theme.disabled),
+            (true, true, _) => (Weight::SEMIBOLD, theme.text),
+            (true, false, _) => (Weight::SEMIBOLD, theme.text_muted),
+            (false, ..) => (Weight::NORMAL, theme.text_muted),
         };
         let left = (cell.x + LABEL_LEFT) as f32;
         let room = (cell.w - LABEL_LEFT - PADDING) as f32;

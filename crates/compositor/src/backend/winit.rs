@@ -181,7 +181,7 @@ impl State {
     /// clients they may draw their next frame.
     pub fn render_window(&mut self) {
         self.shell
-            .refresh_chrome(&mut self.painter, &self.theme, self.hover);
+            .refresh_chrome(&mut self.painter, &self.theme, self.hover, self.armed_slot);
         let cursor = self.cursor(false);
         self.refresh_bar();
         let overlay = self.overlay();

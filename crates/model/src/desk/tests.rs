@@ -1,5 +1,5 @@
 use super::*;
-use crate::geometry::Insets;
+use crate::geometry::{Insets, Point};
 use crate::memory::RememberedPlace;
 
 const LEFT: OutputId = OutputId(1);
@@ -1168,6 +1168,148 @@ fn only_floating_windows_follow_their_client() {
     );
 }
 
+// Minimized windows.
+
+#[test]
+fn a_minimized_window_is_hidden_and_the_previous_one_gets_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open_in(&mut desk, 2, "guide", RIGHT, 0);
+
+    desk.minimize(WindowId(2)).unwrap();
+
+    assert!(!geo(&desk, 2).visible);
+    assert!(geo(&desk, 2).minimized);
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert_eq!(place(&desk, 2), Placement::Slot(slot(RIGHT, 0)));
+}
+
+#[test]
+fn minimizing_the_shown_tab_shows_the_next_one() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 0);
+    open_in(&mut desk, 3, "browser", RIGHT, 0);
+    desk.focus(WindowId(2)).unwrap();
+
+    desk.minimize(WindowId(2)).unwrap();
+
+    assert_eq!(active_tab(&desk, RIGHT, 0), Some(3));
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+    assert!(geo(&desk, 3).visible);
+}
+
+#[test]
+fn minimizing_the_only_window_leaves_nothing_focused() {
+    let mut desk = desk();
+    open(&mut desk, 1, "gimp", LEFT);
+
+    desk.minimize(WindowId(1)).unwrap();
+
+    assert_eq!(desk.focused(), None);
+    assert!(!geo(&desk, 1).visible);
+}
+
+#[test]
+fn the_window_minimized_last_is_restored_first() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open_in(&mut desk, 2, "guide", RIGHT, 0);
+    open_in(&mut desk, 3, "product", CENTER, 0);
+    desk.minimize(WindowId(1)).unwrap();
+    desk.minimize(WindowId(2)).unwrap();
+
+    assert_eq!(desk.restore_last(), Some(WindowId(2)));
+
+    assert!(geo(&desk, 2).visible);
+    assert!(!geo(&desk, 2).minimized);
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    assert_eq!(desk.restore_last(), Some(WindowId(1)));
+    assert_eq!(desk.restore_last(), None);
+}
+
+#[test]
+fn showing_a_minimized_tab_restores_it() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 0);
+    desk.minimize(WindowId(1)).unwrap();
+
+    desk.activate_tab(slot(RIGHT, 0), 0).unwrap();
+
+    assert!(geo(&desk, 1).visible);
+    assert_eq!(desk.restore_last(), None);
+}
+
+#[test]
+fn closing_a_minimized_window_forgets_it() {
+    let mut desk = desk();
+    open(&mut desk, 1, "gimp", LEFT);
+    open(&mut desk, 2, "notes", RIGHT);
+    desk.minimize(WindowId(1)).unwrap();
+
+    desk.close_window(WindowId(1)).unwrap();
+
+    assert_eq!(desk.restore_last(), None);
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+}
+
+#[test]
+fn a_fullscreen_window_cannot_be_minimized_by_the_shell() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+
+    assert_eq!(
+        desk.minimize(WindowId(1)),
+        Err(ModelError::Anchored(CENTER))
+    );
+    assert_eq!(
+        desk.minimize(WindowId(9)),
+        Err(ModelError::UnknownWindow(WindowId(9)))
+    );
+}
+
+#[test]
+fn a_stack_never_shows_a_minimized_tab_while_another_one_could_show() {
+    let mut desk = desk();
+    for id in 1..=3 {
+        open_in(&mut desk, id, &format!("app{id}"), RIGHT, 0);
+    }
+    desk.minimize(WindowId(2)).unwrap();
+    desk.focus(WindowId(1)).unwrap();
+
+    // The shown tab leaves: the minimized one is next in line, but the third
+    // is the one to show.
+    desk.move_to_slot(WindowId(1), slot(LEFT, 0)).unwrap();
+
+    assert_eq!(active_tab(&desk, RIGHT, 0), Some(3));
+    assert!(geo(&desk, 3).visible);
+    assert!(geo(&desk, 2).minimized);
+}
+
+// Moving the separation between two slots.
+
+#[test]
+fn the_separation_follows_the_pointer() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+
+    let ratio = desk.ratio_at(RIGHT, Point::new(1112, 500)).unwrap();
+    desk.set_ratio(RIGHT, ratio).unwrap();
+
+    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 8, 1100, 1064));
+    assert_eq!(desk.separator(RIGHT), Some(Rect::new(1108, 8, 8, 1064)));
+}
+
+#[test]
+fn a_screen_in_one_piece_has_no_separation() {
+    let desk = desk();
+
+    assert_eq!(desk.separator(CENTER), None);
+    assert_eq!(desk.ratio_at(CENTER, Point::new(1000, 500)), None);
+    assert_eq!(desk.separator(OutputId(99)), None);
+}
+
 // Invariants under arbitrary sequences of operations.
 
 /// Small deterministic generator: enough to explore, and failures reproduce.
@@ -1207,7 +1349,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
             let index = rng.next(3) as usize;
 
             // Refusals are part of the contract; only consistency matters here.
-            let _outcome: Result<(), ModelError> = match rng.next(13) {
+            let _outcome: Result<(), ModelError> = match rng.next(15) {
                 0 | 1 => {
                     next_id += 1;
                     let app = AppKey::new(APPS[rng.next(4) as usize]);
@@ -1233,6 +1375,11 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                 11 => {
                     let x = rng.next(3000) as i32 - 400;
                     desk.set_floating_rect(window, Rect::new(x, x / 3, 200 + x.abs(), 150))
+                }
+                12 => desk.minimize(window),
+                13 => {
+                    desk.restore_last();
+                    Ok(())
                 }
                 _ => desk.cycle_tab(slot(output, index), rng.next(2) == 0),
             };

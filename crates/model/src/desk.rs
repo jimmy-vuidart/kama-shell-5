@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::ids::{AppKey, OutputId, WindowId};
 use crate::layout::{LayoutKind, Ratio, SlotId};
 use crate::memory::{AppMemory, RememberedPlace};
@@ -109,6 +109,8 @@ pub struct WindowGeometry {
     pub focused: bool,
     pub floating: bool,
     pub anchored: bool,
+    /// Hidden by the user, until restored.
+    pub minimized: bool,
 }
 
 /// Where a window is inside its screen.
@@ -132,6 +134,8 @@ pub struct Desk {
     windows: BTreeMap<WindowId, WindowRecord>,
     /// Every window exactly once, most recently focused last.
     focus_order: Vec<WindowId>,
+    /// Windows hidden by the user, the one hidden last at the end.
+    minimized: Vec<WindowId>,
     memory: AppMemory,
     last_side: Option<OutputId>,
 }
@@ -144,6 +148,7 @@ impl Desk {
             screens: outputs.into_iter().map(Screen::new).collect(),
             windows: BTreeMap::new(),
             focus_order: Vec::new(),
+            minimized: Vec::new(),
             memory: AppMemory::default(),
             last_side: None,
         }
@@ -184,8 +189,11 @@ impl Desk {
         })
     }
 
+    /// The window with the focus: the one focused last that is not
+    /// minimized.
     pub fn focused(&self) -> Option<WindowId> {
-        self.focus_order.last().copied()
+        let shown = |id: &&WindowId| !self.minimized.contains(id);
+        self.focus_order.iter().rev().find(shown).copied()
     }
 
     /// A new window appears (rules 1, 4 and 7) and takes the focus.
@@ -241,12 +249,15 @@ impl Desk {
         self.screens[screen].remove(id);
         self.windows.remove(&id);
         self.focus_order.retain(|window| *window != id);
+        self.minimized.retain(|window| *window != id);
+        self.settle();
 
         if was_focused {
             let neighbour = match spot {
                 Spot::Slot(index) => self.screens[screen].slots()[index].active(),
                 Spot::Floating(_) => None,
             };
+            let neighbour = neighbour.filter(|window| !self.minimized.contains(window));
             if let Some(next) = neighbour.or_else(|| self.focused()) {
                 self.mark_focused(next);
             }
@@ -280,6 +291,7 @@ impl Desk {
         if let Some(stack) = self.screens[to].slot_mut(slot.index) {
             stack.push(id);
         }
+        self.settle();
 
         let app = self.windows.get(&id).and_then(|record| record.app.clone());
         if let Some(app) = app {
@@ -311,6 +323,7 @@ impl Desk {
         self.screens[from].remove(id);
         let rect = rect.clamped_to(self.screens[to].floating_area(&self.metrics));
         self.screens[to].push_floating(id, rect);
+        self.settle();
 
         if matches!(spot, Spot::Slot(_)) {
             if let Some(app) = self.windows.get(&id).and_then(|record| record.app.as_ref()) {
@@ -408,6 +421,7 @@ impl Desk {
                 }
             }
         }
+        self.settle();
         self.mark_focused(id);
         Ok(())
     }
@@ -422,6 +436,7 @@ impl Desk {
             return Err(ModelError::LayoutNotAllowed { kind, role });
         }
         self.screens[index].apply_layout(kind, &self.metrics);
+        self.settle();
         self.show_focused();
         Ok(())
     }
@@ -475,6 +490,46 @@ impl Desk {
             self.mark_focused(id);
         }
         Ok(())
+    }
+
+    /// Hides a window until it is restored or shown again. Its place is kept;
+    /// in a stack the next tab shows, and the focus goes to the window that
+    /// had it before.
+    pub fn minimize(&mut self, id: WindowId) -> Result<(), ModelError> {
+        let (index, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        self.ensure_not_anchored(index)?;
+        let was_focused = self.focused() == Some(id);
+        if !self.minimized.contains(&id) {
+            self.minimized.push(id);
+        }
+        // Its stack shows another tab; that tab takes the focus the window
+        // had, else the window focused before does.
+        let shown = self.settle();
+        if was_focused {
+            let successor = shown.or_else(|| self.focused());
+            if let Some(successor) = successor {
+                self.mark_focused(successor);
+            }
+        }
+        Ok(())
+    }
+
+    /// Brings back the window minimized last, focused, where it was.
+    pub fn restore_last(&mut self) -> Option<WindowId> {
+        let id = self.minimized.pop()?;
+        self.mark_focused(id);
+        Some(id)
+    }
+
+    /// The gap between the two slots of a screen, relative to the screen.
+    pub fn separator(&self, output: OutputId) -> Option<Rect> {
+        self.screen(output)?.separator(&self.metrics)
+    }
+
+    /// The ratio that puts the separation of a screen under `point`, given
+    /// relative to the screen.
+    pub fn ratio_at(&self, output: OutputId, point: Point) -> Option<Ratio> {
+        self.screen(output)?.ratio_at(&self.metrics, point)
     }
 
     /// A window entered or left fullscreen. While anchored, it covers its
@@ -554,6 +609,7 @@ impl Desk {
         floating: bool,
     ) -> WindowGeometry {
         let anchored = screen.anchored() == Some(id);
+        let minimized = self.minimized.contains(&id);
         let (frame, titlebar, client) = if anchored {
             let bounds = screen.info().bounds();
             (bounds, None, bounds)
@@ -567,10 +623,11 @@ impl Desk {
             frame,
             titlebar,
             client,
-            visible: anchored || (shown && screen.anchored().is_none()),
+            visible: anchored || (shown && !minimized && screen.anchored().is_none()),
             focused: self.focused() == Some(id),
             floating,
             anchored,
+            minimized,
         }
     }
 
@@ -680,6 +737,7 @@ impl Desk {
     fn mark_focused(&mut self, id: WindowId) {
         self.focus_order.retain(|window| *window != id);
         self.focus_order.push(id);
+        self.minimized.retain(|window| *window != id);
 
         if let Some((index, spot)) = self.locate(id) {
             let screen = &mut self.screens[index];
@@ -695,6 +753,34 @@ impl Desk {
                 self.last_side = Some(screen.id());
             }
         }
+    }
+
+    /// Makes every stack show a tab that is not minimized, when it has one.
+    /// Returns the tab that came to show in place of a minimized one, if any.
+    fn settle(&mut self) -> Option<WindowId> {
+        let minimized = &self.minimized;
+        let mut shown = None;
+        for screen in &mut self.screens {
+            for slot in 0..screen.slots().len() {
+                let stack = &screen.slots()[slot];
+                let Some(position) = stack.active_index() else {
+                    continue;
+                };
+                let windows = stack.windows();
+                if !minimized.contains(&windows[position]) {
+                    continue;
+                }
+                // The tabs after it first, then around to the ones before.
+                let next = (1..windows.len())
+                    .map(|step| windows[(position + step) % windows.len()])
+                    .find(|window| !minimized.contains(window));
+                if let (Some(next), Some(stack)) = (next, screen.slot_mut(slot)) {
+                    stack.activate(next);
+                    shown = Some(next);
+                }
+            }
+        }
+        shown
     }
 
     /// Makes sure the focused window is not hidden behind another tab.
@@ -747,10 +833,29 @@ impl Desk {
             return Err("the focus order does not hold every window once".into());
         }
 
+        let mut hidden = self.minimized.clone();
+        hidden.sort();
+        hidden.dedup();
+        if hidden.len() != self.minimized.len()
+            || hidden.iter().any(|id| !self.windows.contains_key(id))
+        {
+            return Err("the minimized windows are not a set of known windows".into());
+        }
+        for screen in &self.screens {
+            for stack in screen.slots() {
+                let is_hidden = |id: &WindowId| self.minimized.contains(id);
+                let stuck = stack.active().is_some_and(|id| is_hidden(&id))
+                    && !stack.windows().iter().all(is_hidden);
+                if stuck {
+                    return Err(format!("{:?} shows a minimized tab", screen.id()));
+                }
+            }
+        }
+
         let arrangement = self.arrangement();
         let focused: Vec<_> = arrangement.iter().filter(|g| g.focused).collect();
         match focused.as_slice() {
-            [] if self.windows.is_empty() => {}
+            [] if self.windows.keys().all(|id| self.minimized.contains(id)) => {}
             [one] => {
                 let under_game = self
                     .screen(one.output)

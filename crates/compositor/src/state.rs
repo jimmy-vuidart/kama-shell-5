@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use coquille_model::{AppMemory, OutputId, Point as ModelPoint, WindowId};
+use coquille_model::{AppMemory, OutputId, Point as ModelPoint, SlotId, WindowId};
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
@@ -103,6 +103,9 @@ pub struct State {
     pub bar: Option<Bar>,
     /// The button of the bar under the pointer.
     pub bar_hover: Option<usize>,
+    /// The slot whose "add a tab" button is armed: the next window that
+    /// opens goes there.
+    pub armed_slot: Option<SlotId>,
     /// What the left mouse button is doing since it went down.
     pub gesture: Option<Gesture>,
     /// The left button went down for the shell: its release is not for a
@@ -220,6 +223,7 @@ impl State {
             placement_offer: None,
             bar: None,
             bar_hover: None,
+            armed_slot: None,
             gesture: None,
             swallowed_press: false,
             redraw_needed: true,

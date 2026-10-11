@@ -23,6 +23,23 @@ pub enum TitlebarButton {
     Close,
 }
 
+/// The buttons that depend on where the window is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Buttons {
+    /// On a side screen, when there is a center to swap with.
+    pub swap: bool,
+    /// In a slot: a floating window has no stack to add a tab to.
+    pub add_tab: bool,
+}
+
+impl Buttons {
+    #[cfg(test)]
+    const ALL: Self = Self {
+        swap: true,
+        add_tab: true,
+    };
+}
+
 /// Rectangles relative to the title bar's top-left corner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitlebarLayout {
@@ -36,16 +53,18 @@ pub struct TitlebarLayout {
 impl TitlebarLayout {
     /// Buttons are right-aligned. When the bar is too narrow, the leftmost
     /// ones are dropped; the close button always stays.
-    pub fn new(size: Size, show_swap: bool) -> Self {
+    pub fn new(size: Size, shown: Buttons) -> Self {
         let order = [
             TitlebarButton::Close,
             TitlebarButton::Minimize,
             TitlebarButton::Swap,
             TitlebarButton::AddTab,
         ];
-        let wanted = order
-            .into_iter()
-            .filter(|button| show_swap || *button != TitlebarButton::Swap);
+        let wanted = order.into_iter().filter(|button| match button {
+            TitlebarButton::Swap => shown.swap,
+            TitlebarButton::AddTab => shown.add_tab,
+            TitlebarButton::Minimize | TitlebarButton::Close => true,
+        });
 
         // Laid out from the right edge; the first one (close) is never dropped.
         let mut buttons = Vec::new();
@@ -102,6 +121,10 @@ mod tests {
     use super::*;
 
     const BAR: Size = Size::new(400, 38);
+    const NO_SWAP: Buttons = Buttons {
+        swap: false,
+        add_tab: true,
+    };
 
     fn kinds(layout: &TitlebarLayout) -> Vec<TitlebarButton> {
         layout.buttons.iter().map(|(button, _)| *button).collect()
@@ -109,7 +132,7 @@ mod tests {
 
     #[test]
     fn buttons_are_right_aligned_in_order() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(
             layout.buttons,
@@ -124,7 +147,7 @@ mod tests {
 
     #[test]
     fn the_swap_button_is_absent_when_not_shown() {
-        let layout = TitlebarLayout::new(BAR, false);
+        let layout = TitlebarLayout::new(BAR, NO_SWAP);
 
         assert_eq!(
             kinds(&layout),
@@ -138,22 +161,41 @@ mod tests {
     }
 
     #[test]
+    fn a_floating_window_has_no_add_tab_button() {
+        let floating = Buttons {
+            swap: true,
+            add_tab: false,
+        };
+
+        let layout = TitlebarLayout::new(BAR, floating);
+
+        assert_eq!(
+            kinds(&layout),
+            [
+                TitlebarButton::Swap,
+                TitlebarButton::Minimize,
+                TitlebarButton::Close
+            ]
+        );
+    }
+
+    #[test]
     fn the_icon_is_vertically_centered_on_the_left() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(layout.icon, Rect::new(12, 10, 18, 18));
     }
 
     #[test]
     fn the_text_fills_the_room_between_the_icon_and_the_buttons() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(layout.text, Rect::new(40, 0, 196, 38));
     }
 
     #[test]
     fn a_narrow_bar_drops_the_leftmost_buttons_but_keeps_close() {
-        let layout = TitlebarLayout::new(Size::new(120, 38), true);
+        let layout = TitlebarLayout::new(Size::new(120, 38), Buttons::ALL);
 
         assert_eq!(
             kinds(&layout),
@@ -164,14 +206,14 @@ mod tests {
 
     #[test]
     fn a_bar_narrower_than_a_button_still_has_close() {
-        let layout = TitlebarLayout::new(Size::new(30, 38), true);
+        let layout = TitlebarLayout::new(Size::new(30, 38), Buttons::ALL);
 
         assert_eq!(kinds(&layout), [TitlebarButton::Close]);
     }
 
     #[test]
     fn tabs_share_the_room_left_of_the_buttons() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(
             layout.tabs(2),
@@ -181,7 +223,7 @@ mod tests {
 
     #[test]
     fn tabs_are_not_wider_than_their_maximum() {
-        let layout = TitlebarLayout::new(Size::new(1000, 38), false);
+        let layout = TitlebarLayout::new(Size::new(1000, 38), NO_SWAP);
 
         assert_eq!(
             layout.tabs(2),
@@ -191,22 +233,22 @@ mod tests {
 
     #[test]
     fn a_single_tab_is_laid_out_too() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(layout.tabs(1), [Rect::new(8, 4, 220, 30)]);
     }
 
     #[test]
     fn no_tab_gives_no_cell_and_a_narrow_bar_no_negative_width() {
-        assert!(TitlebarLayout::new(BAR, true).tabs(0).is_empty());
+        assert!(TitlebarLayout::new(BAR, Buttons::ALL).tabs(0).is_empty());
 
-        let narrow = TitlebarLayout::new(Size::new(60, 38), true);
+        let narrow = TitlebarLayout::new(Size::new(60, 38), Buttons::ALL);
         assert!(narrow.tabs(3).iter().all(|tab| tab.w >= 0));
     }
 
     #[test]
     fn a_point_on_a_button_finds_it() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(
             layout.button_at(Point::new(377, 19)),
@@ -220,7 +262,7 @@ mod tests {
 
     #[test]
     fn a_point_on_the_title_finds_no_button() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
         assert_eq!(layout.button_at(Point::new(100, 19)), None);
         assert_eq!(layout.button_at(Point::new(398, 19)), None);

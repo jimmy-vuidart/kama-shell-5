@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::geometry::{Insets, Rect};
+use crate::geometry::{Insets, Point, Rect};
 use crate::ids::OutputId;
 use crate::output::OutputRole;
 
@@ -126,6 +126,33 @@ impl LayoutKind {
             Self::Free => "Écran libre",
             Self::TwoThirdsOneThird => "Deux tiers + un tiers",
         }
+    }
+
+    /// The gap between the two slots, where the user grabs to change the
+    /// ratio. `None` for layouts in one piece or with a fixed split.
+    pub fn separator(self, area: Rect, ratio: Ratio, gap: i32) -> Option<Rect> {
+        let first = *self.slot_rects(area, ratio, gap).first()?;
+        match self {
+            Self::Columns => Some(Rect::new(first.right(), first.y, gap, first.h)),
+            Self::Rows => Some(Rect::new(first.x, first.bottom(), first.w, gap)),
+            _ => None,
+        }
+    }
+
+    /// The ratio that puts the separation under `point`.
+    pub fn ratio_at(self, area: Rect, gap: i32, point: Point) -> Option<Ratio> {
+        let inner = area.inset(Insets::uniform(gap));
+        let (offset, room) = match self {
+            Self::Columns => (point.x - inner.x, inner.w - gap),
+            Self::Rows => (point.y - inner.y, inner.h - gap),
+            _ => return None,
+        };
+        if room <= 0 {
+            return None;
+        }
+        // The pointer holds the middle of the gap.
+        let first = offset - gap / 2;
+        Some(Ratio::from_fraction(f64::from(first) / f64::from(room)))
     }
 
     /// Slot rectangles inside `area`, with `gap` between slots and along the
@@ -299,6 +326,66 @@ mod tests {
             vec![Rect::new(8, 8, 2277, 1424), Rect::new(2293, 8, 1139, 1424)]
         );
         assert_eq!(rects[1].right(), 3440 - 8);
+    }
+
+    #[test]
+    fn the_separation_of_columns_is_the_gap_between_them() {
+        let area = Rect::new(0, 0, 1920, 1080);
+
+        assert_eq!(
+            LayoutKind::Columns.separator(area, Ratio::HALF, 8),
+            Some(Rect::new(956, 8, 8, 1064))
+        );
+        assert_eq!(
+            LayoutKind::Rows.separator(area, Ratio::HALF, 8),
+            Some(Rect::new(8, 536, 1904, 8))
+        );
+    }
+
+    #[test]
+    fn layouts_with_a_fixed_or_no_split_have_no_separation() {
+        let area = Rect::new(0, 0, 3440, 1440);
+        for kind in [
+            LayoutKind::Full,
+            LayoutKind::Tabs,
+            LayoutKind::Free,
+            LayoutKind::TwoThirdsOneThird,
+        ] {
+            assert_eq!(kind.separator(area, Ratio::HALF, 8), None, "{kind:?}");
+            assert_eq!(
+                kind.ratio_at(area, 8, Point::new(900, 700)),
+                None,
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ratio_puts_the_separation_under_the_pointer() {
+        let area = Rect::new(0, 0, 1920, 1080);
+
+        assert_eq!(
+            LayoutKind::Columns.ratio_at(area, 8, Point::new(1112, 500)),
+            Some(Ratio::from_percent(58))
+        );
+        assert_eq!(
+            LayoutKind::Rows.ratio_at(area, 8, Point::new(900, 540)),
+            Some(Ratio::HALF)
+        );
+    }
+
+    #[test]
+    fn the_ratio_under_the_pointer_stays_within_bounds() {
+        let area = Rect::new(52, 0, 1868, 1080);
+
+        assert_eq!(
+            LayoutKind::Columns.ratio_at(area, 8, Point::new(0, 500)),
+            Some(Ratio::MIN)
+        );
+        assert_eq!(
+            LayoutKind::Columns.ratio_at(area, 8, Point::new(5000, 500)),
+            Some(Ratio::MAX)
+        );
     }
 
     #[test]

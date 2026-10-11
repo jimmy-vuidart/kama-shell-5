@@ -150,7 +150,9 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 ```
 
 - Souris : glisser une barre de titre montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
-- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `6` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+Maj+E` quitter.
+- Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
+- Boutons de la barre de titre : « réduire » cache la fenêtre (son onglet reste, grisé ; un clic dessus ou `Mod+R` la ramène) ; « ajouter un onglet » arme l'emplacement, et la prochaine fenêtre ouverte s'y empile, quelle que soit sa mémoire (second clic pour désarmer) ; ⇄ ; fermer.
+- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `6` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter.
 - Mémoire par appli : enregistrée dans `~/.local/state/coquille/memory.json` sur le matériel ; en imbriqué, seulement avec `--state-dir`.
 - Sorties de secours, sans Mod : `Ctrl+Alt+Retour arrière` quitte, `Ctrl+Alt+F1…F12` change de terminal virtuel, `--exit-after <secondes>` quitte tout seul.
 - Vérifier le rendu sans regarder l'écran (imbriqué) : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`) et ignore alors la vraie souris. Un glisser s'écrit `down`, `move…`, `up` ; une touche tenue, `press alt` … `release alt`. Placer le pointeur dès `0 move x y` : une fenêtre s'ouvre sur l'écran où il se trouve à ce moment-là.
@@ -166,9 +168,9 @@ Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour
 
 ### État de la phase 2
 
-Fait : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (bande dans la barre de titre), ⇄, mémoire par appli, écran libre, barre de rangement.
+Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (bande dans la barre de titre), ⇄, mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, boutons « réduire » et « ajouter un onglet ».
 
-Pas encore : redimensionner une fenêtre flottante, régler le ratio à la souris (`Super+glisser` sur la séparation), boutons « ajouter un onglet » et « réduire » (dessinés, inactifs), menu de disposition (il viendra avec les barres, phase 4).
+Reportés à la phase 4, avec les barres latérales : le menu de disposition (clic droit sur la barre) et la liste des fenêtres de l'écran, qui sera la vraie façon de retrouver une fenêtre réduite.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 
