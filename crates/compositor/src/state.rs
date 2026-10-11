@@ -28,6 +28,7 @@ use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
+use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
@@ -91,6 +92,7 @@ pub struct State {
     _cursor_shape_state: CursorShapeManagerState,
     _pointer_constraints_state: PointerConstraintsState,
     _relative_pointer_state: RelativePointerManagerState,
+    _viewporter_state: ViewporterState,
 
     pub seat: Seat<State>,
     pub cursor_status: CursorImageStatus,
@@ -167,6 +169,9 @@ impl State {
         // Games: hold the pointer in place, and read how far the mouse went.
         let pointer_constraints_state = PointerConstraintsState::new::<Self>(dh);
         let relative_pointer_state = RelativePointerManagerState::new::<Self>(dh);
+        // Lets a client stretch a small buffer over its surface: how
+        // XWayland shows a game that asked for a lower resolution.
+        let viewporter_state = ViewporterState::new::<Self>(dh);
         let (dmabuf_state, dmabuf_global) = init_dmabuf(dh, renderer);
 
         let mut seat_state = SeatState::new();
@@ -236,6 +241,7 @@ impl State {
             _cursor_shape_state: cursor_shape_state,
             _pointer_constraints_state: pointer_constraints_state,
             _relative_pointer_state: relative_pointer_state,
+            _viewporter_state: viewporter_state,
             seat,
             cursor_status: CursorImageStatus::default_named(),
             cursor_images: CursorImages::load(),
