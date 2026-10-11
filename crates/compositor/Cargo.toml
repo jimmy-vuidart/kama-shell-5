@@ -1,0 +1,27 @@
+[package]
+name = "coquille"
+description = "The coquille Wayland compositor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+coquille-model.workspace = true
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+cosmic-text = "0.19"
+tiny-skia = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dependencies.smithay]
+git = "https://github.com/Smithay/smithay.git"
+# Same commit as niri 26.4.0, so that niri reads as a reference for this API.
+rev = "19c16d3e34172fcc8fb3d293bcae563b0a19ea70"
+default-features = false
+# backend_drm is only there to name the render node in dmabuf feedback for now.
+features = ["backend_drm", "backend_winit", "desktop", "renderer_gl", "wayland_frontend"]
+
+[lints]
+workspace = true

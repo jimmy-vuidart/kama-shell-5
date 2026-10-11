@@ -139,6 +139,17 @@ coquille/
 - **Décorations en Rust pur** : `tiny-skia` (formes) et `cosmic-text` (texte) vers des textures, shaders GLES pour l'anneau et le rognage des coins.
 - **Mode imbriqué (winit) : `Alt` remplace `Super`**, que la session hôte intercepte. `scripts/ci.sh` lance `fmt`, `clippy` et les tests.
 
+### Lancer le compositeur imbriqué (phase 1)
+
+```
+cargo run -p coquille -- --spawn alacritty --spawn kitty
+```
+
+- Options : `--role left|center|right` (défaut `right`), `--theme light|dark`, `--keyboard-layout fr`, `--spawn <commande>` (répétable).
+- Raccourcis (`Alt` en imbriqué) : `Alt+1` disposition « plein », `Alt+2` « côte à côte », `Alt+Page suiv./préc.` onglet suivant/précédent, `Alt+Maj+E` quitter.
+- Vérifier le rendu sans regarder l'écran : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`).
+- Les images ne dépendent pas des demandes de rafraîchissement de l'hôte : un minuteur à 60 Hz dessine quand quelque chose a changé.
+
 ### Références à étudier avant de coder
 
 - **anvil**, le compositeur d'exemple du dépôt Smithay : structure de base, backends winit et udev.
