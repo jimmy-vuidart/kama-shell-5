@@ -15,6 +15,7 @@ use smithay::input::pointer::{CursorImageAttributes, CursorImageStatus};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::winit::cursor::Cursor;
 use smithay::reexports::winit::dpi::LogicalSize;
+use smithay::reexports::winit::monitor::Fullscreen;
 use smithay::reexports::winit::window::WindowAttributes;
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Size};
 use smithay::wayland::compositor::with_states;
@@ -42,11 +43,14 @@ pub struct Winit {
     pub screenshot: Option<PathBuf>,
 }
 
-/// Opens the host window and prepares the renderer.
-pub fn init() -> anyhow::Result<(Winit, WinitEventLoop)> {
+/// Opens the host window and prepares the renderer. In full screen, the
+/// window covers the monitor it appears on, which makes the simulated output
+/// as large as a real one.
+pub fn init(fullscreen: bool) -> anyhow::Result<(Winit, WinitEventLoop)> {
     let attributes = WindowAttributes::default()
         .with_title(TITLE)
-        .with_surface_size(LogicalSize::new(INITIAL_SIZE.0, INITIAL_SIZE.1));
+        .with_surface_size(LogicalSize::new(INITIAL_SIZE.0, INITIAL_SIZE.1))
+        .with_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
     let (mut backend, events) = winit::init_from_attributes::<GlesRenderer>(attributes)
         .map_err(|error| anyhow::anyhow!("cannot open the host window: {error}"))?;
     let shaders = Shaders::compile(backend.renderer()).context("cannot compile the shaders")?;

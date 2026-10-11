@@ -14,9 +14,10 @@ mod state;
 mod theme;
 mod winit;
 
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -66,6 +67,11 @@ struct Cli {
     #[arg(long, value_enum, default_value = "light")]
     theme: ThemeKind,
 
+    /// Occupe tout l'écran où la fenêtre s'ouvre, pour simuler un écran
+    /// réel. Alt+Maj+E pour quitter.
+    #[arg(long)]
+    fullscreen: bool,
+
     /// Disposition du clavier (par exemple « fr »). Par défaut, celle du
     /// système.
     #[arg(long)]
@@ -74,6 +80,10 @@ struct Cli {
     /// Variante de la disposition du clavier.
     #[arg(long, requires = "keyboard_layout")]
     keyboard_variant: Option<String>,
+
+    /// Écrit le journal dans ce fichier plutôt que dans le terminal.
+    #[arg(long, value_name = "FICHIER")]
+    log_file: Option<PathBuf>,
 
     /// Commande à lancer dans le compositeur ; l'option peut être répétée.
     #[arg(long, value_name = "COMMANDE")]
@@ -103,13 +113,13 @@ struct App {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    init_logging();
+    init_logging(cli.log_file.as_deref())?;
 
     let mut event_loop: EventLoop<App> = EventLoop::try_new()?;
     let handle = event_loop.handle();
     let mut display: Display<State> = Display::new()?;
 
-    let (backend, winit_events) = winit::init()?;
+    let (backend, winit_events) = winit::init(cli.fullscreen)?;
 
     let socket = ListeningSocketSource::new_auto().context("cannot create the Wayland socket")?;
     let socket_name = socket.socket_name().to_os_string();
@@ -208,10 +218,33 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn init_logging() {
+/// Logs to the terminal, or to a file when the compositor is started from a
+/// menu. Panics are logged too, so that a crash leaves a trace either way.
+fn init_logging(file: Option<&Path>) -> anyhow::Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    match file {
+        Some(path) => {
+            if let Some(directory) = path.parent() {
+                fs::create_dir_all(directory)
+                    .with_context(|| format!("cannot create {}", directory.display()))?;
+            }
+            let file = File::create(path)
+                .with_context(|| format!("cannot write the log to {}", path.display()))?;
+            builder
+                .with_ansi(false)
+                .with_writer(Mutex::new(file))
+                .init();
+        }
+        None => builder.init(),
+    }
+
+    std::panic::set_hook(Box::new(|panic| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        error!("{panic}\n{backtrace}");
+    }));
+    Ok(())
 }
 
 /// Runs a shell command as a client of this compositor.

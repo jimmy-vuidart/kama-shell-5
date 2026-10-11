@@ -15,3 +15,12 @@ thiserror = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+[profile.release]
+# Line numbers in the backtrace of a real-world crash...
+debug = "line-tables-only"
+
+# ...but only for this workspace: for every dependency they would triple the
+# size of the binary.
+[profile.release.package."*"]
+debug = false

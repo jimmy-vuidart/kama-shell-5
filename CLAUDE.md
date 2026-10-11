@@ -149,6 +149,13 @@ cargo run -p coquille -- --spawn alacritty --spawn kitty
 - Raccourcis (`Alt` en imbriqué) : `Alt+1` disposition « plein », `Alt+2` « côte à côte », `Alt+Page suiv./préc.` onglet suivant/précédent, `Alt+Maj+E` quitter.
 - Vérifier le rendu sans regarder l'écran : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`).
 - Les images ne dépendent pas des demandes de rafraîchissement de l'hôte : un minuteur à 60 Hz dessine quand quelque chose a changé.
+- `--fullscreen` couvre l'écran où la fenêtre s'ouvre : la sortie simulée prend la taille d'un vrai écran.
+
+### Installer pour un essai réel
+
+`scripts/install.sh` compile en release et installe **pour l'utilisateur seulement** : `~/.local/bin/coquille` et une entrée de menu `coquille` (clic droit : plein écran comme écran gauche, central ou droit). Lancé depuis le menu, le journal va dans `~/.local/state/coquille/coquille.log` (`--log-file`), paniques comprises. `scripts/install.sh --uninstall` retire le tout.
+
+Aucune session de connexion n'est installée : tant que le backend udev (phase 2) n'existe pas, le compositeur ne peut pas démarrer depuis un TTY ou SDDM.
 
 ### Références à étudier avant de coder
 
