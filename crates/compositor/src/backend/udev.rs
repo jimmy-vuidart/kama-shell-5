@@ -42,7 +42,7 @@ use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pic
 use crate::render::scene::{self, Layers, SceneElement};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
-use crate::state::{App, State};
+use crate::state::State;
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
@@ -216,7 +216,7 @@ pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
 
 /// Takes the seat, opens the GPU and lights every screen that gets a role.
 pub fn init(
-    handle: &LoopHandle<'static, App>,
+    handle: &LoopHandle<'static, State>,
     roles: &RoleConfig,
 ) -> anyhow::Result<(Udev, Vec<(ScreenInfo, Output)>)> {
     let (mut session, session_events) =
@@ -265,19 +265,17 @@ pub fn init(
     handle
         .insert_source(
             LibinputInputBackend::new(libinput.clone()),
-            |event, _, app| {
-                app.state.process_input_event(event);
+            |event, _, state| {
+                state.process_input_event(event);
             },
         )
         .map_err(|error| anyhow!("cannot watch input devices: {error}"))?;
     handle
-        .insert_source(session_events, |event, _, app| {
-            app.state.session_event(event)
-        })
+        .insert_source(session_events, |event, _, state| state.session_event(event))
         .map_err(|error| anyhow!("cannot watch the session: {error}"))?;
     handle
-        .insert_source(drm_events, |event, _, app| match event {
-            DrmEvent::VBlank(crtc) => app.state.frame_shown(crtc),
+        .insert_source(drm_events, |event, _, state| match event {
+            DrmEvent::VBlank(crtc) => state.frame_shown(crtc),
             DrmEvent::Error(error) => error!(%error, "DRM error"),
         })
         .map_err(|error| anyhow!("cannot watch the screens: {error}"))?;
@@ -560,8 +558,8 @@ impl State {
             // Nothing went to the screen, so nothing will come back from it:
             // a timer ends this frame instead.
             let timer = Timer::from_duration(screen.frame);
-            let armed = self.loop_handle.insert_source(timer, move |_, _, app| {
-                app.state.frame_done(crtc);
+            let armed = self.loop_handle.insert_source(timer, move |_, _, state| {
+                state.frame_done(crtc);
                 TimeoutAction::Drop
             });
             if let Err(error) = armed {

@@ -17,6 +17,9 @@ pub struct Config {
     pub theme: Option<ThemeKind>,
     /// Command of the terminal opened by the shortcut.
     pub terminal: Option<String>,
+    /// Whether X11 applications can run, through XWayland; they can unless
+    /// this says otherwise.
+    pub xwayland: Option<bool>,
     pub game: GameConfig,
 }
 
@@ -140,6 +143,12 @@ mod tests {
         assert_eq!(config.game.sticky_edges_ms(), 0);
         assert!(parse("[game]\nsticky_edges_ms = -5").is_err());
         assert!(parse("[game]\nsticky = 5").is_err());
+    }
+
+    #[test]
+    fn xwayland_can_be_turned_off() {
+        assert_eq!(parse("").unwrap().xwayland, None);
+        assert_eq!(parse("xwayland = false").unwrap().xwayland, Some(false));
     }
 
     #[test]

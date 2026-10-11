@@ -5,7 +5,8 @@
 
 use coquille_model::{
     AppKey, AppMemory, Desk, DropTarget, LayoutKind, Metrics, OpenRequest, OutputId, OutputInfo,
-    OutputRole, Placement, Point as ModelPoint, Rect, SlotId, WindowGeometry, WindowId,
+    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowGeometry,
+    WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -15,12 +16,15 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::Sta
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, SERIAL_COUNTER, Size, Transform};
 use smithay::wayland::compositor::with_states;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
+use smithay::xwayland::X11Surface;
 use tracing::{debug, info, warn};
 
 use crate::decoration::layout::{Buttons, TitlebarButton};
 use crate::decoration::naming::{badge_color, display_name};
 use crate::decoration::paint::{Painter, TabSpec, TitlebarSpec};
+use crate::focus::KeyFocus;
 use crate::input::Gesture;
 use crate::render::scene::Chrome;
 use crate::state::State;
@@ -92,12 +96,33 @@ pub struct Unmapped {
     pub fullscreen: Option<Option<OutputId>>,
 }
 
+/// A window about to be placed by the model, Wayland or X11.
+pub struct NewWindow {
+    pub window: Window,
+    /// What identifies its application: `app_id`, or `WM_CLASS`.
+    pub app_id: String,
+    pub title: String,
+    /// It follows the habits of its application. A dialog does not: it
+    /// opens floating wherever the application lives.
+    pub habits: bool,
+    /// The screen to open on, when it is not the one under the pointer.
+    pub screen: Option<OutputId>,
+    /// The size its client asks for, without decoration, when it is known
+    /// beforehand (X11).
+    pub size: Option<ModelSize>,
+    /// It opens fullscreen: on this screen, if it names one.
+    pub fullscreen: Option<Option<OutputId>>,
+}
+
 pub struct Shell {
     pub desk: Desk,
     pub screens: Vec<ScreenInfo>,
     /// Bottom to top, as the model orders them.
     pub windows: Vec<ManagedWindow>,
     pub unmapped: Vec<Unmapped>,
+    /// X11 windows that manage themselves (menus, tooltips, dropdowns),
+    /// bottom to top. They are shown where they say, above everything.
+    pub overrides: Vec<X11Surface>,
     next_id: u64,
 }
 
@@ -113,6 +138,7 @@ impl Shell {
             screens,
             windows: Vec::new(),
             unmapped: Vec::new(),
+            overrides: Vec::new(),
             next_id: 1,
         }
     }
@@ -137,24 +163,31 @@ impl Shell {
         self.screens = screens;
     }
 
-    /// The managed window whose toplevel surface is `surface`.
+    /// The managed window whose main surface is `surface`.
     pub fn by_surface(&self, surface: &WlSurface) -> Option<&ManagedWindow> {
         self.windows
             .iter()
-            .find(|managed| is_toplevel_of(&managed.window, surface))
+            .find(|managed| is_surface_of(&managed.window, surface))
     }
 
     pub fn by_surface_mut(&mut self, surface: &WlSurface) -> Option<&mut ManagedWindow> {
         self.windows
             .iter_mut()
-            .find(|managed| is_toplevel_of(&managed.window, surface))
+            .find(|managed| is_surface_of(&managed.window, surface))
+    }
+
+    /// The managed window that is this X11 window.
+    pub fn by_x11(&self, window: &X11Surface) -> Option<&ManagedWindow> {
+        self.windows
+            .iter()
+            .find(|managed| managed.window.x11_surface() == Some(window))
     }
 
     /// The toplevel not placed yet whose surface is `surface`.
     pub fn unmapped_mut(&mut self, surface: &WlSurface) -> Option<&mut Unmapped> {
         self.unmapped
             .iter_mut()
-            .find(|unmapped| is_toplevel_of(&unmapped.window, surface))
+            .find(|unmapped| is_surface_of(&unmapped.window, surface))
     }
 
     pub fn by_id(&self, id: WindowId) -> Option<&ManagedWindow> {
@@ -311,10 +344,22 @@ impl Shell {
     }
 }
 
-fn is_toplevel_of(window: &Window, surface: &WlSurface) -> bool {
-    window
-        .toplevel()
-        .is_some_and(|toplevel| toplevel.wl_surface() == surface)
+/// `surface` is the main surface of `window`. An X11 window has none until
+/// XWayland pairs them.
+fn is_surface_of(window: &Window, surface: &WlSurface) -> bool {
+    window.wl_surface().is_some_and(|own| *own == *surface)
+}
+
+/// The rectangle an X11 window is given for its content to fill `client`:
+/// the window may draw shadows of its own around it, which stay outside.
+pub fn x11_rect(client: Rect, shadows: (i32, i32, i32, i32)) -> Rect {
+    let (left, right, top, bottom) = shadows;
+    Rect::new(
+        client.x - left,
+        client.y - top,
+        client.w + left + right,
+        client.h + top + bottom,
+    )
 }
 
 /// `app_id` and title set by the client, empty when missing.
@@ -342,7 +387,7 @@ impl State {
             .shell
             .unmapped
             .iter()
-            .position(|unmapped| is_toplevel_of(&unmapped.window, surface))
+            .position(|unmapped| is_surface_of(&unmapped.window, surface))
         else {
             return;
         };
@@ -351,35 +396,60 @@ impl State {
             return;
         };
         let (app_id, title) = toplevel_names(toplevel);
-        let Some(cursor_screen) = self
-            .pointer_screen()
-            .or(self.shell.screens.first().copied())
-        else {
+        self.manage(NewWindow {
+            window,
+            app_id,
+            title,
+            habits: true,
+            screen: None,
+            size: None,
+            fullscreen,
+        });
+    }
+
+    /// A new window, Wayland or X11: the model places it, and its client is
+    /// told where it stands.
+    pub fn manage(&mut self, new: NewWindow) -> Option<WindowId> {
+        let NewWindow {
+            window,
+            app_id,
+            title,
+            habits,
+            screen,
+            size,
+            fullscreen,
+        } = new;
+        let known = screen.filter(|id| self.shell.screen(*id).is_some());
+        let pointer = || self.pointer_screen().map(|screen| screen.id);
+        let first = || self.shell.screens.first().map(|screen| screen.id);
+        let Some(output) = known.or_else(pointer).or_else(first) else {
             warn!("no screen to open a window on");
-            return;
+            return None;
         };
 
         let id = WindowId(self.shell.next_id);
         self.shell.next_id += 1;
-        let app = (!app_id.is_empty()).then(|| AppKey::new(app_id.clone()));
-        let request = OpenRequest::at(cursor_screen.id);
+        let app = (habits && !app_id.is_empty()).then(|| AppKey::new(app_id.clone()));
+        let bar = self.shell.desk.metrics().titlebar_height;
+        let mut request = OpenRequest::at(output);
+        if let Some(size) = size.filter(|size| size.w > 0 && size.h > 0) {
+            request = request.with_size(ModelSize::new(size.w, size.h + bar));
+        }
         if let Err(error) = self.shell.desk.open_window(id, app, request) {
             warn!(%error, "the model refused a new window");
-            return;
+            return None;
         }
         if let Err(error) = self.shell.desk.set_title(id, title.clone()) {
             warn!(%error, "cannot title a new window");
         }
-        let Some(geometry) = self
+        let geometry = self
             .shell
             .desk
             .arrangement()
             .into_iter()
-            .find(|geometry| geometry.id == id)
-        else {
-            return;
-        };
-        debug!(?id, app_id, title, "window mapped");
+            .find(|geometry| geometry.id == id)?;
+        let x11 = window.x11_surface().is_some();
+        debug!(?id, app_id, title, x11, "window mapped");
 
         let (origin, show_swap) = self.shell.placement_of(&geometry);
         self.shell.windows.push(ManagedWindow {
@@ -391,7 +461,8 @@ impl State {
             origin,
             show_swap,
             tabs: Vec::new(),
-            sized: false,
+            // The size of an X11 window is known and imposed from the start.
+            sized: x11,
             oversized: false,
             user_sized: false,
             covered: Size::default(),
@@ -420,6 +491,7 @@ impl State {
         self.placement_offer = offered.then_some(id);
         self.apply_arrangement();
         self.refresh_pointer_focus();
+        Some(id)
     }
 
     /// A window asks to cover a screen, its own when it names none: that
@@ -451,10 +523,14 @@ impl State {
     pub fn unmap_window(&mut self, surface: &WlSurface) {
         self.shell
             .unmapped
-            .retain(|unmapped| !is_toplevel_of(&unmapped.window, surface));
-        let Some(id) = self.shell.by_surface(surface).map(|managed| managed.id) else {
-            return;
-        };
+            .retain(|unmapped| !is_surface_of(&unmapped.window, surface));
+        if let Some(id) = self.shell.by_surface(surface).map(|managed| managed.id) {
+            self.remove_window(id);
+        }
+    }
+
+    /// A managed window is gone: its place is given back.
+    pub fn remove_window(&mut self, id: WindowId) {
         self.shell.windows.retain(|managed| managed.id != id);
         if let Err(error) = self.shell.desk.close_window(id) {
             warn!(%error, "the model did not know a closed window");
@@ -464,15 +540,35 @@ impl State {
         self.refresh_pointer_focus();
     }
 
+    /// Asks the client of a window to close it.
+    pub fn close_window(&self, id: WindowId) {
+        let Some(managed) = self.shell.by_id(id) else {
+            return;
+        };
+        if let Some(toplevel) = managed.window.toplevel() {
+            toplevel.send_close();
+        } else if let Some(window) = managed.window.x11_surface() {
+            if let Err(error) = window.close() {
+                warn!(%error, "cannot close an X11 window");
+            }
+        }
+    }
+
     /// The client changed its title or `app_id`.
     pub fn refresh_names(&mut self, toplevel: &ToplevelSurface) {
         let (app_id, title) = toplevel_names(toplevel);
-        let Some(managed) = self.shell.by_surface_mut(toplevel.wl_surface()) else {
+        if let Some(id) = self.shell.by_surface(toplevel.wl_surface()).map(|m| m.id) {
+            self.rename_window(id, app_id, title);
+        }
+    }
+
+    /// A window is called something else from now on.
+    pub fn rename_window(&mut self, id: WindowId, app_id: String, title: String) {
+        let Some(managed) = self.shell.windows.iter_mut().find(|m| m.id == id) else {
             return;
         };
         managed.app_id = app_id;
         managed.title = title.clone();
-        let id = managed.id;
         if let Err(error) = self.shell.desk.set_title(id, title) {
             warn!(%error, "cannot retitle a window");
         }
@@ -486,6 +582,19 @@ impl State {
 
         for managed in &self.shell.windows {
             let geometry = managed.geometry;
+            // Tells the client which output it is on, hence its scale.
+            for screen in &self.outputs {
+                if screen.id == geometry.output && geometry.visible {
+                    managed
+                        .window
+                        .output_enter(&screen.output, managed.window.bbox());
+                } else {
+                    managed.window.output_leave(&screen.output);
+                }
+            }
+            if let Some(window) = managed.window.x11_surface() {
+                configure_x11(window, managed);
+            }
             let Some(toplevel) = managed.window.toplevel() else {
                 continue;
             };
@@ -522,17 +631,6 @@ impl State {
             } else {
                 toplevel.send_configure();
             }
-
-            // Tells the client which output it is on, hence its scale.
-            for screen in &self.outputs {
-                if screen.id == geometry.output && geometry.visible {
-                    managed
-                        .window
-                        .output_enter(&screen.output, managed.window.bbox());
-                } else {
-                    managed.window.output_leave(&screen.output);
-                }
-            }
         }
 
         self.sync_keyboard_focus();
@@ -564,6 +662,11 @@ impl State {
         let Some(managed) = self.shell.by_surface_mut(surface) else {
             return;
         };
+        // An X11 window has the size it is given; it asks for another one
+        // with a configure request.
+        if managed.window.x11_surface().is_some() {
+            return;
+        }
         let geometry = managed.geometry;
         let drawn = managed.window.geometry().size;
         let (frame, client) = (geometry.frame, geometry.client);
@@ -622,10 +725,75 @@ impl State {
             .desk
             .focused()
             .and_then(|id| self.shell.by_id(id))
-            .and_then(|managed| managed.window.toplevel())
-            .map(|toplevel| toplevel.wl_surface().clone());
-        if keyboard.current_focus() != wanted {
-            keyboard.set_focus(self, wanted, SERIAL_COUNTER.next_serial());
+            .and_then(|managed| KeyFocus::of(&managed.window));
+        if keyboard.current_focus() == wanted {
+            return;
         }
+        // X11 has a stacking order of its own, which must agree on who is in
+        // front.
+        if let (Some(window), Some(xwm)) = (wanted.as_ref().and_then(KeyFocus::x11), &mut self.xwm)
+        {
+            if let Err(error) = xwm.raise_window(window) {
+                debug!(%error, "cannot raise an X11 window");
+            }
+        }
+        keyboard.set_focus(self, wanted, SERIAL_COUNTER.next_serial());
+    }
+}
+
+/// Tells an X11 window where it is and in what state. X11 clients place
+/// their menus from where they believe their window is, so the position is
+/// the real one, in the global space.
+fn configure_x11(window: &X11Surface, managed: &ManagedWindow) {
+    if !window.alive() {
+        return;
+    }
+    let geometry = managed.geometry;
+    let mut done = Ok(());
+    if window.is_fullscreen() != geometry.anchored {
+        done = done.and(window.set_fullscreen(geometry.anchored));
+    }
+    if window.is_activated() != geometry.focused {
+        done = done.and(window.set_activated(geometry.focused));
+    }
+    if window.is_hidden() != geometry.minimized {
+        done = done.and(window.set_hidden(geometry.minimized));
+    }
+    if let Err(error) = done {
+        debug!(%error, "cannot update the state of an X11 window");
+    }
+
+    let shadows = window.frame_extents();
+    let rect = x11_rect(
+        managed.client(),
+        (shadows.left, shadows.right, shadows.top, shadows.bottom),
+    );
+    let rect = crate::render::scene::rectangle(rect);
+    if window.last_configure() != rect {
+        if let Err(error) = window.configure(rect) {
+            debug!(%error, "cannot configure an X11 window");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_x11_window_without_shadows_gets_the_client_area() {
+        let client = Rect::new(1928, 46, 800, 600);
+
+        assert_eq!(x11_rect(client, (0, 0, 0, 0)), client);
+    }
+
+    #[test]
+    fn the_shadows_of_an_x11_window_stay_outside_the_client_area() {
+        let client = Rect::new(1928, 46, 800, 600);
+
+        assert_eq!(
+            x11_rect(client, (20, 22, 10, 30)),
+            Rect::new(1908, 36, 842, 640)
+        );
     }
 }

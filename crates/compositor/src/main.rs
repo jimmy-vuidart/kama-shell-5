@@ -5,6 +5,7 @@ mod config;
 mod cursor;
 mod debug;
 mod decoration;
+mod focus;
 mod game;
 mod handlers;
 mod input;
@@ -18,6 +19,7 @@ mod shell;
 mod shortcuts;
 mod state;
 mod theme;
+mod xwayland;
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -39,7 +41,7 @@ use crate::backend::Backend;
 use crate::backend::winit::{REFRESH, Simulated};
 use crate::config::Config;
 use crate::shortcuts::ModKey;
-use crate::state::{App, ClientState, Options, State};
+use crate::state::{ClientState, Options, State};
 use crate::theme::{Theme, ThemeKind};
 
 /// Where the compositor runs.
@@ -99,6 +101,10 @@ impl From<Role> for OutputRole {
 /// un tiers) ; Mod+Page suiv./préc. onglet suivant/précédent ; Mod+R
 /// restaure la dernière fenêtre réduite ; Mod+Maj+E quitter.
 /// Ctrl+Alt+Retour arrière quitte aussi, quoi qu'il arrive.
+///
+/// Mode jeu : une fenêtre en plein écran ancre son écran (ni décoration ni
+/// geste du shell). Mod seul libère le pointeur retenu par le jeu ;
+/// Mod+Échap remet le jeu en fenêtre.
 #[derive(Debug, Parser)]
 #[command(version)]
 struct Cli {
@@ -150,6 +156,11 @@ struct Cli {
     #[arg(long, value_name = "COMMANDE")]
     spawn: Vec<String>,
 
+    /// Ne démarre pas XWayland : les applications X11 (dont beaucoup de
+    /// jeux) ne pourront pas s'ouvrir.
+    #[arg(long)]
+    no_xwayland: bool,
+
     /// Session de connexion : indique l'affichage aux services de la session
     /// (activation D-Bus, portails). À ne pas utiliser à côté d'une autre
     /// session graphique du même utilisateur, qui partage ces services.
@@ -189,27 +200,30 @@ fn main() -> anyhow::Result<()> {
         return backend::udev::probe(&config.outputs);
     }
 
-    let mut event_loop: EventLoop<'static, App> = EventLoop::try_new()?;
+    let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
     let handle = event_loop.handle();
     let mut display: Display<State> = Display::new()?;
 
     let socket = ListeningSocketSource::new_auto().context("cannot create the Wayland socket")?;
     let socket_name = socket.socket_name().to_os_string();
     handle
-        .insert_source(socket, |stream, _, app| {
+        .insert_source(socket, |stream, _, state| {
             let client = Arc::new(ClientState::default());
-            if let Err(error) = app.state.display_handle.insert_client(stream, client) {
+            if let Err(error) = state.display_handle.insert_client(stream, client) {
                 warn!(%error, "cannot accept a client");
             }
         })
         .map_err(|error| anyhow::anyhow!("cannot listen on the socket: {error}"))?;
 
+    // The display dispatches to the state, so it cannot live inside it: the
+    // source that wakes up on client requests owns it instead.
+    let display_handle = display.handle();
     let poll_fd = display.backend().poll_fd().try_clone_to_owned()?;
     handle
         .insert_source(
             Generic::new(poll_fd, Interest::READ, Mode::Level),
-            |_, _, app| {
-                if let Err(error) = app.display.dispatch_clients(&mut app.state) {
+            move |_, _, state| {
+                if let Err(error) = display.dispatch_clients(state) {
                     error!(%error, "cannot dispatch client requests");
                 }
                 Ok(PostAction::Continue)
@@ -244,7 +258,7 @@ fn main() -> anyhow::Result<()> {
         (None, true) => None,
     };
     let mut state = State::new(
-        display.handle(),
+        display_handle,
         event_loop.get_signal(),
         handle.clone(),
         socket_name,
@@ -252,6 +266,14 @@ fn main() -> anyhow::Result<()> {
         screens,
         options,
     )?;
+    if !cli.no_xwayland && config.xwayland.unwrap_or(true) {
+        // What the X server says goes next to the compositor's own log.
+        let log = cli.log_file.as_deref().and_then(Path::parent);
+        let log = log.map(|directory| directory.join("xwayland.log"));
+        state.start_xwayland(log.as_deref());
+    } else {
+        info!("XWayland is turned off: X11 applications will not run");
+    }
     if let Backend::Udev(udev) = &mut state.backend {
         udev.init_explicit_sync(&state.display_handle);
         if cli.export_environment {
@@ -259,19 +281,18 @@ fn main() -> anyhow::Result<()> {
         }
         state.center_pointer();
         // The first frame must not wait for the first input event.
-        handle.insert_idle(|app| app.state.redraw_screens());
+        handle.insert_idle(|state| state.redraw_screens());
     }
-    let mut app = App { display, state };
-    info!(socket = ?app.state.socket_name, "listening");
+    info!(socket = ?state.socket_name, "listening");
 
     if let Some(path) = cli.screenshot {
         let timer = Timer::from_duration(Duration::from_millis(cli.screenshot_delay));
         handle
-            .insert_source(timer, move |_, _, app| {
-                if let Backend::Winit(winit) = &mut app.state.backend {
+            .insert_source(timer, move |_, _, state| {
+                if let Backend::Winit(winit) = &mut state.backend {
                     winit.screenshot = Some(path.clone());
                 }
-                app.state.render_window();
+                state.render_window();
                 TimeoutAction::Drop
             })
             .map_err(|error| anyhow::anyhow!("cannot arm the screenshot timer: {error}"))?;
@@ -288,9 +309,9 @@ fn main() -> anyhow::Result<()> {
         handle
             .insert_source(
                 Timer::from_duration(Duration::from_secs(seconds)),
-                |_, _, app| {
+                |_, _, state| {
                     info!("quitting: the --exit-after delay is over");
-                    app.state.loop_signal.stop();
+                    state.loop_signal.stop();
                     TimeoutAction::Drop
                 },
             )
@@ -301,22 +322,22 @@ fn main() -> anyhow::Result<()> {
     for timed in cli.debug_input.unwrap_or_default() {
         elapsed += Duration::from_millis(timed.after_ms);
         handle
-            .insert_source(Timer::from_duration(elapsed), move |_, _, app| {
-                app.state.debug_input(timed.step);
+            .insert_source(Timer::from_duration(elapsed), move |_, _, state| {
+                state.debug_input(timed.step);
                 TimeoutAction::Drop
             })
             .map_err(|error| anyhow::anyhow!("cannot arm a debug input timer: {error}"))?;
     }
 
     for command in &cli.spawn {
-        app.state.spawn(command);
+        state.spawn(command);
     }
 
-    event_loop.run(None, &mut app, |app| {
+    event_loop.run(None, &mut state, |state| {
         // On real screens, frames start as soon as something changed; the
         // nested window draws on its own timer.
-        app.state.redraw_screens();
-        if let Err(error) = app.state.display_handle.flush_clients() {
+        state.redraw_screens();
+        if let Err(error) = state.display_handle.flush_clients() {
             warn!(%error, "cannot flush clients");
         }
     })?;
@@ -327,9 +348,17 @@ fn main() -> anyhow::Result<()> {
 /// Tells the session's services (D-Bus activation, portals) which display
 /// to use, as they are started outside of the compositor.
 fn export_environment(state: &State) {
-    let display = format!("WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy());
+    let mut variables = vec![
+        format!("WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy()),
+        "XDG_CURRENT_DESKTOP=coquille".to_owned(),
+    ];
+    // Where X11 applications started by those services find the X server.
+    if let Some(number) = state.xdisplay {
+        variables.push(format!("DISPLAY={}", xwayland::display_name(number)));
+    }
     let result = std::process::Command::new("dbus-update-activation-environment")
-        .args(["--systemd", &display, "XDG_CURRENT_DESKTOP=coquille"])
+        .arg("--systemd")
+        .args(&variables)
         .status();
     match result {
         Ok(status) if status.success() => {}
@@ -340,7 +369,7 @@ fn export_environment(state: &State) {
 
 /// Opens the host window and the timer that paces its frames.
 fn init_nested(
-    handle: &LoopHandle<'static, App>,
+    handle: &LoopHandle<'static, State>,
     simulated: Simulated,
     fullscreen: bool,
     ignore_input: bool,
@@ -349,23 +378,20 @@ fn init_nested(
     let screens = winit.screens();
 
     handle
-        .insert_source(events, move |event, _, app| {
-            let state = &mut app.state;
-            match event {
-                WinitEvent::Resized { size, .. } => state.resize_window(size),
-                WinitEvent::Input(_) if ignore_input => {}
-                WinitEvent::Input(event) => state.process_input_event(event),
-                WinitEvent::Redraw => state.queue_redraw(),
-                WinitEvent::CloseRequested => state.loop_signal.stop(),
-                WinitEvent::Focus(_) => {}
-            }
+        .insert_source(events, move |event, _, state| match event {
+            WinitEvent::Resized { size, .. } => state.resize_window(size),
+            WinitEvent::Input(_) if ignore_input => {}
+            WinitEvent::Input(event) => state.process_input_event(event),
+            WinitEvent::Redraw => state.queue_redraw(),
+            WinitEvent::CloseRequested => state.loop_signal.stop(),
+            WinitEvent::Focus(_) => {}
         })
         .map_err(|error| anyhow::anyhow!("cannot watch the host window: {error}"))?;
 
     let frame = Duration::from_secs(1000) / REFRESH.unsigned_abs();
     handle
-        .insert_source(Timer::from_duration(frame), move |_, _, app| {
-            app.state.frame_tick();
+        .insert_source(Timer::from_duration(frame), move |_, _, state| {
+            state.frame_tick();
             TimeoutAction::ToDuration(frame)
         })
         .map_err(|error| anyhow::anyhow!("cannot arm the frame timer: {error}"))?;

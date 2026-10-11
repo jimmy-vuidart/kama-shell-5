@@ -105,7 +105,7 @@ impl XdgShellHandler for State {
         let Ok(root) = find_popup_root_surface(&kind) else {
             return;
         };
-        let Ok(mut grab) = self.popups.grab_popup(root, kind, &seat, serial) else {
+        let Ok(mut grab) = self.popups.grab_popup(root.into(), kind, &seat, serial) else {
             return;
         };
 

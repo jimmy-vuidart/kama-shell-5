@@ -17,6 +17,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use smithay::wayland::compositor::RegionAttributes;
 use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
+use smithay::wayland::seat::WaylandFocus;
 use tracing::{debug, info, warn};
 
 use crate::debug::Step;
@@ -845,8 +846,8 @@ impl State {
                         let surface = self
                             .shell
                             .by_id(window)
-                            .and_then(|managed| managed.window.toplevel())
-                            .map(|toplevel| toplevel.wl_surface().clone());
+                            .and_then(|managed| managed.window.wl_surface())
+                            .map(|surface| surface.into_owned());
                         if let Some(surface) = surface {
                             self.follow_client_size(&surface);
                         }
@@ -978,15 +979,7 @@ impl State {
 
     fn click_titlebar_button(&mut self, window: WindowId, button: TitlebarButton) {
         match button {
-            TitlebarButton::Close => {
-                let toplevel = self
-                    .shell
-                    .by_id(window)
-                    .and_then(|managed| managed.window.toplevel());
-                if let Some(toplevel) = toplevel {
-                    toplevel.send_close();
-                }
-            }
+            TitlebarButton::Close => self.close_window(window),
             TitlebarButton::Swap => {
                 if let Err(error) = self.shell.desk.swap_with_center(window) {
                     warn!(%error, "cannot swap with the center");
@@ -1049,6 +1042,19 @@ impl State {
                 bar: Some(button),
                 ..Hit::default()
             };
+        }
+
+        // X11 menus, tooltips and dropdowns sit above every window.
+        for window in self.shell.overrides.iter().rev() {
+            let origin = window.last_configure().loc;
+            let under =
+                window.surface_under(location - origin.to_f64(), (0, 0), WindowSurfaceType::ALL);
+            if let Some((surface, offset)) = under {
+                return Hit {
+                    surface: Some((surface, (offset + origin).to_f64())),
+                    ..Hit::default()
+                };
+            }
         }
 
         for managed in visible() {

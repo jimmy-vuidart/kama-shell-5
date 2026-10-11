@@ -15,8 +15,8 @@ use smithay::input::pointer::{CursorImageAttributes, CursorImageStatus};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{LoopHandle, LoopSignal};
+use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
-use smithay::reexports::wayland_server::{Display, DisplayHandle};
 use smithay::utils::{IsAlive, Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_states};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
@@ -28,6 +28,8 @@ use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
+use smithay::wayland::xwayland_shell::XWaylandShellState;
+use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
 
 use crate::backend::Backend;
@@ -42,13 +44,6 @@ use crate::render::scene::Cursor;
 use crate::shell::{ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
 use crate::theme::Theme;
-
-/// What event sources get: the display must stay outside the state it
-/// dispatches to.
-pub struct App {
-    pub display: Display<State>,
-    pub state: State,
-}
 
 pub struct Options {
     pub theme: Theme,
@@ -72,7 +67,7 @@ pub struct State {
     pub start_time: Instant,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
-    pub loop_handle: LoopHandle<'static, App>,
+    pub loop_handle: LoopHandle<'static, State>,
     pub socket_name: OsString,
 
     pub compositor_state: CompositorState,
@@ -82,6 +77,13 @@ pub struct State {
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
     pub popups: PopupManager,
+    pub xwayland_shell_state: XWaylandShellState,
+    /// The X11 window manager, once XWayland runs. Never taken out again:
+    /// X11 events rely on it.
+    pub xwm: Option<X11Wm>,
+    /// The number of the X server, for the `DISPLAY` of the programs started
+    /// from here.
+    pub xdisplay: Option<u32>,
     // Kept alive for as long as their globals must exist.
     _dmabuf_global: DmabufGlobal,
     _output_manager_state: OutputManagerState,
@@ -144,7 +146,7 @@ impl State {
     pub fn new(
         display_handle: DisplayHandle,
         loop_signal: LoopSignal,
-        loop_handle: LoopHandle<'static, App>,
+        loop_handle: LoopHandle<'static, State>,
         socket_name: OsString,
         mut backend: Backend,
         screens: Vec<(ScreenInfo, Output)>,
@@ -160,6 +162,8 @@ impl State {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
+        // Only XWayland may use it, to pair X11 windows with their surfaces.
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
         // Games: hold the pointer in place, and read how far the mouse went.
         let pointer_constraints_state = PointerConstraintsState::new::<Self>(dh);
         let relative_pointer_state = RelativePointerManagerState::new::<Self>(dh);
@@ -223,6 +227,9 @@ impl State {
             data_device_state,
             dmabuf_state,
             popups: PopupManager::default(),
+            xwayland_shell_state,
+            xwm: None,
+            xdisplay: None,
             _dmabuf_global: dmabuf_global,
             _output_manager_state: output_manager_state,
             _decoration_state: decoration_state,
@@ -332,14 +339,17 @@ impl State {
 
     /// Runs a shell command as a client of this compositor.
     pub fn spawn(&self, command: &str) {
-        let child = Command::new("sh")
+        let mut child = Command::new("sh");
+        child
             .arg("-c")
             .arg(command)
-            .env("WAYLAND_DISPLAY", &self.socket_name)
-            // Without this, toolkits may prefer an X server.
-            .env_remove("DISPLAY")
-            .spawn();
-        match child {
+            .env("WAYLAND_DISPLAY", &self.socket_name);
+        match self.xdisplay {
+            Some(number) => child.env("DISPLAY", crate::xwayland::display_name(number)),
+            // Never the X server of another session.
+            None => child.env_remove("DISPLAY"),
+        };
+        match child.spawn() {
             Ok(child) => info!(command, pid = child.id(), "spawned"),
             Err(error) => warn!(command, %error, "cannot spawn"),
         }

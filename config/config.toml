@@ -20,6 +20,10 @@ right = "DP-1"
 # kitty, alacritty et foot.
 # terminal = "kitty"
 
+# Applications X11 (dont beaucoup de jeux, via Steam et Proton) : elles
+# passent par XWayland, démarré avec le compositeur. `false` s'en passe.
+# xwayland = true
+
 # Mode jeu : ce qui se passe sur un écran occupé par une fenêtre en plein écran.
 [game]
 # Bords collants : durée (en millisecondes) pendant laquelle il faut pousser le

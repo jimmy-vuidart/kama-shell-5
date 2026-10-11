@@ -288,6 +288,24 @@ impl State {
                 managed.window.refresh();
             }
         }
+        // X11 menus draw again only once told that a frame went out.
+        for window in &self.shell.overrides {
+            let rect = window.last_configure();
+            let middle = rect.loc + rect.size.downscale(2).to_point();
+            let on = self
+                .shell
+                .screen_at(coquille_model::Point::new(middle.x, middle.y))
+                .or(self.shell.screens.first())
+                .map(|info| info.id);
+            let output = on
+                .filter(|id| screen.is_none_or(|wanted| wanted == *id))
+                .and_then(|id| self.output(id));
+            if let (Some(output), Some(surface)) = (output, window.wl_surface()) {
+                send_frames_surface_tree(&surface, output, time, throttle, |_, _| {
+                    Some(output.clone())
+                });
+            }
+        }
         if let CursorImageStatus::Surface(surface) = &self.cursor_status {
             let pointer_screen = self.pointer_screen().map(|screen| screen.id);
             let output = pointer_screen

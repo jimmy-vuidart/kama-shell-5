@@ -3,6 +3,8 @@
 mod compositor;
 mod xdg_shell;
 
+use std::os::fd::OwnedFd;
+
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::ImportDma;
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
@@ -19,18 +21,21 @@ use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::{
     ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
 };
-use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 
+use tracing::debug;
+
 use crate::backend::Backend;
+use crate::focus::KeyFocus;
 use crate::state::State;
 
 impl SeatHandler for State {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = KeyFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -42,9 +47,9 @@ impl SeatHandler for State {
         self.set_cursor(image);
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyFocus>) {
         let dh = &self.display_handle;
-        let client = focused.and_then(|surface| dh.get_client(surface.id()).ok());
+        let client = focused.and_then(|focus| dh.get_client(focus.surface().id()).ok());
         set_data_device_focus(dh, seat, client);
     }
 }
@@ -81,8 +86,40 @@ impl PointerConstraintsHandler for State {
     }
 }
 
+/// The clipboard is shared with X11 applications.
 impl SelectionHandler for State {
     type SelectionUserData = ();
+
+    /// A Wayland client copied something: X11 clients may paste it.
+    fn new_selection(
+        &mut self,
+        target: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        if let Some(xwm) = self.xwm.as_mut() {
+            let mime_types = source.map(|source| source.mime_types());
+            if let Err(error) = xwm.new_selection(target, mime_types) {
+                debug!(%error, "cannot tell X11 about the clipboard");
+            }
+        }
+    }
+
+    /// A Wayland client pastes what an X11 client copied.
+    fn send_selection(
+        &mut self,
+        target: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        if let Some(xwm) = self.xwm.as_mut() {
+            if let Err(error) = xwm.send_selection(target, mime_type, fd) {
+                debug!(%error, "cannot fetch the clipboard from X11");
+            }
+        }
+    }
 }
 
 impl DataDeviceHandler for State {

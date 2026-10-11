@@ -13,6 +13,7 @@ use smithay::backend::renderer::{
 use smithay::desktop::PopupManager;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Rectangle};
+use smithay::wayland::seat::WaylandFocus;
 use tracing::warn;
 
 use super::clipped::ClippedSurface;
@@ -172,10 +173,11 @@ pub fn build(
         if !geometry.visible || !overlaps(reach, view) {
             continue;
         }
-        let Some(toplevel) = managed.window.toplevel() else {
+        // An X11 window has no surface until XWayland pairs them.
+        let Some(surface) = managed.window.wl_surface() else {
             continue;
         };
-        let surface = toplevel.wl_surface();
+        let surface = &*surface;
         let client = managed.client().translated(shift);
         let origin: Point<i32, Logical> = (client.x, client.y).into();
 
@@ -336,6 +338,22 @@ pub fn build(
         if overlaps(shape.area, Rect::new(0, 0, view.w, view.h)) {
             elements.push(SceneElement::Shape(shape_element(&shaders.rounded, shape)));
         }
+    }
+    // X11 menus, tooltips and dropdowns: where they ask to be, above every
+    // window, the one shown last on top.
+    for window in shell.overrides.iter().rev() {
+        let Some(surface) = window.wl_surface() else {
+            continue;
+        };
+        let location = window.last_configure().loc + to_view;
+        elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+            renderer,
+            &surface,
+            physical(location),
+            SCALE,
+            1.0,
+            Kind::Unspecified,
+        ));
     }
     elements.extend(popups);
     elements.extend(windows);

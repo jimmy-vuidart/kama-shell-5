@@ -10,6 +10,7 @@ use smithay::wayland::compositor::{
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::drm_syncobj::DrmSyncobjCachedState;
 use smithay::wayland::shm::{ShmHandler, ShmState};
+use smithay::xwayland::XWaylandClientData;
 use tracing::warn;
 
 use crate::state::{ClientState, State};
@@ -22,6 +23,10 @@ impl CompositorHandler for State {
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
         // Every client is inserted with a `ClientState`, see `main`.
         static FALLBACK: std::sync::OnceLock<CompositorClientState> = std::sync::OnceLock::new();
+        // XWayland is a client too, inserted by Smithay with its own data.
+        if let Some(state) = client.get_data::<XWaylandClientData>() {
+            return &state.compositor_state;
+        }
         match client.get_data::<ClientState>() {
             Some(state) => &state.compositor_state,
             None => FALLBACK.get_or_init(CompositorClientState::default),
@@ -52,10 +57,10 @@ impl CompositorHandler for State {
             let Ok((blocker, source)) = acquire_point.generate_blocker() else {
                 return;
             };
-            let watched = state.loop_handle.insert_source(source, move |_, _, app| {
-                let dh = app.state.display_handle.clone();
-                let client_state = app.state.client_compositor_state(&client);
-                client_state.blocker_cleared(&mut app.state, &dh);
+            let watched = state.loop_handle.insert_source(source, move |_, _, state| {
+                let dh = state.display_handle.clone();
+                let client_state = state.client_compositor_state(&client);
+                client_state.blocker_cleared(state, &dh);
                 Ok(())
             });
             if watched.is_ok() {

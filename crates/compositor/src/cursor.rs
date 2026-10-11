@@ -62,6 +62,13 @@ impl CursorImages {
         &self.sprites[&icon]
     }
 
+    /// The default arrow as the theme has it, for those who draw it
+    /// themselves (the X server).
+    pub fn default_image(&self) -> Option<Image> {
+        self.read(CursorIcon::Default.name())
+            .or_else(|| self.read("left_ptr"))
+    }
+
     /// Reads the image of a shape at the size closest to the wanted one.
     /// Animated cursors show their first frame.
     fn read(&self, name: &str) -> Option<Image> {
