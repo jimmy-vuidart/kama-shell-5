@@ -1,15 +1,19 @@
+use coquille_model::WindowGeometry;
 use smithay::desktop::{
     PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window,
     find_popup_root_surface, get_popup_toplevel_coords,
 };
 use smithay::input::Seat;
 use smithay::input::pointer::Focus;
+use smithay::output::Output;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::utils::{Logical, Point, Serial};
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
+use crate::shell::Unmapped;
 use crate::state::State;
 
 impl XdgShellHandler for State {
@@ -19,9 +23,38 @@ impl XdgShellHandler for State {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Placed on its first commit, once its `app_id` is known.
-        self.shell
-            .unmapped
-            .push(Window::new_wayland_window(surface));
+        self.shell.unmapped.push(Unmapped {
+            window: Window::new_wayland_window(surface),
+            fullscreen: None,
+        });
+    }
+
+    /// Fullscreen anchors the screen (game mode): the one the client names
+    /// if it is one of ours, else the one its window is on.
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        let wanted = output
+            .as_ref()
+            .and_then(Output::from_resource)
+            .and_then(|output| self.outputs.iter().find(|screen| screen.output == output))
+            .map(|screen| screen.id);
+        let wl_surface = surface.wl_surface();
+        if let Some(before) = self.shell.by_surface(wl_surface).map(|m| m.geometry) {
+            self.enter_fullscreen(before.id, wanted);
+            self.answer(&surface, before);
+        } else if let Some(unmapped) = self.shell.unmapped_mut(wl_surface) {
+            // Applied when the window is placed, on its first commit.
+            unmapped.fullscreen = Some(wanted);
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        let wl_surface = surface.wl_surface();
+        if let Some(before) = self.shell.by_surface(wl_surface).map(|m| m.geometry) {
+            self.leave_fullscreen(before.id);
+            self.answer(&surface, before);
+        } else if let Some(unmapped) = self.shell.unmapped_mut(wl_surface) {
+            unmapped.fullscreen = None;
+        }
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
@@ -98,6 +131,15 @@ impl XdgShellHandler for State {
 }
 
 impl State {
+    /// The protocol wants a configure in answer to some requests, even when
+    /// nothing changed; a change has sent one already.
+    fn answer(&self, toplevel: &ToplevelSurface, before: WindowGeometry) {
+        let after = self.shell.by_id(before.id).map(|m| m.geometry);
+        if after == Some(before) && toplevel.is_initial_configure_sent() {
+            toplevel.send_configure();
+        }
+    }
+
     /// Keeps a popup inside the screen of its window.
     fn unconstrain_popup(&self, popup: &PopupSurface) {
         let kind = PopupKind::Xdg(popup.clone());

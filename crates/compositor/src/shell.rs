@@ -4,8 +4,8 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, AppMemory, Desk, DropTarget, LayoutKind, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole,
-    Placement, Point as ModelPoint, Rect, SlotId, WindowGeometry, WindowId,
+    AppKey, AppMemory, Desk, DropTarget, LayoutKind, Metrics, OpenRequest, OutputId, OutputInfo,
+    OutputRole, Placement, Point as ModelPoint, Rect, SlotId, WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -16,7 +16,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{SERIAL_COUNTER, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::decoration::layout::{Buttons, TitlebarButton};
 use crate::decoration::naming::{badge_color, display_name};
@@ -83,13 +83,19 @@ impl ManagedWindow {
     }
 }
 
+/// A toplevel that has not made its first commit yet.
+pub struct Unmapped {
+    pub window: Window,
+    /// It already asked to open fullscreen: on this screen, if it named one.
+    pub fullscreen: Option<Option<OutputId>>,
+}
+
 pub struct Shell {
     pub desk: Desk,
     pub screens: Vec<ScreenInfo>,
     /// Bottom to top, as the model orders them.
     pub windows: Vec<ManagedWindow>,
-    /// Toplevels that have not made their first commit yet.
-    pub unmapped: Vec<Window>,
+    pub unmapped: Vec<Unmapped>,
     next_id: u64,
 }
 
@@ -142,6 +148,13 @@ impl Shell {
             .find(|managed| is_toplevel_of(&managed.window, surface))
     }
 
+    /// The toplevel not placed yet whose surface is `surface`.
+    pub fn unmapped_mut(&mut self, surface: &WlSurface) -> Option<&mut Unmapped> {
+        self.unmapped
+            .iter_mut()
+            .find(|unmapped| is_toplevel_of(&unmapped.window, surface))
+    }
+
     pub fn by_id(&self, id: WindowId) -> Option<&ManagedWindow> {
         self.windows.iter().find(|managed| managed.id == id)
     }
@@ -164,12 +177,11 @@ impl Shell {
     /// What a window needs besides the model's geometry: where its screen is,
     /// and whether it can be swapped with the center.
     fn placement_of(&self, geometry: &WindowGeometry) -> (ModelPoint, bool) {
-        let has_center = self
-            .screens
-            .iter()
-            .any(|screen| screen.role == OutputRole::Center);
         match self.screen(geometry.output) {
-            Some(screen) => (screen.rect.origin(), screen.role.is_side() && has_center),
+            Some(screen) => (
+                screen.rect.origin(),
+                self.desk.can_swap_with_center(geometry.id),
+            ),
             None => (ModelPoint::default(), false),
         }
     }
@@ -328,11 +340,11 @@ impl State {
             .shell
             .unmapped
             .iter()
-            .position(|window| is_toplevel_of(window, surface))
+            .position(|unmapped| is_toplevel_of(&unmapped.window, surface))
         else {
             return;
         };
-        let window = self.shell.unmapped.swap_remove(index);
+        let Unmapped { window, fullscreen } = self.shell.unmapped.swap_remove(index);
         let Some(toplevel) = window.toplevel() else {
             return;
         };
@@ -389,9 +401,43 @@ impl State {
                 Err(error) => warn!(%error, "cannot add the window as a tab"),
             }
         }
+        // It opens fullscreen: its screen is anchored from the start.
+        if let Some(output) = fullscreen {
+            match self.shell.desk.set_fullscreen(id, output) {
+                Ok(()) => info!(?id, "a window opened fullscreen: screen anchored"),
+                Err(error) => warn!(%error, "cannot open the window fullscreen"),
+            }
+            self.shell.sync();
+        }
         // Rule 1: a window that opens floating comes with the offer to tidy it.
-        let floating = self.shell.by_id(id).is_some_and(|m| m.geometry.floating);
-        self.placement_offer = floating.then_some(id);
+        let offered = self
+            .shell
+            .by_id(id)
+            .is_some_and(|m| m.geometry.floating && !m.geometry.anchored);
+        self.placement_offer = offered.then_some(id);
+        self.apply_arrangement();
+    }
+
+    /// A window asks to cover a screen, its own when it names none: that
+    /// screen is anchored (game mode).
+    pub fn enter_fullscreen(&mut self, id: WindowId, output: Option<OutputId>) {
+        match self.shell.desk.set_fullscreen(id, output) {
+            Ok(()) => info!(?id, ?output, "fullscreen: screen anchored"),
+            Err(error) => warn!(%error, "cannot make the window fullscreen"),
+        }
+        self.apply_arrangement();
+    }
+
+    /// A window leaves fullscreen, by itself or because the user asked: its
+    /// screen is released.
+    pub fn leave_fullscreen(&mut self, id: WindowId) {
+        let was_anchored = self.shell.by_id(id).is_some_and(|m| m.geometry.anchored);
+        if let Err(error) = self.shell.desk.set_anchored(id, false) {
+            warn!(%error, "cannot take the window out of fullscreen");
+        }
+        if was_anchored {
+            info!(?id, "fullscreen left: screen released");
+        }
         self.apply_arrangement();
     }
 
@@ -399,7 +445,7 @@ impl State {
     pub fn unmap_window(&mut self, surface: &WlSurface) {
         self.shell
             .unmapped
-            .retain(|window| !is_toplevel_of(window, surface));
+            .retain(|unmapped| !is_toplevel_of(&unmapped.window, surface));
         let Some(id) = self.shell.by_surface(surface).map(|managed| managed.id) else {
             return;
         };

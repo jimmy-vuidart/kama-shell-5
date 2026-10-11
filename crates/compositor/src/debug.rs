@@ -10,12 +10,14 @@
 //! ```
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
-const KEYS: [(&str, u32); 11] = [
+const KEYS: [(&str, u32); 13] = [
     ("alt", 64),
     ("ctrl", 37),
     ("shift", 50),
     ("enter", 36),
     ("backspace", 22),
+    ("escape", 9),
+    ("f11", 95),
     ("1", 10),
     ("2", 11),
     ("e", 26),
@@ -184,6 +186,12 @@ mod tests {
         );
         assert_eq!(steps("0 key enter")[0], (0, Step::Press(36)));
         assert_eq!(steps("0 key alt+r")[1], (0, Step::Press(27)));
+    }
+
+    #[test]
+    fn escape_and_f11_can_be_named() {
+        assert_eq!(steps("0 key alt+escape")[1], (0, Step::Press(9)));
+        assert_eq!(steps("0 key ctrl+shift+f11")[2], (0, Step::Press(95)));
     }
 
     #[test]

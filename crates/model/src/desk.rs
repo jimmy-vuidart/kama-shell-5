@@ -189,11 +189,18 @@ impl Desk {
         })
     }
 
-    /// The window with the focus: the one focused last that is not
-    /// minimized.
+    /// The window with the focus: the one focused last that can be seen,
+    /// that is neither minimized nor under a fullscreen window.
     pub fn focused(&self) -> Option<WindowId> {
-        let shown = |id: &&WindowId| !self.minimized.contains(id);
+        let shown = |id: &&WindowId| !self.minimized.contains(id) && !self.under_a_game(**id);
         self.focus_order.iter().rev().find(shown).copied()
+    }
+
+    /// `id` is on a screen that another window anchors.
+    fn under_a_game(&self, id: WindowId) -> bool {
+        self.screens
+            .iter()
+            .any(|screen| screen.anchored().is_some_and(|game| game != id) && screen.contains(id))
     }
 
     /// A new window appears (rules 1, 4 and 7) and takes the focus.
@@ -522,27 +529,104 @@ impl Desk {
     }
 
     /// The gap between the two slots of a screen, relative to the screen.
+    /// An anchored screen has none to grab.
     pub fn separator(&self, output: OutputId) -> Option<Rect> {
-        self.screen(output)?.separator(&self.metrics)
+        let screen = self.screen(output)?;
+        if screen.anchored().is_some() {
+            return None;
+        }
+        screen.separator(&self.metrics)
     }
 
     /// The ratio that puts the separation of a screen under `point`, given
     /// relative to the screen.
     pub fn ratio_at(&self, output: OutputId, point: Point) -> Option<Ratio> {
-        self.screen(output)?.ratio_at(&self.metrics, point)
+        let screen = self.screen(output)?;
+        if screen.anchored().is_some() {
+            return None;
+        }
+        screen.ratio_at(&self.metrics, point)
     }
 
-    /// A window entered or left fullscreen. While anchored, it covers its
-    /// whole output and no shell gesture applies to that screen.
+    /// A window entered or left fullscreen on the screen it is on. While
+    /// anchored, it covers its whole output and no shell gesture applies to
+    /// that screen.
     pub fn set_anchored(&mut self, id: WindowId, anchored: bool) -> Result<(), ModelError> {
-        let (screen, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         if anchored {
-            self.screens[screen].set_anchored(Some(id));
-            self.mark_focused(id);
-        } else if self.screens[screen].anchored() == Some(id) {
+            return self.set_fullscreen(id, None);
+        }
+        let (screen, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        if self.screens[screen].anchored() == Some(id) {
             self.screens[screen].set_anchored(None);
         }
         Ok(())
+    }
+
+    /// A window goes fullscreen on `output`, or on its own screen when it
+    /// names none: that screen is anchored, and the window takes the focus.
+    ///
+    /// A window sent to another screen floats there once it leaves
+    /// fullscreen. Its application asked for the move, not the user: habits
+    /// are left alone. A window that already anchored the target screen
+    /// gives it up.
+    pub fn set_fullscreen(
+        &mut self,
+        id: WindowId,
+        output: Option<OutputId>,
+    ) -> Result<(), ModelError> {
+        let (from, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        let to = match output {
+            Some(output) => self.screen_index(output)?,
+            None => from,
+        };
+        if to != from {
+            self.screens[from].remove(id);
+            let size = match spot {
+                Spot::Floating(rect) => Some(rect.size()),
+                Spot::Slot(_) => None,
+            };
+            self.open_floating(id, to, size);
+            self.settle();
+        }
+        self.screens[to].set_anchored(Some(id));
+        self.mark_focused(id);
+        Ok(())
+    }
+
+    /// The fullscreen window the user means when asking to put "the game"
+    /// back in a window: the focused one, else the one of the screen the
+    /// pointer is on, else the first one found, center first.
+    pub fn game_to_release(&self, cursor: OutputId) -> Option<WindowId> {
+        let anchors = |screen: &Screen| screen.anchored();
+        let focused = self.focused().filter(|id| {
+            self.screens
+                .iter()
+                .any(|screen| anchors(screen) == Some(*id))
+        });
+        let under_cursor = || self.screen(cursor).and_then(anchors);
+        let any = || {
+            let center = self
+                .screens
+                .iter()
+                .filter(|screen| screen.role() == OutputRole::Center);
+            center.chain(&self.screens).find_map(anchors)
+        };
+        focused.or_else(under_cursor).or_else(any)
+    }
+
+    /// The ⇄ button applies to `id`: it is on a side screen, there is a
+    /// center, and no game holds either of them (rule 5).
+    pub fn can_swap_with_center(&self, id: WindowId) -> bool {
+        let Some((side, _)) = self.locate(id) else {
+            return false;
+        };
+        let free = |screen: &Screen| screen.anchored().is_none();
+        let side = &self.screens[side];
+        let mut centers = self
+            .screens
+            .iter()
+            .filter(|screen| screen.role() == OutputRole::Center);
+        side.role().is_side() && free(side) && centers.next().is_some_and(free)
     }
 
     /// Where `dragged` can be released (rule 2). Anchored screens offer
@@ -854,14 +938,12 @@ impl Desk {
 
         let arrangement = self.arrangement();
         let focused: Vec<_> = arrangement.iter().filter(|g| g.focused).collect();
+        let hidden = |id: &WindowId| self.minimized.contains(id) || self.under_a_game(*id);
         match focused.as_slice() {
-            [] if self.windows.keys().all(|id| self.minimized.contains(id)) => {}
+            [] if self.windows.keys().all(hidden) => {}
             [one] => {
-                let under_game = self
-                    .screen(one.output)
-                    .is_some_and(|screen| screen.anchored().is_some());
-                if !one.visible && !under_game {
-                    return Err(format!("focused {:?} is a hidden tab", one.id));
+                if !one.visible {
+                    return Err(format!("focused {:?} cannot be seen", one.id));
                 }
             }
             _ => return Err(format!("{} windows are focused", focused.len())),

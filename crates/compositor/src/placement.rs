@@ -92,7 +92,8 @@ impl State {
         let offered = self.placement_offer.and_then(|window| {
             let managed = self.shell.by_id(window)?;
             let geometry = managed.geometry;
-            let still_open = geometry.floating && geometry.visible && geometry.focused;
+            let still_open =
+                geometry.floating && !geometry.anchored && geometry.visible && geometry.focused;
             let handled = matches!(
                 self.gesture,
                 Some(Gesture::Placing { .. } | Gesture::Moving { .. } | Gesture::Resizing { .. })

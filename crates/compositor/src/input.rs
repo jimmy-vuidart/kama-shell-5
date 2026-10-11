@@ -224,6 +224,13 @@ impl State {
                 }
                 return;
             }
+            Action::LeaveFullscreen => {
+                let game = screen.and_then(|screen| desk.game_to_release(screen.id));
+                if let Some(game) = game {
+                    self.leave_fullscreen(game);
+                }
+                return;
+            }
             Action::SwitchVt(vt) => {
                 self.backend.switch_vt(vt);
                 return;

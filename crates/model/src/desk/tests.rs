@@ -660,6 +660,203 @@ fn closing_the_anchored_window_releases_the_screen() {
     assert_eq!(desk.screen(CENTER).unwrap().anchored(), None);
 }
 
+#[test]
+fn going_fullscreen_on_another_screen_moves_the_window_there() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "video", LEFT, 0);
+
+    desk.set_fullscreen(WindowId(1), Some(CENTER)).unwrap();
+
+    let video = geo(&desk, 1);
+    assert_eq!(video.output, CENTER);
+    assert!(video.anchored);
+    assert_eq!(video.frame, Rect::from_size(CENTER_SIZE));
+    assert_eq!(desk.screen(CENTER).unwrap().anchored(), Some(WindowId(1)));
+    assert_eq!(desk.screen(LEFT).unwrap().anchored(), None);
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn going_fullscreen_without_naming_a_screen_anchors_the_window_where_it_is() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "video", LEFT, 1);
+
+    desk.set_fullscreen(WindowId(1), None).unwrap();
+
+    assert_eq!(geo(&desk, 1).frame, Rect::from_size(SIDE_SIZE));
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 1)));
+}
+
+#[test]
+fn going_fullscreen_on_its_own_screen_keeps_the_place_of_the_window() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "video", LEFT, 1);
+
+    desk.set_fullscreen(WindowId(1), Some(LEFT)).unwrap();
+    desk.set_anchored(WindowId(1), false).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 1)));
+}
+
+#[test]
+fn a_window_sent_fullscreen_to_another_screen_floats_there_afterwards() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "video", LEFT, 0);
+    let habits = desk.memory().clone();
+
+    desk.set_fullscreen(WindowId(1), Some(RIGHT)).unwrap();
+    desk.set_anchored(WindowId(1), false).unwrap();
+
+    assert_eq!(floating_output(place(&desk, 1)), RIGHT);
+    assert!(geo(&desk, 1).visible);
+    // The application asked for it, not the user: habits are left alone.
+    assert_eq!(desk.memory(), &habits);
+}
+
+#[test]
+fn going_fullscreen_on_an_unknown_screen_is_refused() {
+    let mut desk = desk();
+    open(&mut desk, 1, "video", LEFT);
+
+    assert_eq!(
+        desk.set_fullscreen(WindowId(1), Some(OutputId(99))),
+        Err(ModelError::UnknownOutput(OutputId(99)))
+    );
+    assert!(!geo(&desk, 1).anchored);
+}
+
+#[test]
+fn a_second_fullscreen_window_takes_the_screen_from_the_first() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+    open(&mut desk, 2, "video", LEFT);
+
+    desk.set_fullscreen(WindowId(2), Some(CENTER)).unwrap();
+
+    assert!(geo(&desk, 2).anchored);
+    assert!(!geo(&desk, 1).anchored);
+    assert!(!geo(&desk, 1).visible);
+}
+
+#[test]
+fn the_anchored_window_leaving_for_another_screen_releases_the_first() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+    open(&mut desk, 2, "notes", CENTER);
+
+    desk.set_fullscreen(WindowId(1), Some(LEFT)).unwrap();
+
+    assert_eq!(desk.screen(CENTER).unwrap().anchored(), None);
+    assert_eq!(desk.screen(LEFT).unwrap().anchored(), Some(WindowId(1)));
+}
+
+#[test]
+fn the_focus_never_goes_to_a_window_hidden_under_a_game() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "notes", CENTER, 0);
+    desk.minimize(WindowId(1)).unwrap();
+    anchor_game(&mut desk, 2);
+
+    // Restoring a window of the anchored screen cannot show it.
+    desk.restore_last();
+
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    assert!(geo(&desk, 2).focused);
+    assert!(!geo(&desk, 1).focused);
+}
+
+#[test]
+fn a_window_hidden_under_a_game_gets_the_focus_back_when_the_game_leaves() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "notes", CENTER, 0);
+    anchor_game(&mut desk, 2);
+    desk.focus(WindowId(1)).unwrap();
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+
+    desk.close_window(WindowId(2)).unwrap();
+
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn the_swap_button_is_offered_on_side_screens_only_without_a_game() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open_in(&mut desk, 2, "browser", CENTER, 0);
+    assert!(desk.can_swap_with_center(WindowId(1)));
+    assert!(!desk.can_swap_with_center(WindowId(2)));
+    assert!(!desk.can_swap_with_center(WindowId(99)));
+
+    desk.set_anchored(WindowId(2), true).unwrap();
+
+    assert!(!desk.can_swap_with_center(WindowId(1)));
+}
+
+#[test]
+fn a_window_under_a_side_game_cannot_be_swapped() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open_in(&mut desk, 2, "video", LEFT, 1);
+
+    desk.set_anchored(WindowId(2), true).unwrap();
+
+    assert!(!desk.can_swap_with_center(WindowId(1)));
+    assert!(!desk.can_swap_with_center(WindowId(2)));
+}
+
+#[test]
+fn an_anchored_screen_has_no_separation_to_grab() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "video", RIGHT, 0);
+    assert!(desk.separator(RIGHT).is_some());
+
+    desk.set_anchored(WindowId(1), true).unwrap();
+
+    assert_eq!(desk.separator(RIGHT), None);
+    assert_eq!(desk.ratio_at(RIGHT, Point::new(900, 500)), None);
+}
+
+// Mod+Escape: which game goes back into a window.
+
+#[test]
+fn the_focused_game_is_the_one_put_back_in_a_window() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+    open_in(&mut desk, 2, "video", LEFT, 0);
+    desk.set_anchored(WindowId(2), true).unwrap();
+
+    assert_eq!(desk.game_to_release(CENTER), Some(WindowId(2)));
+}
+
+#[test]
+fn without_a_focused_game_the_one_under_the_pointer_is_put_back_in_a_window() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+    open_in(&mut desk, 2, "video", LEFT, 0);
+    desk.set_anchored(WindowId(2), true).unwrap();
+    open_in(&mut desk, 3, "discord", RIGHT, 0);
+
+    assert_eq!(desk.game_to_release(CENTER), Some(WindowId(1)));
+    assert_eq!(desk.game_to_release(LEFT), Some(WindowId(2)));
+}
+
+#[test]
+fn from_a_side_screen_the_only_game_is_put_back_in_a_window() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+    open_in(&mut desk, 2, "discord", RIGHT, 0);
+
+    assert_eq!(desk.game_to_release(RIGHT), Some(WindowId(1)));
+}
+
+#[test]
+fn without_any_game_nothing_is_put_back_in_a_window() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", RIGHT, 0);
+
+    assert_eq!(desk.game_to_release(RIGHT), None);
+}
+
 // Layout changes.
 
 #[test]
@@ -1349,7 +1546,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
             let index = rng.next(3) as usize;
 
             // Refusals are part of the contract; only consistency matters here.
-            let _outcome: Result<(), ModelError> = match rng.next(15) {
+            let _outcome: Result<(), ModelError> = match rng.next(17) {
                 0 | 1 => {
                     next_id += 1;
                     let app = AppKey::new(APPS[rng.next(4) as usize]);
@@ -1379,6 +1576,13 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                 12 => desk.minimize(window),
                 13 => {
                     desk.restore_last();
+                    Ok(())
+                }
+                14 => desk.set_fullscreen(window, (index < 2).then_some(output)),
+                15 => {
+                    if let Some(game) = desk.game_to_release(output) {
+                        assert!(desk.set_anchored(game, false).is_ok());
+                    }
                     Ok(())
                 }
                 _ => desk.cycle_tab(slot(output, index), rng.next(2) == 0),

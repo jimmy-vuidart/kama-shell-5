@@ -32,6 +32,8 @@ pub enum Action {
     SpawnTerminal,
     /// Brings back the window minimized last.
     RestoreWindow,
+    /// Puts the fullscreen window (the game) back in a window.
+    LeaveFullscreen,
     /// Switches to another virtual terminal: the way out if all else fails.
     SwitchVt(i32),
 }
@@ -90,6 +92,7 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
         _ if press.shift && has(Keysym::e) => Some(Action::Quit),
         _ if has(Keysym::Return) => Some(Action::SpawnTerminal),
         _ if has(Keysym::r) => Some(Action::RestoreWindow),
+        _ if has(Keysym::Escape) => Some(Action::LeaveFullscreen),
         _ if has(Keysym::Next) => Some(Action::CycleTab { forward: true }),
         _ if has(Keysym::Prior) => Some(Action::CycleTab { forward: false }),
         _ => None,
@@ -128,6 +131,15 @@ mod tests {
             Some(Action::RestoreWindow)
         );
         assert_eq!(press(false, false, 27, &[Keysym::r]), None);
+    }
+
+    #[test]
+    fn mod_escape_puts_the_game_back_in_a_window() {
+        assert_eq!(
+            press(true, false, 9, &[Keysym::Escape]),
+            Some(Action::LeaveFullscreen)
+        );
+        assert_eq!(press(false, false, 9, &[Keysym::Escape]), None);
     }
 
     #[test]
