@@ -67,19 +67,27 @@ impl CompositorHandler for State {
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
 
+        let mut covers_anew = false;
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
-            if let Some(managed) = self.shell.by_surface(&root) {
+            if let Some(managed) = self.shell.by_surface_mut(&root) {
                 managed.window.on_commit();
+                let covered = managed.window.bbox().size;
+                covers_anew = std::mem::replace(&mut managed.covered, covered) != covered;
             }
         }
 
         // First commit of a toplevel: the model places it, it gets configured.
         self.map_window(surface);
         self.follow_client_size(surface);
+        // What the window covers changed (its first buffer, most of the
+        // time): so may have what is under the pointer.
+        if covers_anew {
+            self.refresh_pointer_focus();
+        }
 
         self.popups.commit(surface);
         if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface) {

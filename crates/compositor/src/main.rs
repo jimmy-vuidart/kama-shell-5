@@ -5,6 +5,7 @@ mod config;
 mod cursor;
 mod debug;
 mod decoration;
+mod game;
 mod handlers;
 mod input;
 mod keyboard_layout;

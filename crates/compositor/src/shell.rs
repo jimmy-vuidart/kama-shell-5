@@ -13,7 +13,7 @@ use smithay::desktop::{Window, space::SpaceElement};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as ToplevelState;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{SERIAL_COUNTER, Transform};
+use smithay::utils::{Logical, SERIAL_COUNTER, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 use tracing::{debug, info, warn};
@@ -57,6 +57,8 @@ pub struct ManagedWindow {
     pub oversized: bool,
     /// Floating: the user resized it, so the compositor imposes the size.
     pub user_sized: bool,
+    /// How much room its surfaces took at their last commit.
+    pub covered: Size<i32, Logical>,
     pub chrome: Chrome,
 }
 
@@ -392,6 +394,7 @@ impl State {
             sized: false,
             oversized: false,
             user_sized: false,
+            covered: Size::default(),
             chrome: Chrome::default(),
         });
         // An armed "add a tab" button takes the next window, whatever it is.
@@ -416,6 +419,7 @@ impl State {
             .is_some_and(|m| m.geometry.floating && !m.geometry.anchored);
         self.placement_offer = offered.then_some(id);
         self.apply_arrangement();
+        self.refresh_pointer_focus();
     }
 
     /// A window asks to cover a screen, its own when it names none: that
@@ -426,6 +430,7 @@ impl State {
             Err(error) => warn!(%error, "cannot make the window fullscreen"),
         }
         self.apply_arrangement();
+        self.refresh_pointer_focus();
     }
 
     /// A window leaves fullscreen, by itself or because the user asked: its
@@ -439,6 +444,7 @@ impl State {
             info!(?id, "fullscreen left: screen released");
         }
         self.apply_arrangement();
+        self.refresh_pointer_focus();
     }
 
     /// A toplevel is gone, mapped or not.
@@ -455,6 +461,7 @@ impl State {
         }
         debug!(?id, "window unmapped");
         self.apply_arrangement();
+        self.refresh_pointer_focus();
     }
 
     /// The client changed its title or `app_id`.

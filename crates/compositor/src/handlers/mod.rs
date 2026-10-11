@@ -6,7 +6,7 @@ mod xdg_shell;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::ImportDma;
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
-use smithay::input::pointer::{CursorImageStatus, Focus};
+use smithay::input::pointer::{CursorImageStatus, Focus, PointerHandle};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
@@ -16,7 +16,9 @@ use smithay::utils::Serial;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
 use smithay::wayland::drm_syncobj::{DrmSyncobjHandler, DrmSyncobjState};
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
+use smithay::wayland::pointer_constraints::{
+    ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
+};
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
@@ -52,9 +54,32 @@ impl TabletSeatHandler for State {
     type ToolFocus = WlSurface;
 }
 
-// Required for surfaces to take pointer focus; the protocol itself comes
-// with game mode (phase 3).
-impl PointerConstraintsHandler for State {}
+/// Games lock the pointer in place, or confine it to their window.
+impl PointerConstraintsHandler for State {
+    fn new_constraint(&mut self, _surface: &WlSurface, _pointer: &PointerHandle<Self>) {
+        self.refresh_constraint();
+    }
+
+    fn remove_constraint(
+        &mut self,
+        surface: &WlSurface,
+        pointer: &PointerHandle<Self>,
+        removed: ConstraintRemove,
+    ) {
+        // Only when the client lets go by itself: on a pointer leave, the
+        // pointer is in the middle of a move and must be left alone.
+        let ConstraintRemove::Destroyed(PointerConstraint::Locked(locked)) = removed else {
+            return;
+        };
+        // The pointer shows again where the client drew its own cursor.
+        if let Some(hint) = locked.cursor_position_hint() {
+            if let Some(origin) = self.surface_origin_under_pointer(surface) {
+                pointer.set_location(origin + hint);
+                self.queue_redraw();
+            }
+        }
+    }
+}
 
 impl SelectionHandler for State {
     type SelectionUserData = ();

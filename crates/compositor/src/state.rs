@@ -22,6 +22,8 @@ use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState};
 use smithay::wayland::output::OutputManagerState;
+use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
@@ -32,6 +34,7 @@ use crate::backend::Backend;
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
+use crate::game::ModTap;
 use crate::input::Gesture;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::placement::Bar;
@@ -82,6 +85,8 @@ pub struct State {
     _output_manager_state: OutputManagerState,
     _decoration_state: XdgDecorationState,
     _cursor_shape_state: CursorShapeManagerState,
+    _pointer_constraints_state: PointerConstraintsState,
+    _relative_pointer_state: RelativePointerManagerState,
 
     pub seat: Seat<State>,
     pub cursor_status: CursorImageStatus,
@@ -89,6 +94,14 @@ pub struct State {
     /// Keys whose press triggered a shortcut: their release is swallowed too.
     pub suppressed_keys: Vec<u32>,
     pub mod_key: ModKey,
+    /// Tells the shell modifier tapped alone from its use in a shortcut.
+    pub mod_tap: ModTap,
+    /// The window the user freed the pointer from with a tap of the shell
+    /// modifier: it may not hold the pointer again before the next click.
+    pub pointer_freed: Option<WindowId>,
+    /// Nested: where the host said its pointer was last, to tell clients
+    /// how far it went.
+    pub last_absolute: Option<Point<f64, Logical>>,
     pub terminal: String,
 
     pub outputs: Vec<ScreenOutput>,
@@ -142,6 +155,9 @@ impl State {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
+        // Games: hold the pointer in place, and read how far the mouse went.
+        let pointer_constraints_state = PointerConstraintsState::new::<Self>(dh);
+        let relative_pointer_state = RelativePointerManagerState::new::<Self>(dh);
         let (dmabuf_state, dmabuf_global) = init_dmabuf(dh, renderer);
 
         let mut seat_state = SeatState::new();
@@ -206,11 +222,16 @@ impl State {
             _output_manager_state: output_manager_state,
             _decoration_state: decoration_state,
             _cursor_shape_state: cursor_shape_state,
+            _pointer_constraints_state: pointer_constraints_state,
+            _relative_pointer_state: relative_pointer_state,
             seat,
             cursor_status: CursorImageStatus::default_named(),
             cursor_images: CursorImages::load(),
             suppressed_keys: Vec::new(),
             mod_key: options.mod_key,
+            mod_tap: ModTap::default(),
+            pointer_freed: None,
+            last_absolute: None,
             terminal: options.terminal,
             outputs,
             backend,

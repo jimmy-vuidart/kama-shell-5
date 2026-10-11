@@ -10,13 +10,18 @@ use smithay::backend::input::{
 };
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::keyboard::{FilterResult, Keycode};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, MotionEvent};
+use smithay::input::pointer::{
+    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, MotionEvent, RelativeMotionEvent,
+};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::wayland::compositor::RegionAttributes;
+use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
 use tracing::{debug, info, warn};
 
 use crate::debug::Step;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
+use crate::game::confine;
 use crate::outputs::constrain;
 use crate::render::scene::Shape;
 use crate::resize::Edges;
@@ -51,6 +56,14 @@ struct Hit {
     bar: Option<Option<usize>>,
     /// The point is on these edges of a floating window.
     resize: Option<Edges>,
+}
+
+/// How a client holds the pointer where it is (pointer-constraints).
+enum Hold {
+    /// The pointer does not move: only the distances travelled are sent.
+    Locked,
+    /// The pointer stays on the surface, inside this region of it if any.
+    Confined(Option<RegionAttributes>),
 }
 
 /// What the left mouse button is doing since it went down.
@@ -96,12 +109,8 @@ impl State {
             InputEvent::Keyboard { event, .. } => {
                 self.key(event.key_code(), event.state(), Event::time(&event));
             }
-            // A mouse: moves from where the pointer is, and stays on screens.
             InputEvent::PointerMotion { event, .. } => {
-                let wanted = self.pointer_location() + event.delta();
-                let screens: Vec<_> = self.shell.screens.iter().map(|s| s.rect).collect();
-                let location = constrain((wanted.x, wanted.y), &screens);
-                self.pointer_moved(location.into(), event.time());
+                self.pointer_relative(event.delta(), event.delta_unaccel(), event.time());
             }
             // The nested window: a position inside the whole canvas.
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -112,7 +121,7 @@ impl State {
                     )
                 });
                 let location = event.position_transformed(canvas.into());
-                self.pointer_moved(location, event.time());
+                self.pointer_absolute(location, event.time());
             }
             InputEvent::PointerButton { event, .. } => {
                 self.pointer_button(event.button_code(), event.state(), event.time());
@@ -143,7 +152,10 @@ impl State {
     pub fn debug_input(&mut self, step: Step) {
         let time = InputTime::now();
         match step {
-            Step::Move { x, y } => self.pointer_moved((x, y).into(), time),
+            Step::Move { x, y } => self.pointer_absolute((x, y).into(), time),
+            Step::Relative { dx, dy } => {
+                self.pointer_relative((dx, dy).into(), (dx, dy).into(), time);
+            }
             Step::Click => {
                 self.pointer_button(BTN_LEFT, ButtonState::Pressed, time);
                 self.pointer_button(BTN_LEFT, ButtonState::Released, time);
@@ -161,6 +173,7 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
         let mod_key = self.mod_key;
+        let mut tapped = false;
 
         let action = keyboard.input::<Option<Action>, _>(
             self,
@@ -170,7 +183,9 @@ impl State {
             time,
             |state, modifiers, handle| {
                 let keycode = handle.raw_code().raw();
+                let is_mod = mod_key.is_key(&handle.raw_syms());
                 if key_state == KeyState::Released {
+                    tapped = state.mod_tap.key_released(is_mod);
                     // The client never saw the press: hide the release too.
                     let before = state.suppressed_keys.len();
                     state.suppressed_keys.retain(|key| *key != keycode);
@@ -180,6 +195,9 @@ impl State {
                         FilterResult::Forward
                     };
                 }
+                state
+                    .mod_tap
+                    .key_pressed(is_mod, mod_key.is_alone(modifiers));
                 let press = KeyPress {
                     main: mod_key.is_held(modifiers),
                     shift: modifiers.shift,
@@ -200,6 +218,11 @@ impl State {
         );
         if let Some(Some(action)) = action {
             self.run(action);
+        }
+        // The shell modifier alone, pressed and released: the way out of a
+        // game that holds the pointer.
+        if tapped {
+            self.free_pointer();
         }
     }
 
@@ -253,6 +276,217 @@ impl State {
         self.apply_arrangement();
     }
 
+    /// A mouse moved by `delta`: the pointer moves from where it is, stays
+    /// on the screens, and obeys the client that holds it. This is the path
+    /// of the hardware backend.
+    pub fn pointer_relative(
+        &mut self,
+        delta: Point<f64, Logical>,
+        delta_unaccel: Point<f64, Logical>,
+        time: InputTime,
+    ) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let from = pointer.current_location();
+        let hit = self.hit_test(from);
+        let hold = self.hold_at(&hit, from);
+        // Games read the distances, whether the pointer moves or not.
+        let event = RelativeMotionEvent {
+            delta,
+            delta_unaccel,
+            time,
+        };
+        pointer.relative_motion(self, hit.surface.clone(), &event);
+
+        let mut wanted = from + delta;
+        match hold {
+            Some(Hold::Locked) => {
+                pointer.frame(self);
+                return;
+            }
+            Some(Hold::Confined(region)) => {
+                let inside = |point| self.is_inside(&hit, region.as_ref(), point);
+                wanted = confine((from.x, from.y), (wanted.x, wanted.y), inside).into();
+            }
+            None => {}
+        }
+        let screens: Vec<_> = self.shell.screens.iter().map(|s| s.rect).collect();
+        let location = constrain((wanted.x, wanted.y), &screens);
+        self.pointer_moved(location.into(), time);
+        self.refresh_constraint();
+    }
+
+    /// The pointer is asked to be at `location`: the nested window says
+    /// where the host's pointer is. A client that holds the pointer keeps
+    /// it; the distance travelled is still told, so that a game can be tried
+    /// nested.
+    pub fn pointer_absolute(&mut self, location: Point<f64, Logical>, time: InputTime) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let from = pointer.current_location();
+        let hit = self.hit_test(from);
+        let hold = self.hold_at(&hit, from);
+        if let Some(last) = self.last_absolute.replace(location) {
+            let delta = location - last;
+            let event = RelativeMotionEvent {
+                delta,
+                delta_unaccel: delta,
+                time,
+            };
+            pointer.relative_motion(self, hit.surface.clone(), &event);
+        }
+
+        let held = match hold {
+            Some(Hold::Locked) => true,
+            Some(Hold::Confined(region)) => {
+                !self.is_inside(&hit, region.as_ref(), (location.x, location.y))
+            }
+            None => false,
+        };
+        if held {
+            pointer.frame(self);
+            return;
+        }
+        self.pointer_moved(location, time);
+        self.refresh_constraint();
+    }
+
+    /// How the client under the pointer holds it, if it does. A shell
+    /// gesture in progress is never held back.
+    fn hold_at(&self, hit: &Hit, location: Point<f64, Logical>) -> Option<Hold> {
+        if self.gesture.is_some() {
+            return None;
+        }
+        let pointer = self.seat.get_pointer()?;
+        let (surface, origin) = hit.surface.as_ref()?;
+        let local = (location - *origin).to_i32_round::<i32>();
+        with_pointer_constraint(surface, &pointer, |constraint| {
+            let constraint = constraint?;
+            let applies = constraint.is_active()
+                && constraint
+                    .region()
+                    .is_none_or(|region| region.contains(local));
+            if !applies {
+                return None;
+            }
+            Some(match &*constraint {
+                PointerConstraint::Locked(_) => Hold::Locked,
+                PointerConstraint::Confined(confined) => Hold::Confined(confined.region().cloned()),
+            })
+        })
+    }
+
+    /// `point` is still on the surface that confines the pointer, and in
+    /// the region it confines it to.
+    fn is_inside(&self, hit: &Hit, region: Option<&RegionAttributes>, point: (f64, f64)) -> bool {
+        let Some((surface, origin)) = hit.surface.as_ref() else {
+            return false;
+        };
+        let point = Point::<f64, Logical>::from(point);
+        let same_surface = self
+            .hit_test(point)
+            .surface
+            .is_some_and(|(under, _)| under == *surface);
+        let local = (point - *origin).to_i32_round::<i32>();
+        same_surface && region.is_none_or(|region| region.contains(local))
+    }
+
+    /// Lets the client under the pointer hold it, if it asked to: its
+    /// window has the focus, the pointer is on its surface, and the user did
+    /// not free the pointer from it.
+    pub fn refresh_constraint(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if self.pointer_freed.is_some() || self.gesture.is_some() {
+            return;
+        }
+        let location = pointer.current_location();
+        let hit = self.hit_test(location);
+        let (Some(window), Some((surface, origin))) = (hit.window, hit.surface) else {
+            return;
+        };
+        if self.shell.desk.focused() != Some(window)
+            || pointer.current_focus().as_ref() != Some(&surface)
+        {
+            return;
+        }
+        let local = (location - origin).to_i32_round::<i32>();
+        with_pointer_constraint(&surface, &pointer, |constraint| {
+            let Some(constraint) = constraint else {
+                return;
+            };
+            let in_region = constraint
+                .region()
+                .is_none_or(|region| region.contains(local));
+            if !constraint.is_active() && in_region {
+                debug!(?window, "pointer held by its window");
+                constraint.activate();
+            }
+        });
+    }
+
+    /// The user tapped the shell modifier: the game under the pointer lets
+    /// go of it, until the next click in that window.
+    fn free_pointer(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let location = pointer.current_location();
+        let hit = self.hit_test(location);
+        let Some(window) = hit.window else {
+            return;
+        };
+        // Where the client says its own cursor was, if it locked the pointer.
+        let mut shown_at = None;
+        let held = hit.surface.as_ref().is_some_and(|(surface, origin)| {
+            with_pointer_constraint(surface, &pointer, |constraint| match constraint {
+                Some(constraint) if constraint.is_active() => {
+                    if let PointerConstraint::Locked(locked) = &*constraint {
+                        shown_at = locked.cursor_position_hint().map(|hint| *origin + hint);
+                    }
+                    constraint.deactivate();
+                    true
+                }
+                _ => false,
+            })
+        });
+        let anchored = self
+            .shell
+            .by_id(window)
+            .is_some_and(|managed| managed.geometry.anchored);
+        if !(held || anchored) {
+            return;
+        }
+        info!(?window, held, "pointer freed from its window");
+        self.pointer_freed = Some(window);
+        if let Some(location) = shown_at {
+            self.pointer_moved(location, InputTime::now());
+        }
+        self.queue_redraw();
+    }
+
+    /// Where `surface` is in the global space, if the pointer is on it.
+    pub fn surface_origin_under_pointer(&self, surface: &WlSurface) -> Option<Point<f64, Logical>> {
+        let (under, origin) = self.hit_test(self.pointer_location()).surface?;
+        (under == *surface).then_some(origin)
+    }
+
+    /// Looks again at what is under the pointer, after windows moved without
+    /// it moving.
+    pub fn refresh_pointer_focus(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if pointer.is_grabbed() || self.gesture.is_some() {
+            return;
+        }
+        self.pointer_moved(pointer.current_location(), InputTime::now());
+        self.refresh_constraint();
+    }
+
     fn pointer_moved(&mut self, location: Point<f64, Logical>, time: InputTime) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -276,6 +510,10 @@ impl State {
 
         self.hover = hit.window.zip(hit.button);
         self.bar_hover = hit.bar.flatten();
+        // Freed from a window, the pointer is free until it leaves it.
+        if self.pointer_freed.is_some() && self.pointer_freed != hit.window {
+            self.pointer_freed = None;
+        }
         // Over the shell's own chrome no client sets the cursor: it shows
         // what a press would grab.
         if hit.surface.is_none() && !pointer.is_grabbed() {
@@ -523,6 +761,11 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let location = pointer.current_location();
         let mut for_clients = true;
+        self.mod_tap.disturb();
+        if state == ButtonState::Pressed {
+            // A click gives the pointer back to the game it was freed from.
+            self.pointer_freed = None;
+        }
 
         match state {
             // During a grab (a popup menu, a drag) clicks belong to the grab.
@@ -599,6 +842,9 @@ impl State {
                 },
             );
             pointer.frame(self);
+        }
+        if state == ButtonState::Pressed {
+            self.refresh_constraint();
         }
     }
 

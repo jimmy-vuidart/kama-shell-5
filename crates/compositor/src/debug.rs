@@ -7,7 +7,11 @@
 //! 500 move 780 27; 100 click; 300 key alt+1
 //! 0 move 100 27; 0 down; 200 move 900 400; 100 up
 //! 0 press alt; 0 down; 100 move 500 500; 0 up; 0 release alt
+//! 0 rel 40 -10
 //! ```
+//!
+//! `move` puts the pointer at a position, as the host window does; `rel`
+//! moves it by a distance, as a real mouse does on the hardware backend.
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
 const KEYS: [(&str, u32); 13] = [
@@ -32,6 +36,11 @@ pub enum Step {
     Move {
         x: f64,
         y: f64,
+    },
+    /// Moves the pointer by a distance, as a mouse does.
+    Relative {
+        dx: f64,
+        dy: f64,
     },
     /// Presses and releases the left mouse button.
     Click,
@@ -73,6 +82,10 @@ pub fn parse(script: &str) -> Result<Vec<TimedStep>, String> {
             ("move", [x, y]) => match (x.parse(), y.parse()) {
                 (Ok(x), Ok(y)) => vec![Step::Move { x, y }],
                 _ => return Err(format!("`{text}`: a position is two numbers")),
+            },
+            ("rel", [dx, dy]) => match (dx.parse(), dy.parse()) {
+                (Ok(dx), Ok(dy)) => vec![Step::Relative { dx, dy }],
+                _ => return Err(format!("`{text}`: a distance is two numbers")),
             },
             ("key", [chord]) => chord_steps(chord)?,
             _ => return Err(format!("`{text}`: unknown command `{command}`")),
@@ -132,6 +145,22 @@ mod tests {
             steps("200 move 780 27.5"),
             [(200, Step::Move { x: 780.0, y: 27.5 })]
         );
+    }
+
+    #[test]
+    fn a_relative_move_takes_a_distance() {
+        assert_eq!(
+            steps("20 rel 40 -10.5"),
+            [(
+                20,
+                Step::Relative {
+                    dx: 40.0,
+                    dy: -10.5
+                }
+            )]
+        );
+        assert!(parse("0 rel 4").is_err());
+        assert!(parse("0 rel a b").is_err());
     }
 
     #[test]

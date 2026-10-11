@@ -19,6 +19,24 @@ impl ModKey {
             Self::Alt => modifiers.alt,
         }
     }
+
+    /// `syms` are those of the modifier key itself, left or right.
+    pub fn is_key(self, syms: &[Keysym]) -> bool {
+        let keys = match self {
+            Self::Super => [Keysym::Super_L, Keysym::Super_R],
+            Self::Alt => [Keysym::Alt_L, Keysym::Alt_R],
+        };
+        syms.iter().any(|sym| keys.contains(sym))
+    }
+
+    /// No other modifier is held: the shell modifier alone can be a tap.
+    pub fn is_alone(self, modifiers: &ModifiersState) -> bool {
+        let others = match self {
+            Self::Super => modifiers.alt,
+            Self::Alt => modifiers.logo,
+        };
+        !(others || modifiers.ctrl || modifiers.shift)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +149,34 @@ mod tests {
             Some(Action::RestoreWindow)
         );
         assert_eq!(press(false, false, 27, &[Keysym::r]), None);
+    }
+
+    #[test]
+    fn the_shell_modifier_key_is_recognised_on_both_sides() {
+        assert!(ModKey::Super.is_key(&[Keysym::Super_L]));
+        assert!(ModKey::Super.is_key(&[Keysym::Super_R]));
+        assert!(!ModKey::Super.is_key(&[Keysym::Alt_L]));
+        assert!(ModKey::Alt.is_key(&[Keysym::Alt_L]));
+        assert!(!ModKey::Alt.is_key(&[Keysym::Super_L]));
+        assert!(!ModKey::Alt.is_key(&[]));
+    }
+
+    #[test]
+    fn the_shell_modifier_is_alone_without_another_modifier() {
+        let held = |ctrl, shift, alt, logo| ModifiersState {
+            ctrl,
+            shift,
+            alt,
+            logo,
+            ..ModifiersState::default()
+        };
+
+        assert!(ModKey::Super.is_alone(&held(false, false, false, true)));
+        assert!(!ModKey::Super.is_alone(&held(true, false, false, true)));
+        assert!(!ModKey::Super.is_alone(&held(false, true, false, true)));
+        assert!(!ModKey::Super.is_alone(&held(false, false, true, true)));
+        assert!(ModKey::Alt.is_alone(&held(false, false, true, false)));
+        assert!(!ModKey::Alt.is_alone(&held(false, false, true, true)));
     }
 
     #[test]
