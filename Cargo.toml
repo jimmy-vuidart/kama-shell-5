@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/model"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+
+[workspace.dependencies]
+coquille-model = { path = "crates/model" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
