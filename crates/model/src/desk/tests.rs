@@ -561,6 +561,58 @@ fn an_app_remembered_on_a_side_screen_still_goes_to_its_slot_during_a_game() {
     assert_eq!(placement, Placement::Slot(slot(LEFT, 0)));
 }
 
+#[test]
+fn a_window_opening_while_a_game_is_played_leaves_the_focus_to_the_game() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+
+    let placement = open(&mut desk, 2, "chat", CENTER);
+
+    assert_eq!(floating_output(placement), LEFT);
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert!(geo(&desk, 2).visible);
+    assert!(!geo(&desk, 2).focused);
+}
+
+#[test]
+fn a_tidied_app_opening_while_a_game_is_played_shows_without_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open_in(&mut desk, 2, "notes", LEFT, 0);
+    desk.close_window(WindowId(1)).unwrap();
+    anchor_game(&mut desk, 3);
+
+    let placement = open(&mut desk, 4, "discord", CENTER);
+
+    assert_eq!(placement, Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(active_tab(&desk, LEFT, 0), Some(4));
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+}
+
+#[test]
+fn the_window_opened_during_a_game_is_next_in_line_for_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", RIGHT, 0);
+    anchor_game(&mut desk, 2);
+    open(&mut desk, 3, "chat", CENTER);
+
+    desk.close_window(WindowId(2)).unwrap();
+
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+}
+
+#[test]
+fn a_window_opening_while_the_game_is_left_aside_takes_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", RIGHT, 0);
+    anchor_game(&mut desk, 2);
+    desk.focus(WindowId(1)).unwrap();
+
+    open(&mut desk, 3, "chat", RIGHT);
+
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+}
+
 // Anchored screen (game mode).
 
 #[test]

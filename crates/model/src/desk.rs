@@ -203,7 +203,9 @@ impl Desk {
             .any(|screen| screen.anchored().is_some_and(|game| game != id) && screen.contains(id))
     }
 
-    /// A new window appears (rules 1, 4 and 7) and takes the focus.
+    /// A new window appears (rules 1, 4 and 7) and takes the focus, unless a
+    /// game is being played: the game keeps it, and the new window, shown on
+    /// another screen, is next in line.
     ///
     /// An application the user tidied reopens in its slot. Anything else opens
     /// floating on the cursor's screen, or, when a game is anchored, on the
@@ -218,6 +220,7 @@ impl Desk {
             return Err(ModelError::DuplicateWindow(id));
         }
         let cursor = self.screen_index(request.cursor_output)?;
+        let game = self.game_in_play().and_then(|_| self.focused());
 
         let remembered = app.as_ref().and_then(|app| self.memory.get(app));
         let placement = match remembered.and_then(|place| self.remembered_target(place)) {
@@ -243,7 +246,11 @@ impl Desk {
                 title: String::new(),
             },
         );
-        self.mark_focused(id);
+        match game.and_then(|game| self.focus_order.iter().position(|id| *id == game)) {
+            // Shown where it opened, right behind the game in the focus order.
+            Some(rank) => self.focus_order.insert(rank, id),
+            None => self.mark_focused(id),
+        }
         Ok(placement)
     }
 

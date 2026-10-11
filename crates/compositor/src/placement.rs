@@ -89,11 +89,16 @@ impl State {
     /// each frame. The offer ends as soon as the user turns to something
     /// else, or handles the window directly.
     pub fn refresh_bar(&mut self) {
+        // A window opened during a game waits without the focus: its offer
+        // stands until the user leaves the game.
+        let playing = self.shell.desk.game_in_play().is_some();
         let offered = self.placement_offer.and_then(|window| {
             let managed = self.shell.by_id(window)?;
             let geometry = managed.geometry;
-            let still_open =
-                geometry.floating && !geometry.anchored && geometry.visible && geometry.focused;
+            let still_open = geometry.floating
+                && !geometry.anchored
+                && geometry.visible
+                && (geometry.focused || playing);
             let handled = matches!(
                 self.gesture,
                 Some(Gesture::Placing { .. } | Gesture::Moving { .. } | Gesture::Resizing { .. })
