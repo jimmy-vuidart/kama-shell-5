@@ -1,6 +1,8 @@
 //! Game mode: pure decisions about the pointer and the shell modifier, shared
 //! by the nested and the hardware backends.
 
+use coquille_model::Rect;
+
 /// Tells a tap of the shell modifier (pressed and released with nothing in
 /// between) from its use in a shortcut or a drag. A tap frees the pointer
 /// from the game that holds it.
@@ -65,6 +67,93 @@ fn furthest(from: f64, to: f64, ok: impl Fn(f64) -> bool) -> f64 {
     good
 }
 
+/// How long a push against the edge may pause without starting over. Longer
+/// than the gap between two events of the slowest mouse.
+const PUSH_PAUSE_MS: u64 = 150;
+
+/// The pointer being pushed against an edge of a game's screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Push {
+    /// The way out being pushed: left or right, up or down.
+    side: (i8, i8),
+    since_ms: u64,
+    last_ms: u64,
+}
+
+/// Sticky edges: the pointer leaves the screen of a game only after it has
+/// been pushed against the edge for a while, so that a quick move in the
+/// game never ends up on the screen next to it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StickyEdges {
+    push: Option<Push>,
+}
+
+impl StickyEdges {
+    /// The pointer is being held at an edge.
+    pub fn is_pushing(&self) -> bool {
+        self.push.is_some()
+    }
+
+    /// Where the pointer goes when it is at `from` and the mouse takes it to
+    /// `wanted`. `games` are the screens whose edges are sticky, `now_ms` the
+    /// time of the move, and `delay_ms` how long the edge must be pushed.
+    pub fn filter(
+        &mut self,
+        from: (f64, f64),
+        wanted: (f64, f64),
+        games: &[Rect],
+        now_ms: u64,
+        delay_ms: u64,
+    ) -> (f64, f64) {
+        let holds = |rect: &Rect, point: (f64, f64)| {
+            (f64::from(rect.x)..f64::from(rect.right())).contains(&point.0)
+                && (f64::from(rect.y)..f64::from(rect.bottom())).contains(&point.1)
+        };
+        let Some(screen) = games.iter().find(|rect| holds(rect, from)) else {
+            self.push = None;
+            return wanted;
+        };
+        if holds(screen, wanted) {
+            // A push lapses by itself: a small move back does not spoil it.
+            return wanted;
+        }
+
+        let side_of = |value: f64, low: i32, high: i32| {
+            i8::from(value >= f64::from(high)) - i8::from(value < f64::from(low))
+        };
+        let side = (
+            side_of(wanted.0, screen.x, screen.right()),
+            side_of(wanted.1, screen.y, screen.bottom()),
+        );
+        let since_ms = match self.push {
+            Some(push)
+                if push.side == side && now_ms.saturating_sub(push.last_ms) <= PUSH_PAUSE_MS =>
+            {
+                push.since_ms
+            }
+            _ => now_ms,
+        };
+        if now_ms.saturating_sub(since_ms) >= delay_ms {
+            self.push = None;
+            return wanted;
+        }
+        self.push = Some(Push {
+            side,
+            since_ms,
+            last_ms: now_ms,
+        });
+        // The last position of a screen is its last pixel.
+        (
+            wanted
+                .0
+                .clamp(f64::from(screen.x), f64::from(screen.right() - 1)),
+            wanted
+                .1
+                .clamp(f64::from(screen.y), f64::from(screen.bottom() - 1)),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +215,133 @@ mod tests {
         tap.key_released(true);
 
         assert!(!tap.key_released(true));
+    }
+
+    const GAME: Rect = Rect::new(1920, 0, 3440, 1440);
+    const DELAY: u64 = 300;
+
+    /// Pushes right against the right edge of the game screen at `now`.
+    fn push_right(edges: &mut StickyEdges, now: u64) -> (f64, f64) {
+        edges.filter((5359.0, 700.0), (5370.0, 702.0), &[GAME], now, DELAY)
+    }
+
+    #[test]
+    fn the_pointer_moves_freely_inside_the_screen_of_a_game() {
+        let mut edges = StickyEdges::default();
+
+        let moved = edges.filter((2000.0, 700.0), (2500.0, 650.0), &[GAME], 0, DELAY);
+
+        assert_eq!(moved, (2500.0, 650.0));
+    }
+
+    #[test]
+    fn the_pointer_stops_at_the_edge_of_the_screen_of_a_game() {
+        let mut edges = StickyEdges::default();
+
+        let moved = edges.filter((5350.0, 700.0), (5370.0, 702.0), &[GAME], 0, DELAY);
+
+        assert_eq!(moved, (5359.0, 702.0));
+    }
+
+    #[test]
+    fn pushing_against_the_edge_long_enough_lets_the_pointer_out() {
+        let mut edges = StickyEdges::default();
+
+        assert_eq!(push_right(&mut edges, 1000), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, 1100), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, 1200), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, 1299), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, 1300), (5370.0, 702.0));
+    }
+
+    #[test]
+    fn a_pause_in_the_push_starts_the_delay_again() {
+        let mut edges = StickyEdges::default();
+
+        push_right(&mut edges, 1000);
+        push_right(&mut edges, 1100);
+        // Nothing for longer than a push may pause: the count starts over.
+        let again = 1100 + PUSH_PAUSE_MS + 1;
+        assert_eq!(push_right(&mut edges, again), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, again + 150), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, again + 299), (5359.0, 702.0));
+        assert_eq!(push_right(&mut edges, again + 300), (5370.0, 702.0));
+    }
+
+    #[test]
+    fn a_small_move_back_does_not_spoil_the_push() {
+        let mut edges = StickyEdges::default();
+
+        push_right(&mut edges, 1000);
+        push_right(&mut edges, 1100);
+        let back = edges.filter((5359.0, 700.0), (5357.0, 700.0), &[GAME], 1110, DELAY);
+        assert_eq!(back, (5357.0, 700.0));
+        push_right(&mut edges, 1200);
+
+        assert_eq!(push_right(&mut edges, 1300), (5370.0, 702.0));
+    }
+
+    #[test]
+    fn pushing_against_another_edge_starts_the_delay_again() {
+        let mut edges = StickyEdges::default();
+
+        push_right(&mut edges, 1000);
+        push_right(&mut edges, 1100);
+        let left = edges.filter((1920.0, 700.0), (1900.0, 700.0), &[GAME], 1200, DELAY);
+        assert_eq!(left, (1920.0, 700.0));
+
+        let left = edges.filter((1920.0, 700.0), (1900.0, 700.0), &[GAME], 1350, DELAY);
+        assert_eq!(left, (1920.0, 700.0));
+        let left = edges.filter((1920.0, 700.0), (1900.0, 700.0), &[GAME], 1500, DELAY);
+        assert_eq!(left, (1900.0, 700.0));
+    }
+
+    #[test]
+    fn once_out_the_pointer_must_push_again_to_leave_the_next_time() {
+        let mut edges = StickyEdges::default();
+
+        push_right(&mut edges, 1000);
+        push_right(&mut edges, 1150);
+        push_right(&mut edges, 1300);
+
+        assert_eq!(push_right(&mut edges, 1310), (5359.0, 702.0));
+    }
+
+    #[test]
+    fn entering_the_screen_of_a_game_is_never_held_back() {
+        let mut edges = StickyEdges::default();
+
+        let moved = edges.filter((1900.0, 500.0), (1950.0, 500.0), &[GAME], 0, DELAY);
+
+        assert_eq!(moved, (1950.0, 500.0));
+    }
+
+    #[test]
+    fn screens_without_a_game_have_no_sticky_edge() {
+        let mut edges = StickyEdges::default();
+
+        let moved = edges.filter((1900.0, 500.0), (1950.0, 500.0), &[], 0, DELAY);
+        assert_eq!(moved, (1950.0, 500.0));
+        let moved = edges.filter((100.0, 500.0), (-50.0, 500.0), &[GAME], 0, DELAY);
+        assert_eq!(moved, (-50.0, 500.0));
+    }
+
+    #[test]
+    fn a_delay_of_zero_turns_sticky_edges_off() {
+        let mut edges = StickyEdges::default();
+
+        let moved = edges.filter((5350.0, 700.0), (5370.0, 702.0), &[GAME], 0, 0);
+
+        assert_eq!(moved, (5370.0, 702.0));
+    }
+
+    #[test]
+    fn a_corner_holds_the_pointer_on_both_axes() {
+        let mut edges = StickyEdges::default();
+
+        let moved = edges.filter((1925.0, 5.0), (1900.0, -20.0), &[GAME], 0, DELAY);
+
+        assert_eq!(moved, (1920.0, 0.0));
     }
 
     /// A region 100 wide and 50 high.

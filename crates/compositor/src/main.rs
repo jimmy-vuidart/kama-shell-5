@@ -390,6 +390,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         mod_key,
         terminal: config.terminal.clone().unwrap_or_else(default_terminal),
         state_dir: None,
+        sticky_edges_ms: config.game.sticky_edges_ms(),
     }
 }
 

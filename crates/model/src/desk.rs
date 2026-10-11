@@ -614,6 +614,17 @@ impl Desk {
         focused.or_else(under_cursor).or_else(any)
     }
 
+    /// The screen of the game being played: the one anchored by the window
+    /// that has the focus.
+    pub fn game_in_play(&self) -> Option<OutputId> {
+        let focused = self.focused()?;
+        let screen = self
+            .screens
+            .iter()
+            .find(|screen| screen.anchored() == Some(focused))?;
+        Some(screen.id())
+    }
+
     /// The ⇄ button applies to `id`: it is on a side screen, there is a
     /// center, and no game holds either of them (rule 5).
     pub fn can_swap_with_center(&self, id: WindowId) -> bool {

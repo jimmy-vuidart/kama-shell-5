@@ -816,6 +816,22 @@ fn an_anchored_screen_has_no_separation_to_grab() {
     assert_eq!(desk.ratio_at(RIGHT, Point::new(900, 500)), None);
 }
 
+#[test]
+fn a_game_is_in_play_while_it_has_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    assert_eq!(desk.game_in_play(), None);
+
+    anchor_game(&mut desk, 2);
+    assert_eq!(desk.game_in_play(), Some(CENTER));
+
+    desk.focus(WindowId(1)).unwrap();
+    assert_eq!(desk.game_in_play(), None);
+
+    desk.focus(WindowId(2)).unwrap();
+    assert_eq!(desk.game_in_play(), Some(CENTER));
+}
+
 // Mod+Escape: which game goes back into a window.
 
 #[test]

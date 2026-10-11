@@ -17,6 +17,25 @@ pub struct Config {
     pub theme: Option<ThemeKind>,
     /// Command of the terminal opened by the shortcut.
     pub terminal: Option<String>,
+    pub game: GameConfig,
+}
+
+/// Game mode: what happens on a screen held by a fullscreen window.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GameConfig {
+    /// How long the pointer must be pushed against the edge to leave the
+    /// screen of a game, in milliseconds; 0 turns sticky edges off.
+    pub sticky_edges_ms: Option<u64>,
+}
+
+impl GameConfig {
+    pub const DEFAULT_STICKY_EDGES_MS: u64 = 300;
+
+    pub fn sticky_edges_ms(&self) -> u64 {
+        self.sticky_edges_ms
+            .unwrap_or(Self::DEFAULT_STICKY_EDGES_MS)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -111,6 +130,16 @@ mod tests {
         assert_eq!(config.terminal.as_deref(), Some("kitty"));
         assert_eq!(config.keyboard.layout.as_deref(), Some("fr"));
         assert_eq!(config.keyboard.variant, None);
+    }
+
+    #[test]
+    fn sticky_edges_last_300_ms_unless_told_otherwise() {
+        assert_eq!(parse("").unwrap().game.sticky_edges_ms(), 300);
+
+        let config = parse("[game]\nsticky_edges_ms = 0").unwrap();
+        assert_eq!(config.game.sticky_edges_ms(), 0);
+        assert!(parse("[game]\nsticky_edges_ms = -5").is_err());
+        assert!(parse("[game]\nsticky = 5").is_err());
     }
 
     #[test]

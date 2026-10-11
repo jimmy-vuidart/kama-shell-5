@@ -34,7 +34,7 @@ use crate::backend::Backend;
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
-use crate::game::ModTap;
+use crate::game::{ModTap, StickyEdges};
 use crate::input::Gesture;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::placement::Bar;
@@ -58,6 +58,8 @@ pub struct Options {
     pub terminal: String,
     /// Where habits are kept between sessions; `None` keeps nothing.
     pub state_dir: Option<PathBuf>,
+    /// How long the pointer is held at the edge of a game's screen.
+    pub sticky_edges_ms: u64,
 }
 
 /// A screen as clients see it.
@@ -102,6 +104,9 @@ pub struct State {
     /// Nested: where the host said its pointer was last, to tell clients
     /// how far it went.
     pub last_absolute: Option<Point<f64, Logical>>,
+    /// Holds the pointer on the screen of the game being played.
+    pub sticky_edges: StickyEdges,
+    pub sticky_edges_ms: u64,
     pub terminal: String,
 
     pub outputs: Vec<ScreenOutput>,
@@ -232,6 +237,8 @@ impl State {
             mod_tap: ModTap::default(),
             pointer_freed: None,
             last_absolute: None,
+            sticky_edges: StickyEdges::default(),
+            sticky_edges_ms: options.sticky_edges_ms,
             terminal: options.terminal,
             outputs,
             backend,

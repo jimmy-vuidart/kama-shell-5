@@ -21,7 +21,7 @@ use tracing::{debug, info, warn};
 
 use crate::debug::Step;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
-use crate::game::confine;
+use crate::game::{StickyEdges, confine};
 use crate::outputs::constrain;
 use crate::render::scene::Shape;
 use crate::resize::Edges;
@@ -311,10 +311,44 @@ impl State {
             }
             None => {}
         }
+        let wanted = self.hold_at_sticky_edge((from.x, from.y), (wanted.x, wanted.y), time);
         let screens: Vec<_> = self.shell.screens.iter().map(|s| s.rect).collect();
-        let location = constrain((wanted.x, wanted.y), &screens);
+        let location = constrain(wanted, &screens);
         self.pointer_moved(location.into(), time);
         self.refresh_constraint();
+    }
+
+    /// Sticky edges: while a game is played, the pointer leaves its screen
+    /// only after pushing against the edge for a while. They give way to a
+    /// shell gesture, and to a pointer freed with the shell modifier.
+    fn hold_at_sticky_edge(
+        &mut self,
+        from: (f64, f64),
+        wanted: (f64, f64),
+        time: InputTime,
+    ) -> (f64, f64) {
+        let game = self
+            .shell
+            .desk
+            .game_in_play()
+            .and_then(|output| self.shell.screen(output))
+            .map(|screen| screen.rect);
+        let free = self.pointer_freed.is_some() || self.gesture.is_some();
+        let Some(game) = game.filter(|_| !free) else {
+            self.sticky_edges = StickyEdges::default();
+            return wanted;
+        };
+        let was_pushing = self.sticky_edges.is_pushing();
+        let now_ms = time.micros() / 1000;
+        let allowed = self
+            .sticky_edges
+            .filter(from, wanted, &[game], now_ms, self.sticky_edges_ms);
+        match (was_pushing, self.sticky_edges.is_pushing()) {
+            (false, true) => debug!("pointer held at the edge of the game's screen"),
+            (true, false) if allowed == wanted => debug!("pointer let out of the game's screen"),
+            _ => {}
+        }
+        allowed
     }
 
     /// The pointer is asked to be at `location`: the nested window says

@@ -19,3 +19,9 @@ right = "DP-1"
 # Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
 # kitty, alacritty et foot.
 # terminal = "kitty"
+
+# Mode jeu : ce qui se passe sur un écran occupé par une fenêtre en plein écran.
+[game]
+# Bords collants : durée (en millisecondes) pendant laquelle il faut pousser le
+# curseur contre le bord pour quitter l'écran du jeu. 0 les désactive.
+# sticky_edges_ms = 300
