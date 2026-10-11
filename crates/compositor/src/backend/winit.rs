@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 use super::Backend;
 use crate::outputs::split_canvas;
-use crate::render::scene;
+use crate::render::scene::{self, Layers};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
 use crate::state::State;
@@ -183,6 +183,7 @@ impl State {
         self.shell
             .refresh_chrome(&mut self.painter, &self.theme, self.hover);
         let cursor = self.cursor(false);
+        self.refresh_bar();
         let overlay = self.overlay();
         let full_redraw = std::mem::take(&mut self.full_redraw);
         let Backend::Winit(winit) = &mut self.backend else {
@@ -221,9 +222,15 @@ impl State {
                     &winit.shaders,
                     &mut self.shell,
                     &self.theme,
-                    view,
-                    &overlay,
-                    cursor,
+                    Layers {
+                        view,
+                        overlay: &overlay,
+                        panel: self
+                            .bar
+                            .as_ref()
+                            .map(|bar| (&bar.buffer, bar.rect.origin())),
+                        cursor,
+                    },
                 );
                 let clear = self.theme.backdrop.premultiplied();
                 let rendered =

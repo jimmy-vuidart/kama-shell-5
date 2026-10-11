@@ -9,6 +9,8 @@ mod handlers;
 mod input;
 mod keyboard_layout;
 mod outputs;
+mod persist;
+mod placement;
 mod render;
 mod shell;
 mod shortcuts;
@@ -82,9 +84,14 @@ impl From<Role> for OutputRole {
 /// Compositeur Wayland « Centre + compagnons ».
 ///
 /// Lancé depuis une session graphique, il s'ouvre dans une fenêtre (mode
-/// imbriqué, raccourcis avec Alt). La touche des raccourcis est notée Mod :
-/// Mod+Entrée terminal, Mod+1 disposition « plein », Mod+2 « côte à côte »,
-/// Mod+Page suiv./préc. onglet suivant/précédent, Mod+Maj+E quitter.
+/// imbriqué). La touche des raccourcis, notée Mod, est Super sur le matériel
+/// et Alt en mode imbriqué.
+///
+/// Souris : glisser une barre de titre montre les emplacements, relâcher
+/// range la fenêtre ; Mod+glisser la déplace librement. Clavier : Mod+Entrée
+/// terminal ; Mod+1 à 6 disposition de l'écran du pointeur (plein, côte à
+/// côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ;
+/// Mod+Page suiv./préc. onglet suivant/précédent ; Mod+Maj+E quitter.
 /// Ctrl+Alt+Retour arrière quitte aussi, quoi qu'il arrive.
 #[derive(Debug, Parser)]
 #[command(version)]
@@ -123,6 +130,11 @@ struct Cli {
     /// Fichier de configuration (défaut : ~/.config/coquille/config.toml).
     #[arg(long, value_name = "FICHIER")]
     config: Option<PathBuf>,
+
+    /// Dossier où garder la mémoire par application. Par défaut
+    /// ~/.local/state/coquille sur le matériel, et rien en mode imbriqué.
+    #[arg(long, value_name = "DOSSIER")]
+    state_dir: Option<PathBuf>,
 
     /// Écrit le journal dans ce fichier plutôt que dans le terminal.
     #[arg(long, value_name = "FICHIER")]
@@ -217,7 +229,14 @@ fn main() -> anyhow::Result<()> {
 
     // Nested, the host session keeps Super for itself.
     let mod_key = if nested { ModKey::Alt } else { ModKey::Super };
-    let options = options(&cli, &config, mod_key);
+    let mut options = options(&cli, &config, mod_key);
+    // Nested runs are trials: they do not touch the habits of real sessions
+    // unless asked to.
+    options.state_dir = match (&cli.state_dir, nested) {
+        (Some(directory), _) => Some(directory.clone()),
+        (None, false) => persist::default_dir(),
+        (None, true) => None,
+    };
     let mut state = State::new(
         display.handle(),
         event_loop.get_signal(),
@@ -364,6 +383,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         keyboard: keyboard_layout::detect(layout, variant),
         mod_key,
         terminal: config.terminal.clone().unwrap_or_else(default_terminal),
+        state_dir: None,
     }
 }
 

@@ -1,10 +1,11 @@
 //! The compositor state and its Wayland globals.
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use coquille_model::{OutputId, Point as ModelPoint, WindowId};
+use coquille_model::{AppMemory, OutputId, Point as ModelPoint, WindowId};
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
@@ -33,6 +34,7 @@ use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
 use crate::input::Gesture;
 use crate::keyboard_layout::KeyboardLayout;
+use crate::placement::Bar;
 use crate::render::scene::Cursor;
 use crate::shell::{ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
@@ -51,6 +53,8 @@ pub struct Options {
     pub mod_key: ModKey,
     /// Command of the terminal opened by the shortcut.
     pub terminal: String,
+    /// Where habits are kept between sessions; `None` keeps nothing.
+    pub state_dir: Option<PathBuf>,
 }
 
 /// A screen as clients see it.
@@ -94,11 +98,20 @@ pub struct State {
     pub painter: Painter,
     /// The title bar button under the pointer.
     pub hover: Option<(WindowId, TitlebarButton)>,
+    /// The window, freshly opened floating, the placement bar is offered for.
+    pub placement_offer: Option<WindowId>,
+    pub bar: Option<Bar>,
+    /// The button of the bar under the pointer.
+    pub bar_hover: Option<usize>,
     /// What the left mouse button is doing since it went down.
     pub gesture: Option<Gesture>,
     /// The left button went down for the shell: its release is not for a
     /// client either.
     pub swallowed_press: bool,
+
+    /// Where habits are kept between sessions, and what was written last.
+    pub state_dir: Option<PathBuf>,
+    pub saved_habits: AppMemory,
 
     /// Something changed: a frame is due.
     pub redraw_needed: bool,
@@ -166,6 +179,13 @@ impl State {
             infos.push(info);
         }
 
+        let habits = options
+            .state_dir
+            .as_deref()
+            .map(crate::persist::load)
+            .unwrap_or_default();
+        info!(habits = habits.len(), "habits loaded");
+
         Ok(Self {
             start_time: Instant::now(),
             display_handle,
@@ -191,10 +211,15 @@ impl State {
             terminal: options.terminal,
             outputs,
             backend,
-            shell: Shell::new(infos),
+            shell: Shell::new(infos, habits.clone()),
+            state_dir: options.state_dir,
+            saved_habits: habits,
             theme: options.theme,
             painter: Painter::new(),
             hover: None,
+            placement_offer: None,
+            bar: None,
+            bar_hover: None,
             gesture: None,
             swallowed_press: false,
             redraw_needed: true,

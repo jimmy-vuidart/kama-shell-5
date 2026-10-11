@@ -112,6 +112,19 @@ pub enum Cursor {
     },
 }
 
+/// What a frame shows besides the windows.
+pub struct Layers<'a> {
+    /// The part of the global space the frame shows: one screen, or all of
+    /// them nested.
+    pub view: Rect,
+    /// Shell hints above the windows (drop zones), in the global space.
+    pub overlay: &'a [Shape],
+    /// A panel of the shell above everything but the cursor (the placement
+    /// bar), with its corner in the global space.
+    pub panel: Option<(&'a MemoryRenderBuffer, ModelPoint)>,
+    pub cursor: Option<Cursor>,
+}
+
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
     Rectangle::new((rect.x, rect.y).into(), (rect.w, rect.h).into())
 }
@@ -124,18 +137,22 @@ fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }
 
-/// Every element seen through `view`, a part of the global space (one screen,
-/// or all of them nested), topmost first: cursor, shell overlay, popups, then
-/// windows from the top one down. Positions are relative to the view's corner.
+/// Every element of a frame, topmost first: cursor, shell panel, shell hints,
+/// popups, then windows from the top one down. Positions are relative to the
+/// corner of the view.
 pub fn build(
     renderer: &mut GlesRenderer,
     shaders: &Shaders,
     shell: &mut Shell,
     theme: &Theme,
-    view: Rect,
-    overlay: &[Shape],
-    cursor: Option<Cursor>,
+    layers: Layers<'_>,
 ) -> Vec<SceneElement> {
+    let Layers {
+        view,
+        overlay,
+        panel,
+        cursor,
+    } = layers;
     let metrics = *shell.desk.metrics();
     // From the global space to the view.
     let shift = ModelPoint::new(-view.x, -view.y);
@@ -292,6 +309,22 @@ pub fn build(
             }
         }
         None => {}
+    }
+    if let Some((buffer, corner)) = panel {
+        let corner = ModelPoint::new(corner.x + shift.x, corner.y + shift.y);
+        let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            location,
+            buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        ) {
+            Ok(element) => elements.push(SceneElement::Texture(element)),
+            Err(error) => warn!(?error, "cannot upload the placement bar"),
+        }
     }
     // Shell hints (drop zones) sit above every window, in the global space.
     for shape in overlay {

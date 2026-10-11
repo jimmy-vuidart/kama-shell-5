@@ -4,8 +4,8 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole, Placement,
-    Point as ModelPoint, Rect, WindowGeometry, WindowId,
+    AppKey, AppMemory, Desk, DropTarget, LayoutKind, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole,
+    Placement, Point as ModelPoint, Rect, WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -20,7 +20,7 @@ use tracing::{debug, warn};
 
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::naming::{badge_color, display_name};
-use crate::decoration::paint::{Painter, TitlebarSpec};
+use crate::decoration::paint::{Painter, TabSpec, TitlebarSpec};
 use crate::render::scene::Chrome;
 use crate::state::State;
 use crate::theme::Theme;
@@ -46,6 +46,9 @@ pub struct ManagedWindow {
     pub origin: ModelPoint,
     /// The "swap with the center" button applies to this window.
     pub show_swap: bool,
+    /// The windows stacked in its slot when they show as tabs in its title
+    /// bar, in order; empty otherwise.
+    pub tabs: Vec<WindowId>,
     /// Floating: the size its client chose has been taken once already.
     pub sized: bool,
     /// Floating: its client wants more room than the screen has, so the
@@ -80,13 +83,14 @@ pub struct Shell {
 }
 
 impl Shell {
-    pub fn new(screens: Vec<ScreenInfo>) -> Self {
+    /// `memory` holds the habits saved by earlier sessions.
+    pub fn new(screens: Vec<ScreenInfo>, memory: AppMemory) -> Self {
         let outputs = screens
             .iter()
             .map(|screen| OutputInfo::new(screen.id, screen.role, screen.rect.size()))
             .collect();
         Self {
-            desk: Desk::new(outputs, Metrics::default()),
+            desk: Desk::new(outputs, Metrics::default()).with_memory(memory),
             screens,
             windows: Vec::new(),
             unmapped: Vec::new(),
@@ -159,6 +163,23 @@ impl Shell {
         }
     }
 
+    /// The stack a window belongs to, when it must show as tabs: as soon as
+    /// it holds two windows, and always in the `Tabs` layout.
+    fn tabs_of(&self, id: WindowId) -> Vec<WindowId> {
+        let Some(Placement::Slot(slot)) = self.desk.placement(id) else {
+            return Vec::new();
+        };
+        let Some(screen) = self.desk.screen(slot.output) else {
+            return Vec::new();
+        };
+        let stack = &screen.slots()[slot.index];
+        if stack.len() >= 2 || screen.layout() == LayoutKind::Tabs {
+            stack.windows().to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Takes the model's arrangement: geometry of each window, and stacking.
     fn sync(&mut self) {
         let arrangement = self.desk.arrangement();
@@ -168,10 +189,12 @@ impl Shell {
             let id = self.windows[index].id;
             if let Some(geometry) = arrangement.iter().find(|geometry| geometry.id == id) {
                 let (origin, show_swap) = self.placement_of(geometry);
+                let tabs = self.tabs_of(id);
                 let managed = &mut self.windows[index];
                 managed.geometry = *geometry;
                 managed.origin = origin;
                 managed.show_swap = show_swap;
+                managed.tabs = tabs;
             }
         }
     }
@@ -184,6 +207,20 @@ impl Shell {
         hover: Option<(WindowId, TitlebarButton)>,
     ) {
         let corner_radius = self.desk.metrics().corner_radius;
+        // What each window is called, for the tabs of its neighbours.
+        let labels: Vec<(WindowId, String, [u8; 3])> = self
+            .windows
+            .iter()
+            .map(|managed| {
+                let label = if managed.title.is_empty() {
+                    display_name(&managed.app_id)
+                } else {
+                    managed.title.clone()
+                };
+                (managed.id, label, badge_color(&managed.app_id))
+            })
+            .collect();
+
         for managed in &mut self.windows {
             let geometry = managed.geometry;
             let Some(bar) = geometry.titlebar.filter(|_| geometry.visible) else {
@@ -195,6 +232,16 @@ impl Shell {
             } else {
                 managed.title.clone()
             };
+            let tabs = managed
+                .tabs
+                .iter()
+                .filter_map(|id| labels.iter().find(|(known, ..)| known == id))
+                .map(|(id, label, badge)| TabSpec {
+                    label: label.clone(),
+                    badge: *badge,
+                    active: *id == managed.id,
+                })
+                .collect();
             let spec = TitlebarSpec {
                 size: bar.size(),
                 title: name,
@@ -207,6 +254,7 @@ impl Shell {
                 show_swap: managed.show_swap,
                 theme: theme.kind,
                 corner_radius,
+                tabs,
             };
             if managed.chrome.spec.as_ref() == Some(&spec) {
                 continue;
@@ -308,10 +356,13 @@ impl State {
             geometry,
             origin,
             show_swap,
+            tabs: Vec::new(),
             sized: false,
             oversized: false,
             chrome: Chrome::default(),
         });
+        // Rule 1: a window that opens floating comes with the offer to tidy it.
+        self.placement_offer = geometry.floating.then_some(id);
         self.apply_arrangement();
     }
 
@@ -402,8 +453,24 @@ impl State {
         }
 
         self.sync_keyboard_focus();
+        self.save_habits();
         self.full_redraw = true;
         self.queue_redraw();
+    }
+
+    /// Writes the habits to disk when tidying a window changed them.
+    fn save_habits(&mut self) {
+        let Some(directory) = &self.state_dir else {
+            return;
+        };
+        let memory = self.shell.desk.memory();
+        if *memory == self.saved_habits {
+            return;
+        }
+        match crate::persist::save(directory, memory) {
+            Ok(()) => self.saved_habits = memory.clone(),
+            Err(error) => warn!(%error, "cannot save habits"),
+        }
     }
 
     /// A client drew: if its window floats, the frame takes the size the

@@ -39,7 +39,7 @@ use tracing::{debug, error, info, warn};
 
 use super::Backend;
 use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
-use crate::render::scene::{self, SceneElement};
+use crate::render::scene::{self, Layers, SceneElement};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
 use crate::state::{App, State};
@@ -493,6 +493,7 @@ impl State {
         self.shell
             .refresh_chrome(&mut self.painter, &self.theme, self.hover);
         let cursor = self.cursor(true);
+        self.refresh_bar();
         let overlay = self.overlay();
         let Backend::Udev(udev) = &mut self.backend else {
             return;
@@ -509,9 +510,15 @@ impl State {
             &udev.shaders,
             &mut self.shell,
             &self.theme,
-            view,
-            &overlay,
-            cursor,
+            Layers {
+                view,
+                overlay: &overlay,
+                panel: self
+                    .bar
+                    .as_ref()
+                    .map(|bar| (&bar.buffer, bar.rect.origin())),
+                cursor,
+            },
         );
         let clear = self.theme.backdrop.premultiplied();
         // Everything is composited for now; scanning client buffers out

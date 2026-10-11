@@ -328,6 +328,7 @@ dependencies = [
  "coquille-model",
  "cosmic-text",
  "serde",
+ "serde_json",
  "smithay",
  "smithay-drm-extras",
  "tiny-skia",

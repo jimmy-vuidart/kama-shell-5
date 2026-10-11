@@ -40,6 +40,10 @@ struct Hit {
     /// The point is on the window's title bar.
     titlebar: bool,
     button: Option<TitlebarButton>,
+    /// The tab there: its position in the stack, and its window.
+    tab: Option<(usize, WindowId)>,
+    /// The point is on the placement bar, on this button of it if any.
+    bar: Option<Option<usize>>,
 }
 
 /// What the left mouse button is doing since it went down.
@@ -47,10 +51,16 @@ struct Hit {
 pub enum Gesture {
     /// Down on a title bar, not moved yet: a click, or the start of a drag.
     Pressed {
+        /// The window a drag would take: the one of the tab under the
+        /// pointer, else the one shown.
         window: WindowId,
         at: Point<f64, Logical>,
         button: Option<TitlebarButton>,
+        /// The tab to show if this ends as a click.
+        tab: Option<usize>,
     },
+    /// Down on the placement bar, on this button of it if any.
+    BarPressed { button: Option<usize> },
     /// Dragging a window by its title bar: drop zones are shown, and
     /// releasing on one places the window.
     Placing { window: WindowId },
@@ -229,6 +239,7 @@ impl State {
         };
 
         self.hover = hit.window.zip(hit.button);
+        self.bar_hover = hit.bar.flatten();
         // Over the shell's own chrome no client sets the cursor.
         if hit.surface.is_none() && !pointer.is_grabbed() {
             self.set_cursor(CursorImageStatus::default_named());
@@ -260,6 +271,7 @@ impl State {
                 window,
                 at,
                 button: None,
+                ..
             }) => {
                 let travelled = (location - at).to_i32_round::<i32>();
                 let far = f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt();
@@ -408,8 +420,25 @@ impl State {
                             self.click_titlebar_button(window, pressed);
                         }
                     }
+                    Some(Gesture::Pressed {
+                        window,
+                        tab: Some(tab),
+                        ..
+                    }) => self.show_tab(window, tab),
+                    Some(Gesture::BarPressed {
+                        button: Some(pressed),
+                    }) => {
+                        if self.hit_test(location).bar == Some(Some(pressed)) {
+                            self.run_bar_action(pressed);
+                        }
+                    }
                     Some(Gesture::Placing { window }) => self.drop_window(window, location),
-                    Some(Gesture::Pressed { .. } | Gesture::Moving { .. }) | None => {}
+                    Some(
+                        Gesture::Pressed { .. }
+                        | Gesture::Moving { .. }
+                        | Gesture::BarPressed { button: None },
+                    )
+                    | None => {}
                 }
                 for_clients = !std::mem::take(&mut self.swallowed_press);
                 self.queue_redraw();
@@ -434,6 +463,10 @@ impl State {
     /// Decides what a left press starts. Returns whether the shell keeps the
     /// press for itself.
     fn start_gesture(&mut self, hit: &Hit, location: Point<f64, Logical>) -> bool {
+        if let Some(button) = hit.bar {
+            self.gesture = Some(Gesture::BarPressed { button });
+            return true;
+        }
         let Some(managed) = hit.window.and_then(|window| self.shell.by_id(window)) else {
             return false;
         };
@@ -456,12 +489,23 @@ impl State {
         }
         if hit.titlebar {
             self.gesture = Some(Gesture::Pressed {
-                window,
+                window: hit.tab.map_or(window, |(_, tab_window)| tab_window),
                 at: location,
                 button: hit.button,
+                tab: hit.tab.map(|(index, _)| index),
             });
         }
         false
+    }
+
+    /// Shows a tab of the stack `window` belongs to.
+    fn show_tab(&mut self, window: WindowId, tab: usize) {
+        if let Some(Placement::Slot(slot)) = self.shell.desk.placement(window) {
+            if let Err(error) = self.shell.desk.activate_tab(slot, tab) {
+                warn!(%error, "cannot show this tab");
+            }
+            self.apply_arrangement();
+        }
     }
 
     fn on_axis<I: InputBackend>(&mut self, event: I::PointerAxisEvent) {
@@ -547,6 +591,18 @@ impl State {
                 .map(|(surface, offset)| (surface, offset.to_f64() + origin))
         };
 
+        let point = model_point(location);
+        if let Some(bar) = self.bar.as_ref().filter(|bar| bar.rect.contains(point)) {
+            let button = bar
+                .buttons
+                .iter()
+                .position(|(_, cell)| cell.contains(point));
+            return Hit {
+                bar: Some(button),
+                ..Hit::default()
+            };
+        }
+
         for managed in visible() {
             if let Some(surface) = surface_at(managed, WindowSurfaceType::POPUP) {
                 return Hit {
@@ -557,16 +613,22 @@ impl State {
             }
         }
 
-        let point = model_point(location);
         for managed in visible() {
             if let Some(bar) = managed.titlebar().filter(|bar| bar.contains(point)) {
                 let layout = TitlebarLayout::new(bar.size(), managed.show_swap);
                 let local = ModelPoint::new(point.x - bar.x, point.y - bar.y);
+                let button = layout.button_at(local);
+                let tab = layout
+                    .tab_at(managed.tabs.len(), local)
+                    .filter(|_| button.is_none())
+                    .and_then(|index| Some((index, *managed.tabs.get(index)?)));
                 return Hit {
                     window: Some(managed.id),
                     surface: None,
                     titlebar: true,
-                    button: layout.button_at(local),
+                    button,
+                    tab,
+                    bar: None,
                 };
             }
             if managed.client().contains(point) {
