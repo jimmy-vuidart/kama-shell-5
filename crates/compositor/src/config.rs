@@ -30,10 +30,25 @@ pub struct GameConfig {
     /// How long the pointer must be pushed against the edge to leave the
     /// screen of a game, in milliseconds; 0 turns sticky edges off.
     pub sticky_edges_ms: Option<u64>,
+    /// Hardware backend: show the buffer of the game as it is, without
+    /// drawing it again, when nothing else is on its screen. On unless this
+    /// says otherwise.
+    pub direct_scanout: Option<bool>,
+    /// Hardware backend: let the refresh rate of the screen follow the game,
+    /// where the screen can. On unless this says otherwise.
+    pub vrr: Option<bool>,
 }
 
 impl GameConfig {
     pub const DEFAULT_STICKY_EDGES_MS: u64 = 300;
+
+    pub fn direct_scanout(&self) -> bool {
+        self.direct_scanout.unwrap_or(true)
+    }
+
+    pub fn vrr(&self) -> bool {
+        self.vrr.unwrap_or(true)
+    }
 
     pub fn sticky_edges_ms(&self) -> u64 {
         self.sticky_edges_ms
@@ -143,6 +158,21 @@ mod tests {
         assert_eq!(config.game.sticky_edges_ms(), 0);
         assert!(parse("[game]\nsticky_edges_ms = -5").is_err());
         assert!(parse("[game]\nsticky = 5").is_err());
+    }
+
+    #[test]
+    fn direct_scanout_and_vrr_are_on_unless_turned_off_one_by_one() {
+        let defaults = parse("").unwrap().game;
+        assert!(defaults.direct_scanout());
+        assert!(defaults.vrr());
+
+        let config = parse("[game]\ndirect_scanout = false").unwrap().game;
+        assert!(!config.direct_scanout());
+        assert!(config.vrr());
+
+        let config = parse("[game]\nvrr = false").unwrap().game;
+        assert!(config.direct_scanout());
+        assert!(!config.vrr());
     }
 
     #[test]

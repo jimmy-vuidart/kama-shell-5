@@ -225,10 +225,7 @@ impl State {
                     Layers {
                         view,
                         overlay: &overlay,
-                        panel: self
-                            .bar
-                            .as_ref()
-                            .map(|bar| (&bar.buffer, bar.rect.origin())),
+                        panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
                         cursor,
                     },
                 );

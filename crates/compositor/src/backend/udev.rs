@@ -12,7 +12,8 @@ use anyhow::{Context, anyhow};
 use coquille_model::{OutputId, Rect, Size as ModelSize};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
-use smithay::backend::drm::compositor::FrameFlags;
+use smithay::backend::drm::VrrSupport;
+use smithay::backend::drm::compositor::{FrameFlags, PrimaryPlaneElement};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmNode};
@@ -27,6 +28,7 @@ use smithay::output::{Mode as OutputMode, Output, PhysicalProperties};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::drm::Device as _;
+use smithay::reexports::drm::control::Device as _;
 use smithay::reexports::drm::control::{ModeTypeFlags, connector, crtc};
 use smithay::reexports::input::Libinput;
 use smithay::reexports::rustix;
@@ -38,6 +40,8 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use tracing::{debug, error, info, warn};
 
 use super::Backend;
+use crate::config::GameConfig;
+use crate::game::{Boost, FrameNote};
 use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
 use crate::render::scene::{self, Layers, SceneElement};
 use crate::render::shaders::Shaders;
@@ -79,6 +83,10 @@ struct Screen {
     frame: Duration,
     /// Frames that failed in a row, to keep the log readable.
     failures: u32,
+    /// Game mode: the shortcuts this screen may still take.
+    boost: Boost,
+    /// The refresh rate follows the game at the moment.
+    vrr_on: bool,
 }
 
 pub struct Udev {
@@ -202,6 +210,12 @@ pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
             refresh_mhz = mode.refresh,
             role = ?info.map(|info| info.role),
             position = ?info.map(|info| (info.rect.x, info.rect.y)),
+            vrr_capable = ?flag(
+                gpu.manager.device(),
+                screen.connector.handle(),
+                "vrr_capable"
+            ),
+            vrr_switch = flag(gpu.manager.device(), screen.crtc, "VRR_ENABLED").is_some(),
             "screen found"
         );
     }
@@ -218,6 +232,7 @@ pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
 pub fn init(
     handle: &LoopHandle<'static, State>,
     roles: &RoleConfig,
+    game: &GameConfig,
 ) -> anyhow::Result<(Udev, Vec<(ScreenInfo, Output)>)> {
     let (mut session, session_events) =
         LibSeatSession::new().map_err(|error| anyhow!("cannot take the seat: {error}"))?;
@@ -244,7 +259,7 @@ pub fn init(
             warn!(name = found.name, "this screen has no role and stays off");
             continue;
         };
-        match light(&mut manager, &mut renderer, found, &info) {
+        match light(&mut manager, &mut renderer, found, &info, game) {
             Ok((screen, output)) => {
                 screens.push(screen);
                 outputs.push((info, output));
@@ -320,6 +335,21 @@ fn create_renderer(gbm: &GbmDevice<DrmDeviceFd>) -> anyhow::Result<GlesRenderer>
     unsafe { GlesRenderer::new(context) }.context("cannot create the renderer")
 }
 
+/// The value of an on/off property of a connector or a CRTC, `None` when the
+/// driver does not have it. Game mode reads what the screen and the driver
+/// say about a variable refresh rate this way.
+fn flag<H>(device: &DrmDevice, object: H, name: &str) -> Option<bool>
+where
+    H: smithay::reexports::drm::control::ResourceHandle,
+{
+    let properties = device.get_properties(object).ok()?;
+    let (handles, values) = properties.as_props_and_values();
+    handles.iter().zip(values).find_map(|(handle, value)| {
+        let property = device.get_property(*handle).ok()?;
+        (property.name().to_str() == Ok(name)).then_some(*value != 0)
+    })
+}
+
 /// Every plugged screen that has a CRTC to drive it, with the mode to use.
 fn scan(manager: &OutputManager) -> anyhow::Result<Vec<Found>> {
     let device = manager.device();
@@ -376,6 +406,7 @@ fn light(
     renderer: &mut GlesRenderer,
     found: &Found,
     info: &ScreenInfo,
+    game: &GameConfig,
 ) -> anyhow::Result<(Screen, Output)> {
     let device = manager.device();
     let connector = &found.connector;
@@ -420,12 +451,20 @@ fn light(
         )
         .map_err(|error| anyhow!("{error}"))?;
 
+    // Game mode: what this screen and the driver say about a variable
+    // refresh rate. It is only used where it needs no mode set, which would
+    // blank the screen each time a game starts or stops.
+    let vrr = surface.with_compositor(|compositor| compositor.vrr_supported(connector.handle()));
+    let vrr_usable = matches!(vrr, Ok(VrrSupport::Supported));
     info!(
         name = found.name,
         role = ?info.role,
         width = mode.size.w,
         height = mode.size.h,
         refresh_mhz = mode.refresh,
+        vrr = ?vrr,
+        vrr_for_games = game.vrr() && vrr_usable,
+        direct_scanout_for_games = game.direct_scanout(),
         "screen lit"
     );
     let screen = Screen {
@@ -435,6 +474,8 @@ fn light(
         pacing: Pacing::Idle,
         frame: Duration::from_secs_f64(1000.0 / f64::from(mode.refresh.max(1))),
         failures: 0,
+        boost: Boost::new(game.direct_scanout(), game.vrr() && vrr_usable),
+        vrr_on: false,
     };
     Ok((screen, output))
 }
@@ -511,32 +552,123 @@ impl State {
             Layers {
                 view,
                 overlay: &overlay,
-                panel: self
-                    .bar
-                    .as_ref()
-                    .map(|bar| (&bar.buffer, bar.rect.origin())),
+                panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
                 cursor,
             },
         );
-        let clear = self.theme.backdrop.premultiplied();
-        // Everything is composited for now; scanning client buffers out
-        // directly comes with game mode.
-        let rendered = screen
-            .surface
-            .render_frame(&mut udev.renderer, &elements, clear, FrameFlags::empty())
-            .map(|frame| frame.is_empty)
-            .map_err(|error| error.to_string());
+        let crtc = screen.crtc;
+        // Game mode: a screen held by a fullscreen window may show the
+        // buffer of that window as it is, and follow its pace. Every other
+        // screen is composited, as it always was.
+        let anchored = self
+            .shell
+            .desk
+            .screen(screen.id)
+            .is_some_and(|model| model.anchored().is_some());
+        let wants_vrr = screen.boost.vrr(anchored);
+        if wants_vrr != screen.vrr_on {
+            let switched = screen
+                .surface
+                .with_compositor(|compositor| compositor.use_vrr(wants_vrr));
+            match switched {
+                Ok(()) => {
+                    info!(?crtc, on = wants_vrr, "variable refresh rate switched");
+                    screen.vrr_on = wants_vrr;
+                }
+                Err(error) => {
+                    // Not asked again: the screen keeps its fixed rate.
+                    screen.boost.vrr_failed();
+                    screen.vrr_on = false;
+                    warn!(?crtc, %error, "the driver refused the variable refresh rate: left off");
+                }
+            }
+        }
+
+        // Around a game the screen is black, which is also what lets its
+        // buffer be shown alone.
+        let clear = if anchored {
+            [0.0, 0.0, 0.0, 1.0]
+        } else {
+            self.theme.backdrop.premultiplied()
+        };
+        let scanout = screen.boost.scanout(anchored);
+        // Only the primary plane: the pointer is still drawn by the
+        // compositor, so the buffer of the game is shown directly while
+        // nothing else is on its screen.
+        let flags = if scanout {
+            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT
+        } else {
+            FrameFlags::empty()
+        };
+        let mut draw = |flags| {
+            screen
+                .surface
+                .render_frame(&mut udev.renderer, &elements, clear, flags)
+                .map(|frame| {
+                    let direct = matches!(frame.primary_element, PrimaryPlaneElement::Element(_));
+                    (frame.is_empty, direct)
+                })
+                .map_err(|error| error.to_string())
+        };
+        let mut rendered = draw(flags);
+        let mut gave_up = false;
+        if let (Err(error), true) = (&rendered, scanout) {
+            // Whatever went wrong, the composited path is known to work.
+            warn!(
+                ?crtc,
+                error, "direct scanout failed: this screen is composited from now on"
+            );
+            rendered = draw(FrameFlags::empty());
+            gave_up = screen.boost.scanout_failed();
+        }
+        let direct = matches!(rendered, Ok((_, true)));
+        match screen.boost.frame_shown(anchored, direct) {
+            Some(FrameNote::Direct) => {
+                info!(
+                    ?crtc,
+                    "direct scanout: the buffer of the game is shown as it is"
+                );
+            }
+            Some(FrameNote::Composited) => info!(
+                ?crtc,
+                elements = elements.len(),
+                "direct scanout not possible for this frame: composited \
+                 (more than one element means something else is on the screen, \
+                 one element that the driver or the buffer format did not allow it)"
+            ),
+            None => {}
+        }
         let queued = match rendered {
-            Ok(true) => Ok(false),
-            Ok(false) => screen
+            Ok((true, _)) => Ok(false),
+            Ok((false, _)) => screen
                 .surface
                 .queue_frame(())
                 .map(|()| true)
                 .map_err(|error| error.to_string()),
             Err(error) => Err(error),
         };
+        if queued.is_err() && direct && screen.boost.scanout_failed() {
+            warn!(
+                ?crtc,
+                "a directly shown frame was refused: this screen is composited from now on"
+            );
+            gave_up = true;
+        }
+        // A frame that fails while the refresh rate follows the game: the
+        // fixed rate is known to work, and comes back with the next frame.
+        if queued.is_err() && screen.vrr_on && screen.boost.vrr_failed() {
+            warn!(
+                ?crtc,
+                "a frame failed with the variable refresh rate on: it is turned off for good"
+            );
+            gave_up = true;
+        }
+        if gave_up {
+            // Start again from clean buffers, with the next frame.
+            self.full_redraw = true;
+            self.redraw_needed = true;
+        }
 
-        let crtc = screen.crtc;
         let (sent, failed) = match queued {
             Ok(sent) => {
                 screen.failures = 0;
@@ -624,6 +756,8 @@ impl State {
                 udev.active = true;
                 for screen in &mut udev.screens {
                     screen.pacing = Pacing::Idle;
+                    // Asked again with the next frame of a game.
+                    screen.vrr_on = false;
                 }
                 self.full_redraw = true;
                 self.queue_redraw();

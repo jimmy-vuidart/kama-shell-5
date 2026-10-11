@@ -154,9 +154,172 @@ impl StickyEdges {
     }
 }
 
+/// What to say in the log about how a game's frames reach its screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameNote {
+    /// The game's own buffer is shown as it is.
+    Direct,
+    /// The frame was drawn by the compositor although direct display was
+    /// allowed.
+    Composited,
+}
+
+/// The shortcuts the hardware may take on the screen of a game, direct
+/// scanout and variable refresh rate, and what is left of them once one has
+/// failed. A failure turns its shortcut off for good: the screen goes back
+/// to what always works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Boost {
+    scanout: bool,
+    vrr: bool,
+    /// What the log was last told in this stay of a game on the screen.
+    told: Option<FrameNote>,
+}
+
+impl Boost {
+    /// `scanout` and `vrr` say what the configuration allows and the screen
+    /// can do.
+    pub fn new(scanout: bool, vrr: bool) -> Self {
+        Self {
+            scanout,
+            vrr,
+            told: None,
+        }
+    }
+
+    /// Whether the next frame may show the buffer of the game directly. Only
+    /// a screen held by a fullscreen window may.
+    pub fn scanout(&self, anchored: bool) -> bool {
+        anchored && self.scanout
+    }
+
+    /// Whether the refresh rate should follow the game.
+    pub fn vrr(&self, anchored: bool) -> bool {
+        anchored && self.vrr
+    }
+
+    /// Direct scanout failed. Returns whether this is news, to be logged.
+    pub fn scanout_failed(&mut self) -> bool {
+        std::mem::take(&mut self.scanout)
+    }
+
+    /// Turning the variable refresh rate on failed. Returns whether this is
+    /// news, to be logged.
+    pub fn vrr_failed(&mut self) -> bool {
+        std::mem::take(&mut self.vrr)
+    }
+
+    /// A frame went out, `direct`ly or not. Returns what is worth a line in
+    /// the log: each way of showing a game, once per stay of the game.
+    pub fn frame_shown(&mut self, anchored: bool, direct: bool) -> Option<FrameNote> {
+        if !self.scanout(anchored) {
+            self.told = None;
+            return None;
+        }
+        let note = if direct {
+            FrameNote::Direct
+        } else {
+            FrameNote::Composited
+        };
+        // Direct display is the news: once seen, a composited frame (the
+        // pointer came back over the game) is nothing to report.
+        let news = match self.told {
+            None => true,
+            Some(FrameNote::Composited) => note == FrameNote::Direct,
+            Some(FrameNote::Direct) => false,
+        };
+        news.then(|| {
+            self.told = Some(note);
+            note
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_screen_of_a_game_takes_shortcuts() {
+        let boost = Boost::new(true, true);
+
+        assert!(boost.scanout(true));
+        assert!(boost.vrr(true));
+        assert!(!boost.scanout(false));
+        assert!(!boost.vrr(false));
+    }
+
+    #[test]
+    fn shortcuts_turned_off_are_never_taken() {
+        let boost = Boost::new(false, false);
+
+        assert!(!boost.scanout(true));
+        assert!(!boost.vrr(true));
+    }
+
+    #[test]
+    fn each_shortcut_is_switched_separately() {
+        assert!(Boost::new(true, false).scanout(true));
+        assert!(!Boost::new(true, false).vrr(true));
+        assert!(Boost::new(false, true).vrr(true));
+        assert!(!Boost::new(false, true).scanout(true));
+    }
+
+    #[test]
+    fn a_failure_turns_its_shortcut_off_for_good_and_is_news_once() {
+        let mut boost = Boost::new(true, true);
+
+        assert!(boost.scanout_failed());
+        assert!(!boost.scanout(true));
+        assert!(boost.vrr(true));
+        assert!(!boost.scanout_failed());
+
+        assert!(boost.vrr_failed());
+        assert!(!boost.vrr(true));
+        assert!(!boost.vrr_failed());
+    }
+
+    #[test]
+    fn the_first_frame_of_a_game_says_how_it_was_shown() {
+        let mut direct = Boost::new(true, false);
+        let mut composited = Boost::new(true, false);
+
+        assert_eq!(direct.frame_shown(true, true), Some(FrameNote::Direct));
+        assert_eq!(
+            composited.frame_shown(true, false),
+            Some(FrameNote::Composited)
+        );
+    }
+
+    #[test]
+    fn the_same_way_of_showing_frames_is_said_once() {
+        let mut boost = Boost::new(true, false);
+
+        boost.frame_shown(true, false);
+        assert_eq!(boost.frame_shown(true, false), None);
+        assert_eq!(boost.frame_shown(true, true), Some(FrameNote::Direct));
+        assert_eq!(boost.frame_shown(true, true), None);
+        // The pointer passes over the game: composited again, not news.
+        assert_eq!(boost.frame_shown(true, false), None);
+        assert_eq!(boost.frame_shown(true, true), None);
+    }
+
+    #[test]
+    fn the_next_game_is_reported_anew() {
+        let mut boost = Boost::new(true, false);
+
+        boost.frame_shown(true, true);
+        assert_eq!(boost.frame_shown(false, false), None);
+
+        assert_eq!(boost.frame_shown(true, true), Some(FrameNote::Direct));
+    }
+
+    #[test]
+    fn nothing_is_reported_when_direct_display_is_off() {
+        let mut boost = Boost::new(false, true);
+
+        assert_eq!(boost.frame_shown(true, false), None);
+    }
 
     #[test]
     fn pressing_and_releasing_the_modifier_alone_is_a_tap() {

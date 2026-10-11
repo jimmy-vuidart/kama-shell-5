@@ -24,6 +24,9 @@ use crate::theme::{Rgba, Theme};
 
 /// The compositor draws at scale 1 for now.
 const SCALE: f64 = 1.0;
+/// How far from a view the pointer may be and still show on it: more than
+/// any pointer image is large.
+const CURSOR_REACH: i32 = 256;
 
 render_elements! {
     pub SceneElement<=GlesRenderer>;
@@ -121,8 +124,8 @@ pub struct Layers<'a> {
     /// Shell hints above the windows (drop zones), in the global space.
     pub overlay: &'a [Shape],
     /// A panel of the shell above everything but the cursor (the placement
-    /// bar), with its corner in the global space.
-    pub panel: Option<(&'a MemoryRenderBuffer, ModelPoint)>,
+    /// bar), with its place in the global space.
+    pub panel: Option<(&'a MemoryRenderBuffer, Rect)>,
     pub cursor: Option<Cursor>,
 }
 
@@ -283,8 +286,20 @@ pub fn build(
         }
     }
 
+    // What is not on this view is left out altogether: a screen that shows
+    // a single window can then hand its buffer straight to the hardware.
     let mut elements = Vec::new();
     let to_view: Point<i32, Logical> = (shift.x, shift.y).into();
+    let near_view = Rect::new(
+        view.x - CURSOR_REACH,
+        view.y - CURSOR_REACH,
+        view.w + 2 * CURSOR_REACH,
+        view.h + 2 * CURSOR_REACH,
+    );
+    let cursor = cursor.filter(|cursor| {
+        let (Cursor::Surface { location, .. } | Cursor::Image { location, .. }) = cursor;
+        near_view.contains(ModelPoint::new(location.x, location.y))
+    });
     match cursor {
         Some(Cursor::Surface { surface, location }) => {
             elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
@@ -312,8 +327,8 @@ pub fn build(
         }
         None => {}
     }
-    if let Some((buffer, corner)) = panel {
-        let corner = ModelPoint::new(corner.x + shift.x, corner.y + shift.y);
+    if let Some((buffer, place)) = panel.filter(|(_, place)| overlaps(*place, view)) {
+        let corner = ModelPoint::new(place.x + shift.x, place.y + shift.y);
         let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
         match MemoryRenderBufferRenderElement::from_buffer(
             renderer,
@@ -345,7 +360,12 @@ pub fn build(
         let Some(surface) = window.wl_surface() else {
             continue;
         };
-        let location = window.last_configure().loc + to_view;
+        let place = window.last_configure();
+        let covered = Rect::new(place.loc.x, place.loc.y, place.size.w, place.size.h);
+        if !overlaps(covered, view) {
+            continue;
+        }
+        let location = place.loc + to_view;
         elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
             renderer,
             &surface,

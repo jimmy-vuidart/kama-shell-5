@@ -29,3 +29,12 @@ right = "DP-1"
 # Bords collants : durée (en millisecondes) pendant laquelle il faut pousser le
 # curseur contre le bord pour quitter l'écran du jeu. 0 les désactive.
 # sticky_edges_ms = 300
+
+# Affichage direct : l'image du jeu est envoyée telle quelle à l'écran, sans
+# être redessinée, tant que rien d'autre n'est affiché sur son écran (pointeur
+# compris). En cas de souci d'affichage en jeu, mettre `false`.
+# direct_scanout = true
+
+# Fréquence variable (VRR, G-Sync/FreeSync) : activée sur l'écran d'un jeu si
+# l'écran et le pilote la proposent. En cas de scintillement, mettre `false`.
+# vrr = true
