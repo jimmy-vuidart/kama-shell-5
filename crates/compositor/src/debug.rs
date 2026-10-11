@@ -8,9 +8,12 @@
 //! ```
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
-const KEYS: [(&str, u32); 7] = [
+const KEYS: [(&str, u32); 10] = [
     ("alt", 64),
+    ("ctrl", 37),
     ("shift", 50),
+    ("enter", 36),
+    ("backspace", 22),
     ("1", 10),
     ("2", 11),
     ("e", 26),
@@ -155,6 +158,19 @@ mod tests {
                 (0, Step::Release(64)),
             ]
         );
+    }
+
+    #[test]
+    fn enter_and_backspace_can_be_named() {
+        assert_eq!(
+            steps("0 key ctrl+alt+backspace")[..3],
+            [
+                (0, Step::Press(37)),
+                (0, Step::Press(64)),
+                (0, Step::Press(22))
+            ]
+        );
+        assert_eq!(steps("0 key enter")[0], (0, Step::Press(36)));
     }
 
     #[test]

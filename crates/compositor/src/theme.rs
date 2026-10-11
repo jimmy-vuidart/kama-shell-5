@@ -2,7 +2,8 @@
 
 use clap::ValueEnum;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ThemeKind {
     Light,
     Dark,

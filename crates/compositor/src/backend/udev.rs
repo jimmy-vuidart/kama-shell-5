@@ -1,0 +1,626 @@
+//! The hardware backend: real screens through DRM/KMS, real devices through
+//! libinput, and the seat (who may use them) through libseat.
+//!
+//! One GPU drives everything: the one the firmware booted on, which is where
+//! the screens are plugged. Screens are found once, at start-up.
+
+use std::os::fd::OwnedFd;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::{Context, anyhow};
+use coquille_model::{OutputId, Rect, Size as ModelSize};
+use smithay::backend::allocator::Fourcc;
+use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
+use smithay::backend::drm::compositor::FrameFlags;
+use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
+use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
+use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent, DrmNode};
+use smithay::backend::egl::context::ContextPriority;
+use smithay::backend::egl::{EGLContext, EGLDevice, EGLDisplay};
+use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
+use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::session::libseat::LibSeatSession;
+use smithay::backend::session::{Event as SessionEvent, Session};
+use smithay::backend::udev::{all_gpus, primary_gpu};
+use smithay::output::{Mode as OutputMode, Output, PhysicalProperties};
+use smithay::reexports::calloop::LoopHandle;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+use smithay::reexports::drm::Device as _;
+use smithay::reexports::drm::control::{ModeTypeFlags, connector, crtc};
+use smithay::reexports::input::Libinput;
+use smithay::reexports::rustix;
+use smithay::reexports::rustix::fs::OFlags;
+use smithay::utils::DeviceFd;
+use smithay::wayland::drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd};
+use smithay_drm_extras::display_info;
+use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
+use tracing::{debug, error, info, warn};
+
+use super::Backend;
+use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
+use crate::render::scene::{self, SceneElement};
+use crate::render::shaders::Shaders;
+use crate::shell::ScreenInfo;
+use crate::state::{App, State};
+
+type Allocator = GbmAllocator<DrmDeviceFd>;
+type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
+type OutputManager = DrmOutputManager<Allocator, Exporter, (), DrmDeviceFd>;
+type ScreenSurface = DrmOutput<Allocator, Exporter, (), DrmDeviceFd>;
+
+/// Eight bits per channel, which every screen and driver accepts. Tried in
+/// order: the screen needs no alpha channel, so those without come first.
+const COLOR_FORMATS: [Fourcc; 4] = [
+    Fourcc::Xrgb8888,
+    Fourcc::Xbgr8888,
+    Fourcc::Argb8888,
+    Fourcc::Abgr8888,
+];
+
+/// Where a screen is in its frame cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pacing {
+    /// Nothing pending: a redraw may start at once.
+    Idle,
+    /// A frame is on its way to the screen, or one brought no change and a
+    /// timer stands in for the screen's refresh. `redraw` asks for another
+    /// frame as soon as this one is done.
+    Waiting { redraw: bool },
+}
+
+/// A lit screen.
+struct Screen {
+    id: OutputId,
+    crtc: crtc::Handle,
+    surface: ScreenSurface,
+    pacing: Pacing,
+    /// Duration of one refresh.
+    frame: Duration,
+    /// Frames that failed in a row, to keep the log readable.
+    failures: u32,
+}
+
+pub struct Udev {
+    session: LibSeatSession,
+    libinput: Libinput,
+    pub renderer: GlesRenderer,
+    shaders: Shaders,
+    manager: OutputManager,
+    screens: Vec<Screen>,
+    /// False while another virtual terminal is shown.
+    active: bool,
+    /// Explicit synchronisation with clients, where the driver has it.
+    pub syncobj: Option<DrmSyncobjState>,
+}
+
+/// A plugged screen found while scanning, before it is lit.
+struct Found {
+    connector: connector::Info,
+    crtc: crtc::Handle,
+    name: String,
+    mode: smithay::reexports::drm::control::Mode,
+}
+
+/// A GPU ready to draw, with its screens not lit yet.
+struct Gpu {
+    renderer: GlesRenderer,
+    shaders: Shaders,
+    manager: OutputManager,
+}
+
+/// Prepares rendering and mode setting on an opened GPU. `reset` turns every
+/// screen off first, which only the owner of the screens may do.
+fn prepare(fd: OwnedFd, reset: bool) -> anyhow::Result<(Gpu, DrmDeviceNotifier)> {
+    let fd = DrmDeviceFd::new(DeviceFd::from(fd));
+    let node = DrmNode::from_file(&fd).context("cannot identify the GPU")?;
+    let (drm, drm_events) = DrmDevice::new(fd.clone(), reset).context("cannot set up DRM")?;
+    let gbm = GbmDevice::new(fd).context("cannot set up GBM")?;
+
+    let mut renderer = create_renderer(&gbm)?;
+    let shaders = Shaders::compile(&mut renderer).context("cannot compile the shaders")?;
+
+    let render_node = EGLDevice::device_for_display(renderer.egl_context().display())
+        .ok()
+        .and_then(|device| device.try_get_render_node().ok().flatten())
+        .unwrap_or(node);
+    let allocator = GbmAllocator::new(
+        gbm.clone(),
+        GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+    );
+    let exporter = GbmFramebufferExporter::new(gbm.clone(), Some(render_node).into());
+    let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
+    let manager = DrmOutputManager::new(
+        drm,
+        allocator,
+        exporter,
+        Some(gbm),
+        COLOR_FORMATS,
+        render_formats,
+    );
+    let gpu = Gpu {
+        renderer,
+        shaders,
+        manager,
+    };
+    Ok((gpu, drm_events))
+}
+
+/// The role and place of each screen found; `None` for a screen left off.
+fn plan(found: &[Found], roles: &RoleConfig) -> Vec<Option<ScreenInfo>> {
+    let connected: Vec<Connected> = found
+        .iter()
+        .map(|screen| {
+            let (w, h) = screen.mode.size();
+            Connected {
+                name: screen.name.clone(),
+                size: ModelSize::new(i32::from(w), i32::from(h)),
+            }
+        })
+        .collect();
+    let roles = assign_roles(&connected, roles);
+    let placed: Vec<_> = connected
+        .iter()
+        .zip(&roles)
+        .filter_map(|(screen, role)| Some(((*role)?, screen.size)))
+        .collect();
+    let mut corners = origins(&placed).into_iter();
+
+    let screens = found.iter().zip(connected).zip(roles);
+    screens
+        .map(|((found, connected), role)| {
+            let corner = corners.next().filter(|_| role.is_some())?;
+            Some(ScreenInfo {
+                id: OutputId(found.crtc.into()),
+                role: role?,
+                rect: Rect::new(corner.x, corner.y, connected.size.w, connected.size.h),
+            })
+        })
+        .collect()
+}
+
+/// Debug aid: examines the GPU and the screens without showing anything,
+/// which works from inside another session. Everything short of taking the
+/// seat and setting modes is exercised.
+pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
+    let path = gpu_path("seat0")?;
+    info!(gpu = %path.display(), "probing this GPU");
+    let flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NONBLOCK;
+    let fd = rustix::fs::open(&path, flags, rustix::fs::Mode::empty())
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    let (mut gpu, _events) = prepare(fd, false)?;
+    // Marked inactive, the device leaves the screens alone when it is closed.
+    gpu.manager.pause();
+
+    let found = scan(&gpu.manager)?;
+    for (screen, info) in found.iter().zip(plan(&found, roles)) {
+        let mode = OutputMode::from(screen.mode);
+        info!(
+            name = screen.name,
+            width = mode.size.w,
+            height = mode.size.h,
+            refresh_mhz = mode.refresh,
+            role = ?info.map(|info| info.role),
+            position = ?info.map(|info| (info.rect.x, info.rect.y)),
+            "screen found"
+        );
+    }
+    let sync = supports_syncobj_eventfd(gpu.manager.device().device_fd());
+    info!(
+        screens = found.len(),
+        explicit_sync = sync,
+        "probe done: nothing was displayed"
+    );
+    Ok(())
+}
+
+/// Takes the seat, opens the GPU and lights every screen that gets a role.
+pub fn init(
+    handle: &LoopHandle<'static, App>,
+    roles: &RoleConfig,
+) -> anyhow::Result<(Udev, Vec<(ScreenInfo, Output)>)> {
+    let (mut session, session_events) =
+        LibSeatSession::new().map_err(|error| anyhow!("cannot take the seat: {error}"))?;
+    let seat = session.seat();
+
+    let path = gpu_path(&seat)?;
+    info!(gpu = %path.display(), "using this GPU");
+    let flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK;
+    let fd = session
+        .open(&path, flags)
+        .map_err(|error| anyhow!("cannot open {}: {error}", path.display()))?;
+    let (gpu, drm_events) = prepare(fd, true)?;
+    let Gpu {
+        mut renderer,
+        shaders,
+        mut manager,
+    } = gpu;
+
+    let found = scan(&manager)?;
+    let mut screens = Vec::new();
+    let mut outputs = Vec::new();
+    for (found, info) in found.iter().zip(plan(&found, roles)) {
+        let Some(info) = info else {
+            warn!(name = found.name, "this screen has no role and stays off");
+            continue;
+        };
+        match light(&mut manager, &mut renderer, found, &info) {
+            Ok((screen, output)) => {
+                screens.push(screen);
+                outputs.push((info, output));
+            }
+            Err(error) => error!(name = found.name, "cannot light this screen: {error:#}"),
+        }
+    }
+    if screens.is_empty() {
+        return Err(anyhow!("no screen could be lit"));
+    }
+
+    let mut libinput =
+        Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
+    libinput
+        .udev_assign_seat(&seat)
+        .map_err(|()| anyhow!("cannot attach input devices to seat {seat}"))?;
+
+    handle
+        .insert_source(
+            LibinputInputBackend::new(libinput.clone()),
+            |event, _, app| {
+                app.state.process_input_event(event);
+            },
+        )
+        .map_err(|error| anyhow!("cannot watch input devices: {error}"))?;
+    handle
+        .insert_source(session_events, |event, _, app| {
+            app.state.session_event(event)
+        })
+        .map_err(|error| anyhow!("cannot watch the session: {error}"))?;
+    handle
+        .insert_source(drm_events, |event, _, app| match event {
+            DrmEvent::VBlank(crtc) => app.state.frame_shown(crtc),
+            DrmEvent::Error(error) => error!(%error, "DRM error"),
+        })
+        .map_err(|error| anyhow!("cannot watch the screens: {error}"))?;
+
+    let udev = Udev {
+        session,
+        libinput,
+        renderer,
+        shaders,
+        manager,
+        screens,
+        active: true,
+        syncobj: None,
+    };
+    Ok((udev, outputs))
+}
+
+/// The GPU the firmware booted on, else the first one of the seat.
+fn gpu_path(seat: &str) -> anyhow::Result<PathBuf> {
+    let primary = primary_gpu(seat).context("cannot list GPUs")?;
+    match primary {
+        Some(path) => Ok(path),
+        None => all_gpus(seat)
+            .context("cannot list GPUs")?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("no GPU on seat {seat}")),
+    }
+}
+
+/// Creates the GLES renderer of a GPU.
+#[expect(unsafe_code, reason = "Smithay only offers unsafe constructors here")]
+fn create_renderer(gbm: &GbmDevice<DrmDeviceFd>) -> anyhow::Result<GlesRenderer> {
+    // SAFETY: the display must not be terminated behind Smithay's back by
+    // other EGL code using the same native display; nothing else in this
+    // process creates an EGL display.
+    let display = unsafe { EGLDisplay::new(gbm.clone()) }.context("cannot set up EGL")?;
+    let context = EGLContext::new_with_priority(&display, ContextPriority::High)
+        .context("cannot create the EGL context")?;
+    // SAFETY: the context must not be current on another thread; it was just
+    // created on this one and is handed over to the renderer.
+    unsafe { GlesRenderer::new(context) }.context("cannot create the renderer")
+}
+
+/// Every plugged screen that has a CRTC to drive it, with the mode to use.
+fn scan(manager: &OutputManager) -> anyhow::Result<Vec<Found>> {
+    let device = manager.device();
+    let mut scanner: DrmScanner = DrmScanner::new();
+    let events = scanner
+        .scan_connectors(device)
+        .context("cannot scan connectors")?;
+
+    let mut found = Vec::new();
+    for event in events {
+        let DrmScanEvent::Connected {
+            connector,
+            crtc: Some(crtc),
+        } = event
+        else {
+            continue;
+        };
+        let name = format!(
+            "{}-{}",
+            connector.interface().as_str(),
+            connector.interface_id()
+        );
+        let modes: Vec<ModeInfo> = connector
+            .modes()
+            .iter()
+            .map(|mode| {
+                let (w, h) = mode.size();
+                ModeInfo {
+                    size: ModelSize::new(i32::from(w), i32::from(h)),
+                    refresh: OutputMode::from(*mode).refresh,
+                    preferred: mode.mode_type().contains(ModeTypeFlags::PREFERRED),
+                }
+            })
+            .collect();
+        let Some(mode) = pick_mode(&modes).map(|index| connector.modes()[index]) else {
+            warn!(name, "this screen offers no mode");
+            continue;
+        };
+        found.push(Found {
+            connector,
+            crtc,
+            name,
+            mode,
+        });
+    }
+    // Scan order is not stable across boots; names are.
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(found)
+}
+
+/// Sets a screen's mode and prepares its frame cycle.
+fn light(
+    manager: &mut OutputManager,
+    renderer: &mut GlesRenderer,
+    found: &Found,
+    info: &ScreenInfo,
+) -> anyhow::Result<(Screen, Output)> {
+    let device = manager.device();
+    let connector = &found.connector;
+    let edid = display_info::for_connector(device, connector.handle());
+    let describe = |text: Option<String>| text.unwrap_or_else(|| "Unknown".into());
+    let (width_mm, height_mm) = connector.size().unwrap_or((0, 0));
+    let output = Output::new(
+        found.name.clone(),
+        PhysicalProperties {
+            size: (width_mm as i32, height_mm as i32).into(),
+            subpixel: connector.subpixel().into(),
+            make: describe(edid.as_ref().and_then(|edid| edid.make())),
+            model: describe(edid.as_ref().and_then(|edid| edid.model())),
+            serial_number: describe(edid.as_ref().and_then(|edid| edid.serial())),
+        },
+    );
+    let mode = OutputMode::from(found.mode);
+    let position = (info.rect.x, info.rect.y).into();
+    output.set_preferred(mode);
+    output.change_current_state(Some(mode), None, None, Some(position));
+
+    let mut planes = device.planes(&found.crtc).context("cannot list planes")?;
+    let driver = device.get_driver().context("cannot identify the driver")?;
+    let is_nvidia = [driver.name(), driver.description()]
+        .iter()
+        .any(|text| text.to_string_lossy().to_lowercase().contains("nvidia"));
+    if is_nvidia {
+        // Its overlay planes are too restricted to be worth trying.
+        planes.overlay = Vec::new();
+    }
+
+    let surface = manager
+        .lock()
+        .initialize_output::<GlesRenderer, SceneElement>(
+            found.crtc,
+            found.mode,
+            &[connector.handle()],
+            &output,
+            Some(planes),
+            renderer,
+            &DrmOutputRenderElements::default(),
+        )
+        .map_err(|error| anyhow!("{error}"))?;
+
+    info!(
+        name = found.name,
+        role = ?info.role,
+        width = mode.size.w,
+        height = mode.size.h,
+        refresh_mhz = mode.refresh,
+        "screen lit"
+    );
+    let screen = Screen {
+        id: info.id,
+        crtc: found.crtc,
+        surface,
+        pacing: Pacing::Idle,
+        frame: Duration::from_secs_f64(1000.0 / f64::from(mode.refresh.max(1))),
+        failures: 0,
+    };
+    Ok((screen, output))
+}
+
+impl Udev {
+    pub fn switch_vt(&mut self, vt: i32) {
+        if let Err(error) = self.session.change_vt(vt) {
+            warn!(vt, %error, "cannot switch terminal");
+        }
+    }
+
+    /// Offers explicit synchronisation to clients when the driver can do it;
+    /// the proprietary NVIDIA driver needs it for flicker-free clients.
+    pub fn init_explicit_sync(&mut self, dh: &smithay::reexports::wayland_server::DisplayHandle) {
+        let fd = self.manager.device().device_fd().clone();
+        if supports_syncobj_eventfd(&fd) {
+            self.syncobj = Some(DrmSyncobjState::new::<State>(dh, fd));
+            info!("explicit sync is available");
+        } else {
+            info!("explicit sync is not available on this GPU");
+        }
+    }
+}
+
+impl State {
+    /// Draws the screens that are due. Called after each batch of events.
+    pub fn redraw_screens(&mut self) {
+        let Backend::Udev(udev) = &mut self.backend else {
+            return;
+        };
+        if !udev.active || !std::mem::take(&mut self.redraw_needed) {
+            return;
+        }
+        if std::mem::take(&mut self.full_redraw) {
+            for screen in &udev.screens {
+                screen.surface.reset_buffers();
+            }
+        }
+
+        let mut due = Vec::new();
+        for (index, screen) in udev.screens.iter_mut().enumerate() {
+            match &mut screen.pacing {
+                Pacing::Idle => due.push(index),
+                Pacing::Waiting { redraw } => *redraw = true,
+            }
+        }
+        for index in due {
+            self.render_screen(index);
+        }
+    }
+
+    /// Draws one screen and sends the frame on its way.
+    fn render_screen(&mut self, index: usize) {
+        self.shell
+            .refresh_chrome(&mut self.painter, &self.theme, self.hover);
+        let cursor = self.cursor(true);
+        let Backend::Udev(udev) = &mut self.backend else {
+            return;
+        };
+        let Some(screen) = udev.screens.get_mut(index) else {
+            return;
+        };
+        let Some(view) = self.shell.screen(screen.id).map(|info| info.rect) else {
+            return;
+        };
+
+        let elements = scene::build(
+            &mut udev.renderer,
+            &udev.shaders,
+            &mut self.shell,
+            &self.theme,
+            view,
+            cursor,
+        );
+        let clear = self.theme.backdrop.premultiplied();
+        // Everything is composited for now; scanning client buffers out
+        // directly comes with game mode.
+        let rendered = screen
+            .surface
+            .render_frame(&mut udev.renderer, &elements, clear, FrameFlags::empty())
+            .map(|frame| frame.is_empty)
+            .map_err(|error| error.to_string());
+        let queued = match rendered {
+            Ok(true) => Ok(false),
+            Ok(false) => screen
+                .surface
+                .queue_frame(())
+                .map(|()| true)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error),
+        };
+
+        let crtc = screen.crtc;
+        let (sent, failed) = match queued {
+            Ok(sent) => {
+                screen.failures = 0;
+                (sent, false)
+            }
+            Err(error) => {
+                // Said once, then every few seconds: a broken screen must
+                // not flood the log.
+                if screen.failures % 240 == 0 {
+                    warn!(?crtc, error, "cannot draw a frame");
+                }
+                screen.failures += 1;
+                (false, true)
+            }
+        };
+        // After a failure, another try follows this frame's time.
+        screen.pacing = Pacing::Waiting { redraw: failed };
+        if !sent {
+            // Nothing went to the screen, so nothing will come back from it:
+            // a timer ends this frame instead.
+            let timer = Timer::from_duration(screen.frame);
+            let armed = self.loop_handle.insert_source(timer, move |_, _, app| {
+                app.state.frame_done(crtc);
+                TimeoutAction::Drop
+            });
+            if let Err(error) = armed {
+                error!(%error, "cannot arm a frame timer");
+                screen.pacing = Pacing::Idle;
+            }
+        }
+    }
+
+    /// The screen showed the frame that was queued.
+    fn frame_shown(&mut self, crtc: crtc::Handle) {
+        if let Backend::Udev(udev) = &mut self.backend {
+            let screen = udev.screens.iter_mut().find(|screen| screen.crtc == crtc);
+            if let Some(Err(error)) = screen.map(|screen| screen.surface.frame_submitted()) {
+                debug!(?crtc, %error, "frame not acknowledged");
+            }
+        }
+        self.frame_done(crtc);
+    }
+
+    /// A frame cycle ended: clients may draw again, and a redraw asked in
+    /// the meantime starts now.
+    fn frame_done(&mut self, crtc: crtc::Handle) {
+        let Backend::Udev(udev) = &mut self.backend else {
+            return;
+        };
+        let Some(index) = udev.screens.iter().position(|screen| screen.crtc == crtc) else {
+            return;
+        };
+        let screen = &mut udev.screens[index];
+        let redraw = screen.pacing == Pacing::Waiting { redraw: true };
+        screen.pacing = Pacing::Idle;
+        let id = screen.id;
+        let active = udev.active;
+
+        self.send_frame_callbacks(Some(id));
+        if redraw && active {
+            self.render_screen(index);
+        }
+    }
+
+    /// The user switched to another virtual terminal, or came back.
+    fn session_event(&mut self, event: SessionEvent) {
+        let Backend::Udev(udev) = &mut self.backend else {
+            return;
+        };
+        match event {
+            SessionEvent::PauseSession => {
+                info!("session paused");
+                udev.active = false;
+                udev.libinput.suspend();
+                udev.manager.pause();
+            }
+            SessionEvent::ActivateSession => {
+                info!("session resumed");
+                if udev.libinput.resume().is_err() {
+                    error!("cannot resume input devices");
+                }
+                if let Err(error) = udev.manager.lock().activate(false) {
+                    error!(%error, "cannot take the screens back");
+                }
+                udev.active = true;
+                for screen in &mut udev.screens {
+                    screen.pacing = Pacing::Idle;
+                }
+                self.full_redraw = true;
+                self.queue_redraw();
+            }
+        }
+    }
+}

@@ -5,7 +5,7 @@ use smithay::desktop::{
 use smithay::input::Seat;
 use smithay::input::pointer::Focus;
 use smithay::reexports::wayland_server::protocol::wl_seat;
-use smithay::utils::{Logical, Point, Rectangle, Serial};
+use smithay::utils::{Logical, Point, Serial};
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
@@ -92,7 +92,7 @@ impl XdgShellHandler for State {
 }
 
 impl State {
-    /// Keeps a popup inside the output.
+    /// Keeps a popup inside the screen of its window.
     fn unconstrain_popup(&self, popup: &PopupSurface) {
         let kind = PopupKind::Xdg(popup.clone());
         let Ok(root) = find_popup_root_surface(&kind) else {
@@ -101,15 +101,15 @@ impl State {
         let Some(managed) = self.shell.by_surface(&root) else {
             return;
         };
-        let Some(mode) = self.output.current_mode() else {
+        let Some(screen) = self.shell.screen(managed.geometry.output) else {
             return;
         };
 
-        // The positioner works relative to the parent, so the output is
+        // The positioner works relative to the parent, so the screen is
         // expressed from there.
-        let client = managed.geometry.client;
+        let client = managed.client();
         let origin: Point<i32, Logical> = (client.x, client.y).into();
-        let mut target = Rectangle::from_size((mode.size.w, mode.size.h).into());
+        let mut target = crate::render::scene::rectangle(screen.rect);
         target.loc -= origin;
         target.loc -= get_popup_toplevel_coords(&kind);
 

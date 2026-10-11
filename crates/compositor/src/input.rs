@@ -4,6 +4,7 @@ use coquille_model::{Placement, Point as ModelPoint, WindowId};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    PointerMotionEvent,
 };
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::keyboard::{FilterResult, Keycode};
@@ -14,6 +15,7 @@ use tracing::{debug, info, warn};
 
 use crate::debug::Step;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
+use crate::outputs::constrain;
 use crate::shell::ManagedWindow;
 use crate::shortcuts::{Action, KeyPress, action_for};
 use crate::state::State;
@@ -21,11 +23,11 @@ use crate::state::State;
 /// Linux input code of the left mouse button.
 const BTN_LEFT: u32 = 0x110;
 
-/// What lies under a point of the output.
+/// What lies under a point of the global space.
 #[derive(Debug, Default)]
 struct Hit {
     window: Option<WindowId>,
-    /// The client surface there, with its position on the output.
+    /// The client surface there, with its position.
     surface: Option<(WlSurface, Point<f64, Logical>)>,
     button: Option<TitlebarButton>,
 }
@@ -36,17 +38,46 @@ impl State {
             InputEvent::Keyboard { event, .. } => {
                 self.key(event.key_code(), event.state(), Event::time(&event));
             }
+            // A mouse: moves from where the pointer is, and stays on screens.
+            InputEvent::PointerMotion { event, .. } => {
+                let wanted = self.pointer_location() + event.delta();
+                let screens: Vec<_> = self.shell.screens.iter().map(|s| s.rect).collect();
+                let location = constrain((wanted.x, wanted.y), &screens);
+                self.pointer_moved(location.into(), event.time());
+            }
+            // The nested window: a position inside the whole canvas.
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                if let Some(mode) = self.output.current_mode() {
-                    let location = event.position_transformed(mode.size.to_logical(1));
-                    self.pointer_moved(location, event.time());
-                }
+                let canvas = self.shell.screens.iter().fold((0, 0), |size, screen| {
+                    (
+                        size.0.max(screen.rect.right()),
+                        size.1.max(screen.rect.bottom()),
+                    )
+                });
+                let location = event.position_transformed(canvas.into());
+                self.pointer_moved(location, event.time());
             }
             InputEvent::PointerButton { event, .. } => {
                 self.pointer_button(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => self.on_axis::<I>(event),
             _ => {}
+        }
+    }
+
+    /// Puts the pointer in the middle of the main screen: the center one, or
+    /// the first one.
+    pub fn center_pointer(&mut self) {
+        let screens = &self.shell.screens;
+        let main = screens
+            .iter()
+            .find(|screen| screen.role == coquille_model::OutputRole::Center)
+            .or(screens.first());
+        if let Some(rect) = main.map(|screen| screen.rect) {
+            let middle = (
+                f64::from(rect.x) + f64::from(rect.w) / 2.0,
+                f64::from(rect.y) + f64::from(rect.h) / 2.0,
+            );
+            self.pointer_moved(middle.into(), InputTime::now());
         }
     }
 
@@ -92,8 +123,11 @@ impl State {
                 let press = KeyPress {
                     main: mod_key.is_held(modifiers),
                     shift: modifiers.shift,
+                    ctrl: modifiers.ctrl,
+                    alt: modifiers.alt,
                     keycode,
                     syms: &handle.raw_syms(),
+                    modified: handle.modified_sym(),
                 };
                 match action_for(press) {
                     Some(action) => {
@@ -111,6 +145,7 @@ impl State {
 
     fn run(&mut self, action: Action) {
         debug!(?action, "shortcut");
+        let screen = self.pointer_screen();
         let desk = &mut self.shell.desk;
         let result = match action {
             Action::Quit => {
@@ -118,7 +153,20 @@ impl State {
                 self.loop_signal.stop();
                 return;
             }
-            Action::SetLayout(kind) => desk.set_layout(self.shell.output, kind),
+            Action::SpawnTerminal => {
+                let terminal = self.terminal.clone();
+                self.spawn(&terminal);
+                return;
+            }
+            Action::SwitchVt(vt) => {
+                self.backend.switch_vt(vt);
+                return;
+            }
+            // Layouts apply to the screen the pointer is on.
+            Action::SetLayout(kind) => match screen {
+                Some(screen) => desk.set_layout(screen.id, kind),
+                None => Ok(()),
+            },
             Action::CycleTab { forward } => {
                 match desk.focused().and_then(|id| desk.placement(id)) {
                     Some(Placement::Slot(slot)) => desk.cycle_tab(slot, forward),
@@ -141,7 +189,6 @@ impl State {
         let hover = hit.window.zip(hit.button);
         if hover != self.hover {
             self.hover = hover;
-            self.queue_redraw();
         }
         // Over the shell's own chrome no client sets the cursor.
         if hit.surface.is_none() && !pointer.is_grabbed() {
@@ -158,9 +205,13 @@ impl State {
             },
         );
         pointer.frame(self);
-        if matches!(self.cursor_status, CursorImageStatus::Surface(_)) {
-            self.queue_redraw();
+
+        // Rule 7 sends new windows to the side screen used last.
+        if let Some(screen) = self.pointer_screen() {
+            self.shell.desk.note_output_used(screen.id);
         }
+        // The pointer itself may have to be redrawn, and so may a hover.
+        self.queue_redraw();
     }
 
     fn pointer_button(&mut self, button: u32, state: ButtonState, time: InputTime) {
@@ -228,12 +279,10 @@ impl State {
     }
 
     fn focus_window(&mut self, window: WindowId) {
-        let desk = &mut self.shell.desk;
-        desk.note_output_used(self.shell.output);
-        if desk.focused() == Some(window) {
+        if self.shell.desk.focused() == Some(window) {
             return;
         }
-        if let Err(error) = desk.focus(window) {
+        if let Err(error) = self.shell.desk.focus(window) {
             warn!(%error, "cannot focus a window");
         }
         self.apply_arrangement();
@@ -250,8 +299,14 @@ impl State {
                     toplevel.send_close();
                 }
             }
-            // Wired in the next phases (tabs, swap with the center, bar).
-            TitlebarButton::AddTab | TitlebarButton::Swap | TitlebarButton::Minimize => {
+            TitlebarButton::Swap => {
+                if let Err(error) = self.shell.desk.swap_with_center(window) {
+                    warn!(%error, "cannot swap with the center");
+                }
+                self.apply_arrangement();
+            }
+            // Wired in the next steps (tabs, bar).
+            TitlebarButton::AddTab | TitlebarButton::Minimize => {
                 debug!(?button, "this button does nothing yet");
             }
         }
@@ -267,9 +322,9 @@ impl State {
                 .rev()
                 .filter(|managed| managed.geometry.visible)
         };
-        // Where the window's surface tree starts on the output.
+        // Where the window's surface tree starts.
         let origin = |managed: &ManagedWindow| {
-            let client = managed.geometry.client;
+            let client = managed.client();
             let geometry = managed.window.geometry();
             Point::<i32, Logical>::from((client.x, client.y)) - geometry.loc
         };
@@ -293,9 +348,8 @@ impl State {
 
         let point = ModelPoint::new(location.x.floor() as i32, location.y.floor() as i32);
         for managed in visible() {
-            let geometry = managed.geometry;
-            if let Some(bar) = geometry.titlebar.filter(|bar| bar.contains(point)) {
-                let layout = TitlebarLayout::new(bar.size(), self.shell.role.is_side());
+            if let Some(bar) = managed.titlebar().filter(|bar| bar.contains(point)) {
+                let layout = TitlebarLayout::new(bar.size(), managed.show_swap);
                 let local = ModelPoint::new(point.x - bar.x, point.y - bar.y);
                 return Hit {
                     window: Some(managed.id),
@@ -303,7 +357,7 @@ impl State {
                     button: layout.button_at(local),
                 };
             }
-            if geometry.client.contains(point) {
+            if managed.client().contains(point) {
                 let kind = WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE;
                 return Hit {
                     window: Some(managed.id),

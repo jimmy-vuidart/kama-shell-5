@@ -93,9 +93,9 @@ impl Painter {
         for (button, cell) in &layout.buttons {
             let hovered = spec.hovered == Some(*button);
             let mut color = match button {
-                TitlebarButton::Close => theme.text,
+                TitlebarButton::Close | TitlebarButton::Swap => theme.text,
                 // Not wired yet: shown, but visibly unavailable.
-                _ => theme.disabled,
+                TitlebarButton::AddTab | TitlebarButton::Minimize => theme.disabled,
             };
             if hovered && *button == TitlebarButton::Close {
                 let highlight = rounded_rect(

@@ -4,8 +4,8 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, Desk, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole, Size, WindowGeometry,
-    WindowId,
+    AppKey, Desk, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole, Point as ModelPoint,
+    Rect, WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -25,8 +25,14 @@ use crate::render::scene::Chrome;
 use crate::state::State;
 use crate::theme::Theme;
 
-/// The only output of the nested compositor.
-const OUTPUT: OutputId = OutputId(0);
+/// A screen and where it sits among the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenInfo {
+    pub id: OutputId,
+    pub role: OutputRole,
+    /// In the global space shared by every screen.
+    pub rect: Rect,
+}
 
 /// A window the model knows about.
 pub struct ManagedWindow {
@@ -34,15 +40,33 @@ pub struct ManagedWindow {
     pub window: Window,
     pub app_id: String,
     pub title: String,
-    /// Last geometry decided by the model.
+    /// Last geometry decided by the model, relative to its screen.
     pub geometry: WindowGeometry,
+    /// Top-left corner of its screen in the global space.
+    pub origin: ModelPoint,
+    /// The "swap with the center" button applies to this window.
+    pub show_swap: bool,
     pub chrome: Chrome,
+}
+
+impl ManagedWindow {
+    /// The whole decorated window, in the global space.
+    pub fn frame(&self) -> Rect {
+        self.geometry.frame.translated(self.origin)
+    }
+
+    pub fn titlebar(&self) -> Option<Rect> {
+        Some(self.geometry.titlebar?.translated(self.origin))
+    }
+
+    pub fn client(&self) -> Rect {
+        self.geometry.client.translated(self.origin)
+    }
 }
 
 pub struct Shell {
     pub desk: Desk,
-    pub output: OutputId,
-    pub role: OutputRole,
+    pub screens: Vec<ScreenInfo>,
     /// Bottom to top, as the model orders them.
     pub windows: Vec<ManagedWindow>,
     /// Toplevels that have not made their first commit yet.
@@ -51,16 +75,38 @@ pub struct Shell {
 }
 
 impl Shell {
-    pub fn new(role: OutputRole, size: Size) -> Self {
-        let output = OutputInfo::new(OUTPUT, role, size);
+    pub fn new(screens: Vec<ScreenInfo>) -> Self {
+        let outputs = screens
+            .iter()
+            .map(|screen| OutputInfo::new(screen.id, screen.role, screen.rect.size()))
+            .collect();
         Self {
-            desk: Desk::new(vec![output], Metrics::default()),
-            output: OUTPUT,
-            role,
+            desk: Desk::new(outputs, Metrics::default()),
+            screens,
             windows: Vec::new(),
             unmapped: Vec::new(),
             next_id: 1,
         }
+    }
+
+    pub fn screen(&self, id: OutputId) -> Option<&ScreenInfo> {
+        self.screens.iter().find(|screen| screen.id == id)
+    }
+
+    pub fn screen_at(&self, point: ModelPoint) -> Option<&ScreenInfo> {
+        self.screens
+            .iter()
+            .find(|screen| screen.rect.contains(point))
+    }
+
+    /// The screens changed size or place (the nested window was resized).
+    pub fn move_screens(&mut self, screens: Vec<ScreenInfo>) {
+        for screen in &screens {
+            if let Err(error) = self.desk.set_output_size(screen.id, screen.rect.size()) {
+                warn!(%error, "cannot resize a screen");
+            }
+        }
+        self.screens = screens;
     }
 
     /// The managed window whose toplevel surface is `surface`.
@@ -80,14 +126,32 @@ impl Shell {
         self.windows.iter().find(|managed| managed.id == id)
     }
 
+    /// What a window needs besides the model's geometry: where its screen is,
+    /// and whether it can be swapped with the center.
+    fn placement_of(&self, geometry: &WindowGeometry) -> (ModelPoint, bool) {
+        let has_center = self
+            .screens
+            .iter()
+            .any(|screen| screen.role == OutputRole::Center);
+        match self.screen(geometry.output) {
+            Some(screen) => (screen.rect.origin(), screen.role.is_side() && has_center),
+            None => (ModelPoint::default(), false),
+        }
+    }
+
     /// Takes the model's arrangement: geometry of each window, and stacking.
     fn sync(&mut self) {
         let arrangement = self.desk.arrangement();
         let rank = |id: WindowId| arrangement.iter().position(|geometry| geometry.id == id);
         self.windows.sort_by_key(|managed| rank(managed.id));
-        for managed in &mut self.windows {
-            if let Some(geometry) = arrangement.iter().find(|g| g.id == managed.id) {
+        for index in 0..self.windows.len() {
+            let id = self.windows[index].id;
+            if let Some(geometry) = arrangement.iter().find(|geometry| geometry.id == id) {
+                let (origin, show_swap) = self.placement_of(geometry);
+                let managed = &mut self.windows[index];
                 managed.geometry = *geometry;
+                managed.origin = origin;
+                managed.show_swap = show_swap;
             }
         }
     }
@@ -120,7 +184,7 @@ impl Shell {
                 hovered: hover
                     .filter(|(id, _)| *id == managed.id)
                     .map(|(_, button)| button),
-                show_swap: self.role.is_side(),
+                show_swap: managed.show_swap,
                 theme: theme.kind,
                 corner_radius,
             };
@@ -185,16 +249,23 @@ impl State {
             return;
         };
         let (app_id, title) = toplevel_names(toplevel);
+        let Some(cursor_screen) = self
+            .pointer_screen()
+            .or(self.shell.screens.first().copied())
+        else {
+            warn!("no screen to open a window on");
+            return;
+        };
 
         let id = WindowId(self.shell.next_id);
         self.shell.next_id += 1;
         let app = (!app_id.is_empty()).then(|| AppKey::new(app_id.clone()));
-        let request = OpenRequest::at(self.shell.output);
+        let request = OpenRequest::at(cursor_screen.id);
         if let Err(error) = self.shell.desk.open_window(id, app, request) {
             warn!(%error, "the model refused a new window");
             return;
         }
-        // Until windows can be dragged to slots (phase 2), tile right away.
+        // Until windows can be dragged to slots, tile right away.
         if let Err(error) = self.shell.desk.tile_automatically(id) {
             warn!(%error, "cannot tile a new window");
         }
@@ -212,12 +283,15 @@ impl State {
         };
         debug!(?id, app_id, title, "window mapped");
 
+        let (origin, show_swap) = self.shell.placement_of(&geometry);
         self.shell.windows.push(ManagedWindow {
             id,
             window,
             app_id,
             title,
             geometry,
+            origin,
+            show_swap,
             chrome: Chrome::default(),
         });
         self.apply_arrangement();
@@ -295,17 +369,19 @@ impl State {
             }
 
             // Tells the client which output it is on, hence its scale.
-            if geometry.visible {
-                managed
-                    .window
-                    .output_enter(&self.output, managed.window.bbox());
-            } else {
-                managed.window.output_leave(&self.output);
+            for screen in &self.outputs {
+                if screen.id == geometry.output && geometry.visible {
+                    managed
+                        .window
+                        .output_enter(&screen.output, managed.window.bbox());
+                } else {
+                    managed.window.output_leave(&screen.output);
+                }
             }
         }
 
         self.sync_keyboard_focus();
-        self.backend.full_redraw = true;
+        self.full_redraw = true;
         self.queue_redraw();
     }
 

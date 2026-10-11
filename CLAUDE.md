@@ -139,23 +139,35 @@ coquille/
 - **Décorations en Rust pur** : `tiny-skia` (formes) et `cosmic-text` (texte) vers des textures, shaders GLES pour l'anneau et le rognage des coins.
 - **Mode imbriqué (winit) : `Alt` remplace `Super`**, que la session hôte intercepte. `scripts/ci.sh` lance `fmt`, `clippy` et les tests.
 
-### Lancer le compositeur imbriqué (phase 1)
+### Lancer le compositeur
+
+Deux backends, choisis tout seuls (`--backend auto`) : **imbriqué** (winit) s'il y a déjà une session graphique, **matériel** (udev) sinon.
 
 ```
-cargo run -p coquille -- --spawn alacritty --spawn kitty
+cargo run -p coquille -- --three-screens --spawn kitty      # imbriqué, trois écrans simulés
+cargo run -p coquille -- --role left --spawn kitty          # imbriqué, un seul écran
+cargo run -p coquille -- --probe                            # examine GPU et écrans, n'affiche rien
 ```
 
-- Options : `--role left|center|right` (défaut `right`), `--theme light|dark`, `--keyboard-layout fr`, `--spawn <commande>` (répétable).
-- Raccourcis (`Alt` en imbriqué) : `Alt+1` disposition « plein », `Alt+2` « côte à côte », `Alt+Page suiv./préc.` onglet suivant/précédent, `Alt+Maj+E` quitter.
-- Vérifier le rendu sans regarder l'écran : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`).
-- Les images ne dépendent pas des demandes de rafraîchissement de l'hôte : un minuteur à 60 Hz dessine quand quelque chose a changé.
-- `--fullscreen` couvre l'écran où la fenêtre s'ouvre : la sortie simulée prend la taille d'un vrai écran.
+- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal, `Mod+1` disposition « plein », `Mod+2` « côte à côte » (sur l'écran du pointeur), `Mod+Page suiv./préc.` onglet suivant/précédent, `Mod+Maj+E` quitter.
+- Sorties de secours, sans Mod : `Ctrl+Alt+Retour arrière` quitte, `Ctrl+Alt+F1…F12` change de terminal virtuel, `--exit-after <secondes>` quitte tout seul.
+- Vérifier le rendu sans regarder l'écran (imbriqué) : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`) et ignore alors la vraie souris.
+- `--probe` exerce sur la vraie carte tout ce qui ne demande pas de posséder les écrans : EGL sur GBM, moteur de rendu, shaders, détection et rôles des écrans. À lancer après tout changement du backend matériel.
 
-### Installer pour un essai réel
+### Installer
 
-`scripts/install.sh` compile en release et installe **pour l'utilisateur seulement** : `~/.local/bin/coquille` et une entrée de menu `coquille` (clic droit : plein écran comme écran gauche, central ou droit). Lancé depuis le menu, le journal va dans `~/.local/state/coquille/coquille.log` (`--log-file`), paniques comprises. `scripts/install.sh --uninstall` retire le tout.
+`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-session` (lanceur de session), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
 
-Aucune session de connexion n'est installée : tant que le backend udev (phase 2) n'existe pas, le compositeur ne peut pas démarrer depuis un TTY ou SDDM.
+`scripts/install.sh --session` ajoute en plus deux sessions à l'écran de connexion (`/usr/share/wayland-sessions/`, seul endroit qui demande `sudo`) : « coquille » et « coquille (essai, 60 secondes) ». La session par défaut n'est jamais modifiée. `scripts/install.sh --uninstall` retire tout.
+
+Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises.
+
+### Backend matériel : ce qui est fait et ce qui ne l'est pas
+
+- Un seul GPU : celui du démarrage (la NVIDIA). Écrans détectés **au démarrage seulement** (pas de branchement à chaud).
+- Rôles des écrans : `[outputs]` du fichier de configuration, sinon le plus large au centre. Placés côte à côte, alignés en haut.
+- Tout est composé par le GPU : pas de direct scanout, pas de plan matériel pour le curseur (prévus avec le mode jeu). Synchronisation explicite activée quand le pilote la propose.
+- Je (Claude) ne peux pas tester ce backend moi-même : la session en cours possède les écrans. Seuls `--probe` et le mode imbriqué sont vérifiables sans l'utilisateur.
 
 ### Références à étudier avant de coder
 
@@ -177,6 +189,6 @@ On avance **par phases**, en s'arrêtant à la fin de chacune pour que je teste.
 ## Sécurité pendant le développement
 
 - Tout développer et tester d'abord en **mode imbriqué (winit)**, dans ma session actuelle.
-- Ne jamais remplacer ma session par défaut ni modifier SDDM sans me le demander.
+- Ne jamais remplacer ma session par défaut ni modifier le gestionnaire de connexion (GDM) sans me le demander.
 - Pour les tests sur TTY : prévoir une sortie sûre (raccourci pour quitter le compositeur, et rappel de garder un autre TTY ou un accès SSH).
 - Ne pas installer de paquets système sans me montrer la commande d'abord.

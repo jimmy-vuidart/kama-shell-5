@@ -14,6 +14,7 @@ use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
+use smithay::wayland::drm_syncobj::{DrmSyncobjHandler, DrmSyncobjState};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::selection::SelectionHandler;
@@ -23,6 +24,7 @@ use smithay::wayland::selection::data_device::{
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 
+use crate::backend::Backend;
 use crate::state::State;
 
 impl SeatHandler for State {
@@ -103,12 +105,19 @@ impl DmabufHandler for State {
         dmabuf: Dmabuf,
         notifier: ImportNotifier,
     ) {
-        self.backend.window_is_current = false;
-        let renderer = self.backend.backend.renderer();
-        if renderer.import_dmabuf(&dmabuf, None).is_ok() {
+        if self.backend.renderer().import_dmabuf(&dmabuf, None).is_ok() {
             let _ = notifier.successful::<State>();
         } else {
             notifier.failed();
+        }
+    }
+}
+
+impl DrmSyncobjHandler for State {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
+        match &mut self.backend {
+            Backend::Udev(udev) => udev.syncobj.as_mut(),
+            Backend::Winit(_) => None,
         }
     }
 }

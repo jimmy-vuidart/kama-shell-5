@@ -1,6 +1,6 @@
 //! Turning the shell state into render elements, front to back.
 
-use coquille_model::{Rect, WindowGeometry};
+use coquille_model::{Point as ModelPoint, Rect};
 use smithay::backend::renderer::{
     element::{
         Kind,
@@ -94,6 +94,20 @@ pub struct Chrome {
     below: ShapeCache,
 }
 
+/// What is drawn at the pointer.
+pub enum Cursor {
+    /// A surface provided by the client under the pointer.
+    Surface {
+        surface: WlSurface,
+        location: Point<i32, Logical>,
+    },
+    /// An image from the cursor theme.
+    Image {
+        buffer: MemoryRenderBuffer,
+        location: Point<i32, Logical>,
+    },
+}
+
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
     Rectangle::new((rect.x, rect.y).into(), (rect.w, rect.h).into())
 }
@@ -102,26 +116,46 @@ fn physical(point: Point<i32, Logical>) -> Point<i32, Physical> {
     point.to_physical_precise_round(SCALE)
 }
 
-/// Every element of the output, topmost first: cursor, popups, then windows
-/// from the top one down.
+fn overlaps(a: Rect, b: Rect) -> bool {
+    a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+}
+
+/// Every element seen through `view`, a part of the global space (one screen,
+/// or all of them nested), topmost first: cursor, popups, then windows from
+/// the top one down. Positions are relative to the view's corner.
 pub fn build(
     renderer: &mut GlesRenderer,
     shaders: &Shaders,
     shell: &mut Shell,
     theme: &Theme,
-    cursor: Option<(WlSurface, Point<i32, Logical>)>,
+    view: Rect,
+    cursor: Option<Cursor>,
 ) -> Vec<SceneElement> {
     let metrics = *shell.desk.metrics();
+    // From the global space to the view.
+    let shift = ModelPoint::new(-view.x, -view.y);
     let mut popups = Vec::new();
     let mut windows = Vec::new();
 
     for managed in shell.windows.iter_mut().rev() {
-        let geometry: WindowGeometry = managed.geometry;
-        let Some(toplevel) = managed.window.toplevel().filter(|_| geometry.visible) else {
+        let geometry = managed.geometry;
+        let ring = metrics.ring_width;
+        let global = managed.frame();
+        let reach = Rect::new(
+            global.x - ring,
+            global.y - ring,
+            global.w + 2 * ring,
+            global.h + 2 * ring,
+        );
+        if !geometry.visible || !overlaps(reach, view) {
+            continue;
+        }
+        let Some(toplevel) = managed.window.toplevel() else {
             continue;
         };
         let surface = toplevel.wl_surface();
-        let origin: Point<i32, Logical> = (geometry.client.x, geometry.client.y).into();
+        let client = managed.client().translated(shift);
+        let origin: Point<i32, Logical> = (client.x, client.y).into();
 
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
             let location = physical(origin + offset - popup.geometry().loc);
@@ -139,14 +173,7 @@ pub fn build(
         let radius = if decorated { metrics.corner_radius } else { 0 };
 
         if geometry.focused && decorated {
-            let ring = metrics.ring_width;
-            let frame = geometry.frame;
-            let outline = Rect::new(
-                frame.x - ring,
-                frame.y - ring,
-                frame.w + 2 * ring,
-                frame.h + 2 * ring,
-            );
+            let outline = reach.translated(shift);
             let shape = Shape {
                 outline,
                 area: outline,
@@ -159,7 +186,8 @@ pub fn build(
             ));
         }
 
-        if let (Some(bar), Some(buffer)) = (geometry.titlebar, &managed.chrome.titlebar) {
+        let bar = managed.titlebar().map(|bar| bar.translated(shift));
+        if let (Some(bar), Some(buffer)) = (bar, &managed.chrome.titlebar) {
             let location = Point::<i32, Physical>::from((bar.x, bar.y)).to_f64();
             match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
@@ -185,7 +213,7 @@ pub fn build(
             Kind::Unspecified,
         );
         if decorated {
-            let clip = rectangle(geometry.client).to_physical_precise_round(SCALE);
+            let clip = rectangle(client).to_physical_precise_round(SCALE);
             let radii = [0.0, 0.0, radius as f32, radius as f32];
             windows.extend(surfaces.into_iter().map(|inner| {
                 SceneElement::Clipped(ClippedSurface::new(
@@ -202,7 +230,6 @@ pub fn build(
         // The client may draw less than its area (fixed-size dialogs, or no
         // buffer yet): the rest shows the window background. Nothing is put
         // behind the client itself, so see-through clients stay see-through.
-        let client = geometry.client;
         let drawn = managed.window.geometry().size;
         let (drawn_w, drawn_h) = (drawn.w.clamp(0, client.w), drawn.h.clamp(0, client.h));
         let background = Shape {
@@ -233,15 +260,33 @@ pub fn build(
     }
 
     let mut elements = Vec::new();
-    if let Some((surface, location)) = cursor {
-        elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
-            renderer,
-            &surface,
-            physical(location),
-            SCALE,
-            1.0,
-            Kind::Cursor,
-        ));
+    let to_view: Point<i32, Logical> = (shift.x, shift.y).into();
+    match cursor {
+        Some(Cursor::Surface { surface, location }) => {
+            elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+                renderer,
+                &surface,
+                physical(location + to_view),
+                SCALE,
+                1.0,
+                Kind::Cursor,
+            ));
+        }
+        Some(Cursor::Image { buffer, location }) => {
+            match MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                physical(location + to_view).to_f64(),
+                &buffer,
+                None,
+                None,
+                None,
+                Kind::Cursor,
+            ) {
+                Ok(element) => elements.push(SceneElement::Texture(element)),
+                Err(error) => warn!(?error, "cannot upload the cursor"),
+            }
+        }
+        None => {}
     }
     elements.extend(popups);
     elements.extend(windows);

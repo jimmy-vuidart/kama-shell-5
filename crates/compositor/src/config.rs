@@ -1,0 +1,121 @@
+//! The configuration file, `~/.config/coquille/config.toml`.
+
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use tracing::{info, warn};
+
+use crate::outputs::RoleConfig;
+use crate::theme::ThemeKind;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    /// Which connector is the left, center and right screen.
+    pub outputs: RoleConfig,
+    pub keyboard: KeyboardConfig,
+    pub theme: Option<ThemeKind>,
+    /// Command of the terminal opened by the shortcut.
+    pub terminal: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KeyboardConfig {
+    pub layout: Option<String>,
+    pub variant: Option<String>,
+}
+
+pub fn parse(text: &str) -> Result<Config, toml::de::Error> {
+    toml::from_str(text)
+}
+
+/// Where the configuration is read from when no path is given.
+pub fn default_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")))?;
+    Some(base.join("coquille/config.toml"))
+}
+
+/// Reads the configuration. A missing file gives the defaults; so does a
+/// broken one, with a warning, so that a typo never prevents starting.
+pub fn load(path: Option<&Path>) -> Config {
+    let Some(path) = path.map(Path::to_path_buf).or_else(default_path) else {
+        return Config::default();
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(_) => {
+            info!(path = %path.display(), "no configuration file, using the defaults");
+            return Config::default();
+        }
+    };
+    match parse(&text) {
+        Ok(config) => {
+            info!(path = %path.display(), "configuration loaded");
+            config
+        }
+        Err(error) => {
+            warn!(path = %path.display(), %error, "invalid configuration, using the defaults");
+            Config::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_file_gives_the_defaults() {
+        assert_eq!(parse("").unwrap(), Config::default());
+    }
+
+    #[test]
+    fn screens_are_named_by_connector() {
+        let config = parse(
+            r#"
+            [outputs]
+            left = "HDMI-A-1"
+            center = "DP-2"
+            right = "DP-1"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.outputs,
+            RoleConfig {
+                left: Some("HDMI-A-1".into()),
+                center: Some("DP-2".into()),
+                right: Some("DP-1".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn general_settings_are_read() {
+        let config = parse(
+            r#"
+            theme = "dark"
+            terminal = "kitty"
+
+            [keyboard]
+            layout = "fr"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.theme, Some(ThemeKind::Dark));
+        assert_eq!(config.terminal.as_deref(), Some("kitty"));
+        assert_eq!(config.keyboard.layout.as_deref(), Some("fr"));
+        assert_eq!(config.keyboard.variant, None);
+    }
+
+    #[test]
+    fn an_unknown_setting_is_an_error() {
+        assert!(parse("themes = \"dark\"").is_err());
+        assert!(parse("[outputs]\nmiddle = \"DP-2\"").is_err());
+    }
+}

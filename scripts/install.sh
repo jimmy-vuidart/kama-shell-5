@@ -1,25 +1,46 @@
 #!/usr/bin/env bash
-# Installs coquille for the current user: no root, nothing outside the home
-# directory, and no login session is touched.
+# Installs coquille for the current user.
 #
-#   scripts/install.sh               build and install
-#   scripts/install.sh --uninstall   remove what was installed
+#   scripts/install.sh               build and install in the home directory
+#   scripts/install.sh --session     same, and add coquille to the login screen
+#   scripts/install.sh --uninstall   remove everything that was installed
 #
-# PREFIX (default ~/.local) chooses where; TERMINAL chooses the terminal the
-# menu entries open inside the compositor.
+# Only --session needs root, for the two files of the login screen; it never
+# changes the default session. PREFIX (default ~/.local) chooses where the
+# rest goes; TERMINAL chooses the terminal opened inside the compositor.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 prefix="${PREFIX:-$HOME/.local}"
 bin="$prefix/bin/coquille"
+session_bin="$prefix/bin/coquille-session"
 entry="$prefix/share/applications/coquille.desktop"
-# Logs of sessions started from the menu, to look at after a problem.
+config="${XDG_CONFIG_HOME:-$HOME/.config}/coquille/config.toml"
+# Logs of sessions started from the menu or the login screen.
 log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
+# Where display managers look for Wayland sessions.
+sessions="${SESSIONS_DIR:-/usr/share/wayland-sessions}"
+session_entries=("$sessions/coquille.desktop" "$sessions/coquille-essai.desktop")
+
+# Runs a command as root unless the target directory is already writable
+# (a scratch SESSIONS_DIR, for trying the script out).
+as_root() {
+    if [[ -w "$sessions" || ( ! -e "$sessions" && -w "$(dirname "$sessions")" ) ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-    rm -f -- "${bin:?}" "${entry:?}"
-    echo "coquille est désinstallé de $prefix."
-    echo "Les journaux restent dans $log_dir ; supprimez ce dossier si vous n'en voulez plus."
+    rm -f -- "${bin:?}" "${session_bin:?}" "${entry:?}"
+    for session_entry in "${session_entries[@]}"; do
+        if [[ -e "$session_entry" ]]; then
+            as_root rm -f -- "${session_entry:?}"
+        fi
+    done
+    echo "coquille est désinstallé."
+    echo "Restent, si vous voulez les supprimer : $config et $log_dir"
     exit 0
 fi
 
@@ -27,7 +48,7 @@ terminal="${TERMINAL:-}"
 if [[ -z "$terminal" ]]; then
     for candidate in kitty alacritty foot; do
         if command -v "$candidate" >/dev/null; then
-            terminal="$candidate"
+            terminal="$(command -v "$candidate")"
             break
         fi
     done
@@ -39,10 +60,20 @@ fi
 
 cargo build --release --locked -p coquille
 install -Dm755 target/release/coquille "$bin"
+sed "s|@TERMINAL@|$terminal|" scripts/coquille-session >"$session_bin"
+chmod 755 "$session_bin"
+
+if [[ ! -e "$config" ]]; then
+    install -Dm644 config/config.toml "$config"
+    config_note="créée (rôles des écrans : à vérifier)"
+else
+    config_note="conservée"
+fi
 
 # Started from the menu there is no terminal to read: the log goes to a file.
 launch() {
-    printf '"%s" --log-file "%s/coquille.log" --spawn "%s" %s' "$bin" "$log_dir" "$terminal" "$1"
+    printf '"%s" --backend nested --log-file "%s/coquille.log" --spawn "%s" %s' \
+        "$bin" "$log_dir" "$terminal" "$1"
 }
 
 mkdir -p "$(dirname "$entry")"
@@ -56,7 +87,11 @@ Exec=$(launch "--role right")
 Icon=preferences-desktop-display
 Terminal=false
 Categories=System;
-Actions=left;center;right;
+Actions=three;left;center;right;
+
+[Desktop Action three]
+Name=Plein écran, les trois écrans simulés
+Exec=$(launch "--fullscreen --three-screens")
 
 [Desktop Action left]
 Name=Plein écran, comme écran gauche
@@ -75,17 +110,43 @@ if command -v update-desktop-database >/dev/null; then
     update-desktop-database -q "$(dirname "$entry")" || true
 fi
 
+session_note="non installée (scripts/install.sh --session)"
+if [[ "${1:-}" == "--session" ]]; then
+    staging="$(mktemp -d)"
+    cat >"$staging/coquille.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=coquille
+Comment=Compositeur « Centre + compagnons »
+Exec="$session_bin"
+DesktopNames=coquille
+DESKTOP
+    cat >"$staging/coquille-essai.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=coquille (essai, 60 secondes)
+Comment=Se ferme tout seul après une minute : pour un premier essai
+Exec="$session_bin" --exit-after 60
+DesktopNames=coquille
+DESKTOP
+    echo "Ajout de coquille à l'écran de connexion (droits administrateur) :"
+    as_root install -Dm644 -t "$sessions" "$staging/coquille.desktop" "$staging/coquille-essai.desktop"
+    session_note="installée dans $sessions"
+fi
+
 cat <<DONE
 
 coquille est installé :
-  programme   $bin
-  menu        $entry
-  journal     $log_dir/coquille.log  (sessions lancées depuis le menu)
-  terminal    $terminal
+  programme        $bin
+  session          $session_bin
+  menu             $entry
+  configuration    $config  ($config_note)
+  écran de connexion  $session_note
+  journaux         $log_dir/
+  terminal         $terminal
 
-Lancer depuis un terminal :
-  coquille --spawn $terminal
-  coquille --fullscreen --role left --spawn $terminal
-
-Quitter : Alt+Maj+E.        Désinstaller : scripts/install.sh --uninstall
+Dans la session actuelle (fenêtre) :   coquille --three-screens --spawn $terminal
+Sur les vrais écrans, depuis un TTY :  coquille-session --exit-after 60
+Quitter : Super+Maj+E (Alt+Maj+E en fenêtre) ou Ctrl+Alt+Retour arrière.
+Désinstaller : scripts/install.sh --uninstall
 DONE

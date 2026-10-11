@@ -1,0 +1,32 @@
+#!/bin/sh
+# Starts coquille on the real screens, as a login session (from the display
+# manager) or by hand from a virtual terminal. Extra arguments go to coquille:
+#
+#   coquille-session --exit-after 60    quits by itself after a minute
+#
+# The log is kept in ~/.local/state/coquille/session.log; the log of the
+# previous start is kept beside it, so that a crash is not erased by the next
+# attempt.
+
+# A display manager starts the session as a Wayland one; a login on a virtual
+# terminal does not. Only the former owns the user's session services, which
+# another graphical session may be using in the latter case.
+if [ "$XDG_SESSION_TYPE" = wayland ]; then
+    set -- --export-environment "$@"
+fi
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=coquille
+export XDG_SESSION_DESKTOP=coquille
+
+state="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
+mkdir -p "$state"
+if [ -f "$state/session.log" ]; then
+    mv -f "$state/session.log" "$state/session.previous.log"
+fi
+
+# A display manager does not read the shell's PATH: the terminal started with
+# the session is named in full by the installer.
+here="$(dirname "$(readlink -f "$0")")"
+exec "$here/coquille" --backend hardware --log-file "$state/session.log" \
+    --spawn "@TERMINAL@" "$@"

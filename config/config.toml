@@ -1,0 +1,21 @@
+# Configuration de coquille : à placer dans ~/.config/coquille/config.toml.
+# Tout est facultatif ; une ligne absente garde la valeur par défaut.
+
+# Quel connecteur est quel écran. Sans cette section, l'écran le plus large
+# est le centre et les deux autres sont pris dans l'ordre des connecteurs.
+[outputs]
+left = "HDMI-A-1"
+center = "DP-2"
+right = "DP-1"
+
+# Disposition du clavier ; par défaut, celle du système.
+# [keyboard]
+# layout = "fr"
+# variant = ""
+
+# Thème des décorations : "light" ou "dark".
+# theme = "light"
+
+# Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
+# kitty, alacritty et foot.
+# terminal = "kitty"

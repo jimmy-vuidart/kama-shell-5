@@ -92,6 +92,11 @@ impl Rect {
         point.x >= self.x && point.x < self.right() && point.y >= self.y && point.y < self.bottom()
     }
 
+    /// The same rectangle, moved by `offset`.
+    pub const fn translated(self, offset: Point) -> Self {
+        Self::new(self.x + offset.x, self.y + offset.y, self.w, self.h)
+    }
+
     /// Shrinks the rectangle by `insets`; the size never goes below zero.
     pub fn inset(self, insets: Insets) -> Self {
         Self {
@@ -160,6 +165,13 @@ mod tests {
         assert!(!rect.contains(Point::new(110, 69)));
         assert!(!rect.contains(Point::new(109, 70)));
         assert!(!rect.contains(Point::new(9, 20)));
+    }
+
+    #[test]
+    fn translating_moves_the_origin_and_keeps_the_size() {
+        let rect = Rect::new(8, 46, 948, 1026).translated(Point::new(1920, -10));
+
+        assert_eq!(rect, Rect::new(1928, 36, 948, 1026));
     }
 
     #[test]

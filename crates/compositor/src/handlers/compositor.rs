@@ -1,11 +1,14 @@
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::PopupKind;
-use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_surface::WlSurface};
+use smithay::reexports::wayland_server::{Client, Resource};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, get_parent, is_sync_subsurface,
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states,
 };
+use smithay::wayland::dmabuf::get_dmabuf;
+use smithay::wayland::drm_syncobj::DrmSyncobjCachedState;
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use tracing::warn;
 
@@ -23,6 +26,42 @@ impl CompositorHandler for State {
             Some(state) => &state.compositor_state,
             None => FALLBACK.get_or_init(CompositorClientState::default),
         }
+    }
+
+    /// A client using explicit sync says when its buffer will be ready: its
+    /// commit is held until then, so that no half-drawn frame is shown.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, _dh, surface| {
+            let acquire_point = with_states(surface, |states| {
+                let point = states
+                    .cached_state
+                    .get::<DrmSyncobjCachedState>()
+                    .pending()
+                    .acquire_point
+                    .clone();
+                let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+                let gpu_buffer = matches!(
+                    attributes.pending().buffer.as_ref(),
+                    Some(BufferAssignment::NewBuffer(buffer)) if get_dmabuf(buffer).is_ok()
+                );
+                point.filter(|_| gpu_buffer)
+            });
+            let (Some(acquire_point), Some(client)) = (acquire_point, surface.client()) else {
+                return;
+            };
+            let Ok((blocker, source)) = acquire_point.generate_blocker() else {
+                return;
+            };
+            let watched = state.loop_handle.insert_source(source, move |_, _, app| {
+                let dh = app.state.display_handle.clone();
+                let client_state = app.state.client_compositor_state(&client);
+                client_state.blocker_cleared(&mut app.state, &dh);
+                Ok(())
+            });
+            if watched.is_ok() {
+                add_blocker(surface, blocker);
+            }
+        });
     }
 
     fn commit(&mut self, surface: &WlSurface) {

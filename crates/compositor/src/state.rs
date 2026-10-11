@@ -1,21 +1,23 @@
 //! The compositor state and its Wayland globals.
 
 use std::ffi::OsString;
+use std::process::Command;
 use std::time::Instant;
 
-use coquille_model::{OutputRole, WindowId};
+use coquille_model::{OutputId, Point as ModelPoint, WindowId};
 use smithay::backend::egl::EGLDevice;
+use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
 use smithay::desktop::PopupManager;
 use smithay::input::keyboard::XkbConfig;
-use smithay::input::pointer::CursorImageStatus;
+use smithay::input::pointer::{CursorImageAttributes, CursorImageStatus};
 use smithay::input::{Seat, SeatState};
-use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
-use smithay::reexports::calloop::LoopSignal;
-use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::output::Output;
+use smithay::reexports::calloop::{LoopHandle, LoopSignal};
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
-use smithay::utils::{Physical, Size, Transform};
-use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::reexports::wayland_server::{Display, DisplayHandle};
+use smithay::utils::{IsAlive, Logical, Point};
+use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_states};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState};
 use smithay::wayland::output::OutputManagerState;
@@ -25,27 +27,42 @@ use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use tracing::{info, warn};
 
+use crate::backend::Backend;
+use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
 use crate::keyboard_layout::KeyboardLayout;
-use crate::shell::Shell;
+use crate::render::scene::Cursor;
+use crate::shell::{ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
 use crate::theme::Theme;
-use crate::winit::Winit;
 
-/// Refresh rate announced for the nested output, in mHz.
-pub const REFRESH: i32 = 60_000;
+/// What event sources get: the display must stay outside the state it
+/// dispatches to.
+pub struct App {
+    pub display: Display<State>,
+    pub state: State,
+}
 
 pub struct Options {
-    pub role: OutputRole,
     pub theme: Theme,
     pub keyboard: KeyboardLayout,
+    pub mod_key: ModKey,
+    /// Command of the terminal opened by the shortcut.
+    pub terminal: String,
+}
+
+/// A screen as clients see it.
+pub struct ScreenOutput {
+    pub id: OutputId,
+    pub output: Output,
 }
 
 pub struct State {
     pub start_time: Instant,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
+    pub loop_handle: LoopHandle<'static, App>,
     pub socket_name: OsString,
 
     pub compositor_state: CompositorState,
@@ -63,12 +80,14 @@ pub struct State {
 
     pub seat: Seat<State>,
     pub cursor_status: CursorImageStatus,
+    pub cursor_images: CursorImages,
     /// Keys whose press triggered a shortcut: their release is swallowed too.
     pub suppressed_keys: Vec<u32>,
     pub mod_key: ModKey,
+    pub terminal: String,
 
-    pub output: Output,
-    pub backend: Winit,
+    pub outputs: Vec<ScreenOutput>,
+    pub backend: Backend,
     pub shell: Shell,
     pub theme: Theme,
     pub painter: Painter,
@@ -76,29 +95,37 @@ pub struct State {
     pub hover: Option<(WindowId, TitlebarButton)>,
     /// The title bar button the left mouse button went down on.
     pub pressed: Option<(WindowId, TitlebarButton)>,
+
+    /// Something changed: a frame is due.
+    pub redraw_needed: bool,
+    /// The next frame must be drawn whole, whatever the damage.
+    pub full_redraw: bool,
 }
 
 impl State {
     pub fn new(
         display_handle: DisplayHandle,
         loop_signal: LoopSignal,
+        loop_handle: LoopHandle<'static, App>,
         socket_name: OsString,
-        mut backend: Winit,
+        mut backend: Backend,
+        screens: Vec<(ScreenInfo, Output)>,
         options: Options,
     ) -> anyhow::Result<Self> {
         let dh = &display_handle;
+        let renderer = backend.renderer();
 
         let compositor_state = CompositorState::new::<Self>(dh);
         let xdg_shell_state = XdgShellState::new::<Self>(dh);
         let decoration_state = XdgDecorationState::new::<Self>(dh);
-        let shm_state = ShmState::new::<Self>(dh, backend.backend.renderer().shm_formats());
+        let shm_state = ShmState::new::<Self>(dh, renderer.shm_formats());
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
-        let (dmabuf_state, dmabuf_global) = init_dmabuf(dh, &mut backend);
+        let (dmabuf_state, dmabuf_global) = init_dmabuf(dh, renderer);
 
         let mut seat_state = SeatState::new();
-        let mut seat: Seat<Self> = seat_state.new_wl_seat(dh, "winit");
+        let mut seat: Seat<Self> = seat_state.new_wl_seat(dh, "seat0");
         let keyboard = &options.keyboard;
         info!(
             layout = keyboard.layout,
@@ -117,34 +144,29 @@ impl State {
         )?;
         seat.add_pointer();
 
-        let size = backend.backend.window_size();
-        let output = Output::new(
-            "winit".to_owned(),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: "coquille".into(),
-                model: "nested".into(),
-                serial_number: "Unknown".into(),
-            },
-        );
-        let _global = output.create_global::<Self>(dh);
-        let mode = output_mode(size);
-        // The winit backend draws upside down, hence the flip.
-        output.change_current_state(
-            Some(mode),
-            Some(Transform::Flipped180),
-            None,
-            Some((0, 0).into()),
-        );
-        output.set_preferred(mode);
-
-        let shell = Shell::new(options.role, coquille_model::Size::new(size.w, size.h));
+        let mut outputs = Vec::new();
+        let mut infos = Vec::new();
+        for (info, output) in screens {
+            info!(
+                name = output.name(),
+                role = ?info.role,
+                rect = ?info.rect,
+                "screen"
+            );
+            // The global lives as long as the output does.
+            let _global = output.create_global::<Self>(dh);
+            outputs.push(ScreenOutput {
+                id: info.id,
+                output,
+            });
+            infos.push(info);
+        }
 
         Ok(Self {
             start_time: Instant::now(),
             display_handle,
             loop_signal,
+            loop_handle,
             socket_name,
             compositor_state,
             xdg_shell_state,
@@ -159,47 +181,112 @@ impl State {
             _cursor_shape_state: cursor_shape_state,
             seat,
             cursor_status: CursorImageStatus::default_named(),
+            cursor_images: CursorImages::load(),
             suppressed_keys: Vec::new(),
-            // Nested, the host session keeps Super for itself.
-            mod_key: ModKey::Alt,
-            output,
+            mod_key: options.mod_key,
+            terminal: options.terminal,
+            outputs,
             backend,
-            shell,
+            shell: Shell::new(infos),
             theme: options.theme,
             painter: Painter::new(),
             hover: None,
             pressed: None,
+            redraw_needed: true,
+            full_redraw: true,
         })
     }
 
-    /// The host window changed size: so does the output.
-    pub fn resize_output(&mut self, size: Size<i32, Physical>) {
-        self.output
-            .change_current_state(Some(output_mode(size)), None, None, None);
-        let size = coquille_model::Size::new(size.w, size.h);
-        if let Err(error) = self.shell.desk.set_output_size(self.shell.output, size) {
-            warn!(%error, "cannot resize the output");
-        }
-        self.apply_arrangement();
+    pub fn output(&self, id: OutputId) -> Option<&Output> {
+        self.outputs
+            .iter()
+            .find(|screen| screen.id == id)
+            .map(|screen| &screen.output)
     }
 
-    /// Asks for a frame at the next tick.
+    /// Asks for a frame on every screen.
     pub fn queue_redraw(&mut self) {
-        self.backend.redraw_needed = true;
+        self.redraw_needed = true;
     }
-}
 
-fn output_mode(size: Size<i32, Physical>) -> Mode {
-    Mode {
-        size,
-        refresh: REFRESH,
+    pub fn pointer_location(&self) -> Point<f64, Logical> {
+        self.seat
+            .get_pointer()
+            .map(|pointer| pointer.current_location())
+            .unwrap_or_default()
+    }
+
+    /// The screen the pointer is on.
+    pub fn pointer_screen(&self) -> Option<ScreenInfo> {
+        let location = self.pointer_location();
+        let point = ModelPoint::new(location.x.floor() as i32, location.y.floor() as i32);
+        self.shell.screen_at(point).copied()
+    }
+
+    /// A client (or the shell) changed the pointer image.
+    pub fn set_cursor(&mut self, image: CursorImageStatus) {
+        if self.cursor_status == image {
+            return;
+        }
+        self.backend.show_host_cursor(&image);
+        self.cursor_status = image;
+        self.queue_redraw();
+    }
+
+    /// What to draw at the pointer. Nested, named cursors are left to the
+    /// host; on real hardware (`draw_named`) the compositor draws them.
+    pub fn cursor(&mut self, draw_named: bool) -> Option<Cursor> {
+        let location = self.pointer_location().to_i32_round();
+        match &self.cursor_status {
+            CursorImageStatus::Hidden => None,
+            CursorImageStatus::Surface(surface) if surface.alive() => {
+                let hotspot = with_states(surface, |states| {
+                    states
+                        .data_map
+                        .get::<std::sync::Mutex<CursorImageAttributes>>()
+                        .and_then(|attributes| attributes.lock().ok().map(|a| a.hotspot))
+                        .unwrap_or_default()
+                });
+                Some(Cursor::Surface {
+                    surface: surface.clone(),
+                    location: location - hotspot,
+                })
+            }
+            // A cursor surface that died: back to the default arrow.
+            CursorImageStatus::Surface(_) => {
+                self.set_cursor(CursorImageStatus::default_named());
+                self.cursor(draw_named)
+            }
+            CursorImageStatus::Named(icon) if draw_named => {
+                let sprite = self.cursor_images.get(*icon);
+                Some(Cursor::Image {
+                    buffer: sprite.buffer.clone(),
+                    location: location - Point::from(sprite.hotspot),
+                })
+            }
+            CursorImageStatus::Named(_) => None,
+        }
+    }
+
+    /// Runs a shell command as a client of this compositor.
+    pub fn spawn(&self, command: &str) {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .env("WAYLAND_DISPLAY", &self.socket_name)
+            // Without this, toolkits may prefer an X server.
+            .env_remove("DISPLAY")
+            .spawn();
+        match child {
+            Ok(child) => info!(command, pid = child.id(), "spawned"),
+            Err(error) => warn!(command, %error, "cannot spawn"),
+        }
     }
 }
 
 /// Lets clients hand over GPU buffers, which every OpenGL or Vulkan client
 /// needs.
-fn init_dmabuf(dh: &DisplayHandle, backend: &mut Winit) -> (DmabufState, DmabufGlobal) {
-    let renderer = backend.backend.renderer();
+fn init_dmabuf(dh: &DisplayHandle, renderer: &mut GlesRenderer) -> (DmabufState, DmabufGlobal) {
     let formats = renderer.dmabuf_formats();
     let render_node = EGLDevice::device_for_display(renderer.egl_context().display())
         .and_then(|device| device.try_get_render_node());
