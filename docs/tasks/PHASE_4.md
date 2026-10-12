@@ -37,6 +37,10 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
 - `Super` seul ouvre le tiroir et libère le pointeur d'un jeu ;
   `Super+Échap` remet le jeu en fenêtre.
 - Le bouton « ajouter un onglet » des barres de titre est supprimé.
+- Les onglets quittent les barres de titre pour des **capsules** au-dessus
+  de chaque emplacement ; l'échange avec le centre (⇄, `Mod+C`) et la
+  disposition « Onglets » sont supprimés. Détail :
+  `docs/superpowers/specs/2026-10-12-capsules-design.md`.
 - Un seul dock pour les trois écrans : il montre toutes les applis
   ouvertes, pas seulement celles de l'écran gauche.
 - Se déconnecter, Redémarrer et Éteindre sont réels, après confirmation ;
@@ -59,7 +63,7 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
 | Voir les fenêtres ouvertes | toutes, des trois écrans (favoris puis « OUVERTES »), avec leur écran |
 | Heure, réseau, son | dock et centre de contrôle |
 | Bascule « ne pas déranger » | centre de contrôle, sans effet |
-| Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `6`) |
+| Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `5`) |
 | « Tout envoyer vers l'écran… » | **toujours rien** |
 | Afficher les notifications | **toujours rien** (concept conservé) |
 | Enregistrer et restaurer un instantané | **toujours rien** (concept conservé) |

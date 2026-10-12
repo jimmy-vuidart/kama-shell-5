@@ -93,16 +93,16 @@ impl From<Role> for OutputRole {
 /// imbriqué). La touche des raccourcis, notée Mod, est Super sur le matériel
 /// et Alt en mode imbriqué.
 ///
-/// Souris : glisser une barre de titre montre les emplacements, relâcher
-/// range la fenêtre ; Mod+glisser la déplace librement ; tirer un bord ou un
-/// coin d'une fenêtre flottante la redimensionne ; Mod+glisser sur la
-/// séparation de deux emplacements règle leur ratio.
+/// Souris : glisser une barre de titre ou une capsule montre les
+/// emplacements, relâcher range la fenêtre ; un clic sur une capsule affiche
+/// sa fenêtre ; Mod+glisser la déplace librement ; tirer un bord ou un coin
+/// d'une fenêtre flottante la redimensionne ; Mod+glisser sur la séparation
+/// de deux emplacements règle leur ratio.
 ///
-/// Clavier : Mod+Entrée terminal ; Mod+1 à 6 disposition de l'écran du
-/// pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers +
-/// un tiers) ; Mod+Page suiv./préc. onglet suivant/précédent ; Mod+R
-/// restaure la dernière fenêtre réduite ; Mod+C échange la fenêtre active
-/// avec le centre ; Mod+Maj+E quitter.
+/// Clavier : Mod+Entrée terminal ; Mod+1 à 5 disposition de l'écran du
+/// pointeur (plein, côte à côte, haut/bas, écran libre, deux tiers + un
+/// tiers) ; Mod+Page suiv./préc. onglet suivant/précédent ; Mod+R restaure la
+/// dernière fenêtre réduite ; Mod+Maj+E quitter.
 /// Ctrl+Alt+Retour arrière quitte aussi, quoi qu'il arrive.
 ///
 /// Mode jeu : une fenêtre en plein écran ancre son écran (ni décoration ni

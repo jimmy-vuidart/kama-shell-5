@@ -51,14 +51,13 @@ Et parfois des choses inhabituelles (un logiciel de retouche une seule fois, une
 
 Chaque écran a une disposition parmi une liste courte :
 
-- `Full` : une fenêtre (ou une pile d'onglets) occupe tout l'écran.
+- `Full` : une pile de fenêtres occupe tout l'écran, une seule affichée à la fois.
 - `Columns` : deux emplacements côte à côte, ratio réglable (défaut 50/50 ; exemple réel : 58/42). **Partage par défaut sur les écrans latéraux en paysage.**
 - `Rows` : deux emplacements haut / bas (moins utile en paysage, mais disponible).
-- `Tabs` : tout l'écran est une pile d'onglets.
 - `Free` (« écran libre ») : fenêtres flottantes qui se chevauchent, comme un bureau classique.
 - Le centre 21:9 accepte aussi `TwoThirdsOneThird` hors jeu.
 
-Changement de disposition : `Super+1` à `6`. Le dock ne s'en charge pas : toujours rien à la souris pour cela.
+Changement de disposition : `Super+1` à `5`. Le dock ne s'en charge pas : toujours rien à la souris pour cela.
 
 ### Règles de placement
 
@@ -66,7 +65,7 @@ Changement de disposition : `Super+1` à `6`. Le dock ne s'en charge pas : toujo
 2. **Glisser une fenêtre** (par sa barre de titre) affiche les emplacements possibles sur les trois écrans ; relâcher la place.
 3. **Un écran n'est jamais plein** : déposer sur un emplacement occupé empile la fenêtre **en onglet** avec celle qui s'y trouve.
 4. **Mémoire par application** : une appli que j'ai rangée moi-même rouvre au même écran / emplacement (clé : `app_id` Wayland ou `WM_CLASS` X11). **Les fenêtres laissées flottantes ne créent aucune habitude.**
-5. **Bouton ⇄ « échanger avec le centre »** sur les fenêtres des écrans latéraux : la fenêtre passe au centre, celle du centre prend sa place. Désactivé quand un jeu est ancré.
+5. *Supprimée* : l'échange avec le centre (bouton ⇄, `Mod+C`), jugé inutile à l'usage. Il en reste « Au centre », dans la barre de rangement : la fenêtre est rangée au centre, en onglet si l'emplacement est pris, et l'appli y rouvrira.
 6. **Instantanés optionnels** : mémoriser la disposition actuelle des trois écrans, la restaurer. Rien n'oblige à préparer quoi que ce soit. *Concept conservé, pas encore réalisé : sa forme reste à définir.*
 7. Si je lance une appli alors qu'un jeu est ancré au centre, elle s'ouvre en flottant sur **l'écran latéral utilisé en dernier**, jamais devant le jeu.
 
@@ -94,7 +93,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 - **Bords collants seulement quand le jeu a le focus** : traverser l'écran d'un jeu laissé de côté (focus sur Discord) ne retient pas le curseur. Entrer sur l'écran du jeu n'est jamais retenu. Un glisser du shell n'est jamais retenu.
 - **Une fenêtre qui s'ouvre pendant que le jeu a le focus ne lui prend pas le clavier** : elle apparaît sur l'écran latéral (règle 7), sans le focus, avec sa barre de rangement ; un clic dessus le lui donne.
 - `Super + Échap` vise le jeu qui a le focus, sinon celui de l'écran du pointeur, sinon le seul jeu ancré.
-- Le bouton ⇄ et « Au centre » disparaissent tant qu'un jeu tient le centre (ou l'écran de la fenêtre).
+- « Au centre » disparaît de la barre de rangement tant qu'un jeu tient le centre (ou l'écran de la fenêtre).
 
 ### Règle d'or de la souris
 
@@ -113,9 +112,10 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
 - Fenêtres : rayon **12 px**, espacement **8 px** entre emplacements et avec les bords.
 - **Décorations côté serveur** (dessinées par le compositeur, via `xdg-decoration`) :
   - barre de titre **38 px** : icône et nom de l'appli (ceux de son fichier `.desktop` ; à défaut un carré de couleur et un nom tiré de son identifiant), sous-titre atténué ;
-  - boutons à droite : ⇄ (écrans latéraux uniquement), réduire, fermer ;
+  - boutons à droite, pour une fenêtre flottante seulement : réduire, fermer (une fenêtre rangée les a sur sa capsule) ;
   - pas de bouton « agrandir » (la disposition s'en charge).
-- **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit pas celle du shell. Elle la retrouve dès qu'elle partage son emplacement, pour montrer les onglets. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range). Sans barre du shell, pas de bouton ⇄ : `Mod+C` le remplace.
+- **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range).
+- **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine et montre réduire et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Ni capsule pour une fenêtre flottante, ni sur un écran libre ou ancré. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
 - Fenêtre active : **anneau d'accent de 2 px**. Accent par défaut : `#2f6fed` (clair), `#7aa7ff` (sombre).
 - Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, cahier des charges `docs/maquettes/dock.md`) vit sur le bord gauche de l'écran gauche : barre de 44 px à 8 px du bord, qui se déploie au survol, zone réservée de 60 px.
 - Police d'interface : Figtree (repli : police système sans-serif).
@@ -170,11 +170,11 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 ```
 
 - Le plus rapide : `scripts/debug.sh` compile (debug) et lance coquille et le dock en imbriqué. `scripts/debug.sh left` pour un seul écran, `-f` en plein écran, `--mock` pour un dock simulé, `-- <options de coquille>` pour le reste. Les boutons de session du dock y sont simulés.
-- Souris : glisser une barre de titre montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
+- Souris : glisser une barre de titre ou une capsule montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
 - Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
-- Boutons de la barre de titre : « réduire » cache la fenêtre (son onglet reste, grisé ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; ⇄ ; fermer. Le bouton « ajouter un onglet » a été retiré avec l'arrivée du dock.
+- Capsules : un clic affiche la fenêtre ; « réduire » la cache (sa capsule reste, grisée ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; « fermer » la ferme, affichée ou non. La barre de titre d'une fenêtre flottante garde ces deux boutons.
 - Dock : `target/debug/coquille --role left --spawn "$PWD/target/debug/coquille-dock --mock"` (tout simulé) ; sans `--mock`, vraies fenêtres et vrais services. Détail dans `crates/dock/README.md`.
-- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `6` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+C` échange la fenêtre active avec le centre ; `Mod+Maj+E` quitter.
+- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `5` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter.
 - Mode jeu : `Mod+Échap` remet le jeu en fenêtre ; `Mod` seul ouvre le tiroir du dock et libère le pointeur. (En imbriqué, GNOME garde `Alt+Échap` pour lui : ce raccourci ne s'essaie qu'avec `--debug-input`.)
 - Applications X11 : `DISPLAY` est transmis aux programmes lancés par le compositeur (et aux services de la session avec `--export-environment`). `--no-xwayland` ou `xwayland = false` s'en passent.
 - Mémoire par appli : enregistrée dans `~/.local/state/coquille/memory.json` sur le matériel ; en imbriqué, seulement avec `--state-dir`.
@@ -197,9 +197,9 @@ Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour
 
 ### État de la phase 2
 
-Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (bande dans la barre de titre), ⇄, mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, bouton « réduire ».
+Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (depuis en capsules au-dessus des emplacements), mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, bouton « réduire ». L'échange avec le centre (⇄) et la disposition « Onglets » ont été retirés depuis.
 
-Toujours sans solution à la souris : changer de disposition (`Mod+1` à `6`).
+Toujours sans solution à la souris : changer de disposition (`Mod+1` à `5`).
 
 ### État de la phase 3
 
@@ -242,6 +242,16 @@ Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth de
 Intégration à la session : écrite, **essayée en imbriqué et dans un dossier d'essai seulement** (`scripts/install.sh` avec `PREFIX`, `SESSIONS_DIR` et les dossiers XDG redirigés ; `coquille-dock-watch` relance bien un dock tué et s'arrête avec le compositeur). Jamais lancée depuis l'écran de connexion. Si le dock ne s'affiche pas sur le matériel (il dessine avec le GPU, par wgpu), `ICED_BACKEND=tiny-skia` le fait dessiner sans.
 
 Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un écran. Limites du dock : `crates/dock/README.md`.
+
+### État des capsules
+
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : groupes par emplacement, clic, survol, réduire, restaurer, fermer une fenêtre affichée ou non, glisser une capsule vers un autre emplacement, groupes qui suivent le ratio, disparition sur un écran ancré, « Au centre ». Jamais vu sur les trois vrais écrans.
+
+Limites connues :
+
+- deux fenêtres de la même appli dans un emplacement ont des capsules identiques (le nom de l'appli, pas le titre de la fenêtre) ;
+- pas de réordonnancement des capsules à la souris ;
+- au-delà de ce que la bande peut montrer en icônes seules, les dernières capsules sont coupées.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 

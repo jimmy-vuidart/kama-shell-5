@@ -194,7 +194,7 @@ Depuis l'abandon des barres latérales, plusieurs fonctions n'avaient plus d'end
 | Voir les fenêtres d'un écran | écran gauche seulement (« SUR CET ÉCRAN ») |
 | Heure, réseau, son | dock et centre de contrôle |
 | Bascule « ne pas déranger » | centre de contrôle, sans effet tant qu'il n'y a pas de notifications |
-| Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `6`) |
+| Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `5`) |
 | « Tout envoyer vers l'écran… » | **toujours rien** |
 | Afficher les notifications | **toujours rien** (concept conservé) |
 | Enregistrer et restaurer un instantané | **toujours rien** (concept conservé) |

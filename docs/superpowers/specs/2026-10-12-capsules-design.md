@@ -1,6 +1,6 @@
 # Capsules : les onglets sortent des barres de titre
 
-Date : 2026-10-12. Statut : à relire.
+Date : 2026-10-12. Statut : réalisé (voir « Écarts à la réalisation » en fin de document).
 
 ## Pourquoi
 
@@ -46,15 +46,16 @@ et la disposition `Tabs`.
 - La capsule de la **fenêtre affichée** est pleine, son nom en demi-gras, et
   porte deux boutons : réduire, fermer.
 - Les autres capsules sont atténuées ; leurs deux boutons apparaissent au
-  survol.
+  survol, à une place qui leur est réservée dans la capsule.
 - Une fenêtre **réduite** garde sa capsule, grisée. Si toutes les fenêtres
   d'un emplacement sont réduites, le groupe reste là (aujourd'hui, la seule
   fenêtre d'un emplacement, une fois réduite, ne laisse rien à l'écran).
 - La capsule affichée de la **fenêtre active** est entourée de l'anneau
   d'accent.
-- Largeur d'une capsule : celle de son contenu, 200 px au plus. Quand le
-  groupe dépasse la largeur de l'emplacement, toutes les capsules
-  rétrécissent ensemble (le nom est tronqué), jusqu'à ne montrer que l'icône.
+- Largeur d'une capsule : celle de son contenu, le nom ne dépassant pas
+  160 px. Quand le groupe dépasse la largeur de l'emplacement, les capsules
+  les plus larges rétrécissent d'abord (le nom est coupé), jusqu'à ne montrer
+  que l'icône.
 
 ### Ce qu'on y fait à la souris
 
@@ -103,8 +104,8 @@ touchée. `Mod+Page suiv./préc.` change toujours d'onglet.
 
 - Groupe : rectangle arrondi de 32 px de haut (rayon 16), fond `titlebar` du
   thème à 85 % d'opacité, 3 px de marge intérieure.
-- Capsule : 26 px de haut (rayon 13), icône de 14 px, nom en 12 px, 2 px
-  entre deux capsules.
+- Capsule : 26 px de haut (rayon 13), icône de 14 px, nom en 13 px comme les
+  barres de titre, 2 px entre deux capsules.
 - Capsule affichée : fond `button_hover`, texte `text` ; les autres sans
   fond, texte `text_muted` ; réduite : texte `disabled`, icône à 45 %.
 - Anneau d'accent de 2 px autour de la capsule affichée de la fenêtre active.
@@ -196,6 +197,17 @@ enregistré ne contient de disposition. Rien d'autre à changer dans le dock.
 `CLAUDE.md` (dispositions, règle 5, précisions du mode jeu, apparence,
 raccourcis, états des phases 2 et 3), `docs/tasks/PHASE_4.md` (décisions),
 `config/config.toml` s'il cite les raccourcis.
+
+## Écarts à la réalisation
+
+- **Place des boutons réservée.** Le plan prévoyait que les boutons d'une
+  capsule non affichée recouvrent la fin de son nom au survol. À l'essai, un
+  clic visant le nom d'une capsule courte (« kitty ») tombait sur « fermer ».
+  Chaque capsule réserve donc 44 px à droite pour ses boutons, visibles
+  seulement sur la capsule affichée et sous le pointeur.
+- **Survol** : une capsule non affichée prend un fond léger sous le pointeur.
+- **« Au centre » crée une habitude**, comme « Ranger ici ».
+- Une capsule de moins de 72 px n'a pas de bouton.
 
 ## Hors périmètre
 
