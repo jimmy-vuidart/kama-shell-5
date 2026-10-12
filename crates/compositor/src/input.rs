@@ -56,8 +56,6 @@ struct Hit {
     /// The point is on the window's title bar.
     titlebar: bool,
     button: Option<TitlebarButton>,
-    /// The tab there: its position in the stack, and its window.
-    tab: Option<(usize, WindowId)>,
     /// The point is on the placement bar, on this button of it if any.
     bar: Option<Option<usize>>,
     /// The point is on these edges of a floating window.
@@ -79,13 +77,9 @@ enum Hold {
 pub enum Gesture {
     /// Down on a title bar, not moved yet: a click, or the start of a drag.
     Pressed {
-        /// The window a drag would take: the one of the tab under the
-        /// pointer, else the one shown.
         window: WindowId,
         at: Point<f64, Logical>,
         button: Option<TitlebarButton>,
-        /// The tab to show if this ends as a click.
-        tab: Option<usize>,
     },
     /// Down on the placement bar, on this button of it if any.
     BarPressed { button: Option<usize> },
@@ -869,11 +863,6 @@ impl State {
                             self.click_titlebar_button(window, pressed);
                         }
                     }
-                    Some(Gesture::Pressed {
-                        window,
-                        tab: Some(tab),
-                        ..
-                    }) => self.show_tab(window, tab),
                     Some(Gesture::BarPressed {
                         button: Some(pressed),
                     }) => {
@@ -965,23 +954,12 @@ impl State {
         }
         if hit.titlebar {
             self.gesture = Some(Gesture::Pressed {
-                window: hit.tab.map_or(window, |(_, tab_window)| tab_window),
+                window,
                 at: location,
                 button: hit.button,
-                tab: hit.tab.map(|(index, _)| index),
             });
         }
         false
-    }
-
-    /// Shows a tab of the stack `window` belongs to.
-    fn show_tab(&mut self, window: WindowId, tab: usize) {
-        if let Some(Placement::Slot(slot)) = self.shell.desk.placement(window) {
-            if let Err(error) = self.shell.desk.activate_tab(slot, tab) {
-                warn!(%error, "cannot show this tab");
-            }
-            self.apply_arrangement();
-        }
     }
 
     fn on_axis<I: InputBackend>(&mut self, event: I::PointerAxisEvent) {
@@ -1130,16 +1108,11 @@ impl State {
                 let layout = TitlebarLayout::new(bar.size(), managed.buttons());
                 let local = ModelPoint::new(point.x - bar.x, point.y - bar.y);
                 let button = layout.button_at(local);
-                let tab = layout
-                    .tab_at(managed.tabs.len(), local)
-                    .filter(|_| button.is_none())
-                    .and_then(|index| Some((index, *managed.tabs.get(index)?)));
                 return Hit {
                     window: Some(managed.id),
                     surface: None,
                     titlebar: true,
                     button,
-                    tab,
                     ..Hit::default()
                 };
             }

@@ -78,6 +78,15 @@ impl Screen {
             .slot_rects(self.info.usable(), self.ratio, metrics.gap)
     }
 
+    /// Each slot from top to bottom: the band of its capsules, then the
+    /// frame of its windows.
+    pub fn slot_parts(&self, metrics: &Metrics) -> Vec<(Rect, Rect)> {
+        self.slot_rects(metrics)
+            .into_iter()
+            .map(|slot| slot.split_rows(metrics.capsule_height, metrics.gap))
+            .collect()
+    }
+
     /// The gap between the two slots, if the layout has an adjustable one.
     pub fn separator(&self, metrics: &Metrics) -> Option<Rect> {
         self.layout
@@ -184,13 +193,13 @@ impl Screen {
     /// Switches layout, redistributing windows:
     /// - fewer slots: the slots in excess merge into the last one, as tabs;
     /// - more slots: the new ones start empty;
-    /// - `Free`: every window floats where its slot was;
+    /// - `Free`: every window floats where it was in its slot;
     /// - leaving `Free`: floating windows stay floating.
     pub(crate) fn apply_layout(&mut self, layout: LayoutKind, metrics: &Metrics) {
         let count = layout.slot_count();
         if count == 0 {
-            let rects = self.slot_rects(metrics);
-            for (stack, rect) in std::mem::take(&mut self.slots).into_iter().zip(rects) {
+            let parts = self.slot_parts(metrics);
+            for (stack, (_, rect)) in std::mem::take(&mut self.slots).into_iter().zip(parts) {
                 let active = stack.active();
                 let hidden = stack.windows().iter().filter(|id| Some(**id) != active);
                 // The shown tab ends up above the ones it was hiding.

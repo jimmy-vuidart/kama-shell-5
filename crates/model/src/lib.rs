@@ -20,7 +20,8 @@ pub mod screen;
 pub mod stack;
 
 pub use desk::{
-    Desk, DropTarget, DropZone, ModelError, OpenRequest, Placement, WindowGeometry, WindowRecord,
+    CapsuleGroup, Desk, DropTarget, DropZone, ModelError, OpenRequest, Placement, WindowGeometry,
+    WindowRecord,
 };
 pub use geometry::{Insets, Point, Rect, Size};
 pub use ids::{AppKey, OutputId, WindowId};

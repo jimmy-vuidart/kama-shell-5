@@ -75,8 +75,7 @@ impl OpenRequest {
 pub struct WindowRecord {
     pub app: Option<AppKey>,
     pub title: String,
-    /// The client draws its own title bar, so the shell adds none, except to
-    /// show the tabs of a shared slot.
+    /// The client draws its own title bar, so the shell adds none.
     pub own_titlebar: bool,
 }
 
@@ -94,6 +93,18 @@ pub struct DropZone {
     pub rect: Rect,
     /// Another window is already there: releasing stacks as a tab.
     pub occupied: bool,
+}
+
+/// The capsules above a slot: one per window of its stack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapsuleGroup {
+    pub slot: SlotId,
+    /// Where the capsules go, relative to the screen.
+    pub band: Rect,
+    /// In the order of the stack.
+    pub windows: Vec<WindowId>,
+    /// The window the slot shows; `None` when they are all minimized.
+    pub shown: Option<WindowId>,
 }
 
 /// Geometry and state of one window, as the compositor must apply it.
@@ -724,19 +735,30 @@ impl Desk {
         Ok(())
     }
 
-    /// The windows shown as tabs in the title bar of `id`: its stack, as soon
-    /// as it holds two windows. Empty for a window alone in its slot, or
-    /// floating.
-    pub fn tab_strip(&self, id: WindowId) -> &[WindowId] {
-        let Some((index, Spot::Slot(slot))) = self.locate(id) else {
-            return &[];
-        };
-        let stack = &self.screens[index].slots()[slot];
-        if stack.len() >= 2 {
-            stack.windows()
-        } else {
-            &[]
+    /// The capsules to show: one group above each occupied slot. Anchored
+    /// and `Free` screens have none.
+    pub fn capsule_groups(&self) -> Vec<CapsuleGroup> {
+        let mut groups = Vec::new();
+        for screen in &self.screens {
+            if screen.anchored().is_some() {
+                continue;
+            }
+            let parts = screen.slot_parts(&self.metrics);
+            for (index, (stack, (band, _))) in screen.slots().iter().zip(parts).enumerate() {
+                if stack.is_empty() {
+                    continue;
+                }
+                groups.push(CapsuleGroup {
+                    slot: SlotId::new(screen.id(), index),
+                    band,
+                    windows: stack.windows().to_vec(),
+                    shown: stack
+                        .active()
+                        .filter(|window| !self.minimized.contains(window)),
+                });
+            }
         }
+        groups
     }
 
     /// Every window with its geometry, screen by screen, bottom to top.
@@ -752,11 +774,11 @@ impl Desk {
                 }
             };
 
-            let rects = screen.slot_rects(&self.metrics);
-            for (stack, rect) in screen.slots().iter().zip(rects) {
+            let parts = screen.slot_parts(&self.metrics);
+            for (stack, (_, frame)) in screen.slots().iter().zip(parts) {
                 for id in stack.windows() {
                     let shown = stack.active() == Some(*id);
-                    add(self.geometry(screen, *id, rect, shown, false));
+                    add(self.geometry(screen, *id, frame, shown, false));
                 }
             }
             for window in screen.floating() {
@@ -784,7 +806,7 @@ impl Desk {
         let (frame, titlebar, client) = if anchored {
             let bounds = screen.info().bounds();
             (bounds, None, bounds)
-        } else if own_titlebar && self.tab_strip(id).is_empty() {
+        } else if own_titlebar {
             // The client draws its bar itself: the whole frame is its own.
             (frame, None, frame)
         } else {

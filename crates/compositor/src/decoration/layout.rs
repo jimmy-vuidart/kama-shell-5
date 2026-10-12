@@ -10,9 +10,6 @@ const ICON_SIZE: i32 = 18;
 const ICON_LEFT: i32 = 12;
 const TEXT_LEFT: i32 = 40;
 const TEXT_RIGHT_GAP: i32 = 8;
-/// Space between tabs, and around them in the bar.
-const TAB_GAP: i32 = 4;
-const TAB_MAX_WIDTH: i32 = 220;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TitlebarButton {
@@ -56,28 +53,6 @@ impl TitlebarLayout {
             text: Rect::new(TEXT_LEFT, 0, (text_right - TEXT_LEFT).max(0), size.h),
             buttons,
         }
-    }
-
-    /// Cells of `count` tabs, which take the place of the icon and the title:
-    /// equal widths, never wider than a comfortable maximum.
-    pub fn tabs(&self, count: usize) -> Vec<Rect> {
-        let Ok(count) = i32::try_from(count) else {
-            return Vec::new();
-        };
-        if count == 0 {
-            return Vec::new();
-        }
-        let left = ICON_LEFT - TAB_GAP;
-        let room = (self.text.right() - left - TAB_GAP * (count - 1)).max(0);
-        let width = (room / count).min(TAB_MAX_WIDTH);
-        let height = self.text.h - 2 * TAB_GAP;
-        (0..count)
-            .map(|index| Rect::new(left + index * (width + TAB_GAP), TAB_GAP, width, height))
-            .collect()
-    }
-
-    pub fn tab_at(&self, count: usize, point: Point) -> Option<usize> {
-        self.tabs(count).iter().position(|tab| tab.contains(point))
     }
 
     pub fn button_at(&self, point: Point) -> Option<TitlebarButton> {
@@ -147,41 +122,6 @@ mod tests {
 
         assert_eq!(kinds(&layout), [TitlebarButton::Close]);
         assert_eq!(layout.text.w, 0);
-    }
-
-    #[test]
-    fn tabs_share_the_room_left_of_the_buttons() {
-        let layout = TitlebarLayout::new(BAR, true);
-
-        assert_eq!(
-            layout.tabs(2),
-            [Rect::new(8, 4, 150, 30), Rect::new(162, 4, 150, 30)]
-        );
-    }
-
-    #[test]
-    fn tabs_are_not_wider_than_their_maximum() {
-        let layout = TitlebarLayout::new(Size::new(1000, 38), true);
-
-        assert_eq!(
-            layout.tabs(2),
-            [Rect::new(8, 4, 220, 30), Rect::new(232, 4, 220, 30)]
-        );
-    }
-
-    #[test]
-    fn a_single_tab_is_laid_out_too() {
-        let layout = TitlebarLayout::new(BAR, true);
-
-        assert_eq!(layout.tabs(1), [Rect::new(8, 4, 220, 30)]);
-    }
-
-    #[test]
-    fn no_tab_gives_no_cell_and_a_narrow_bar_no_negative_width() {
-        assert!(TitlebarLayout::new(BAR, true).tabs(0).is_empty());
-
-        let narrow = TitlebarLayout::new(Size::new(60, 38), true);
-        assert!(narrow.tabs(3).iter().all(|tab| tab.w >= 0));
     }
 
     #[test]

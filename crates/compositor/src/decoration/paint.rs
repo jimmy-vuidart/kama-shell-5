@@ -42,20 +42,6 @@ pub struct TitlebarSpec {
     pub theme: ThemeKind,
     pub accent: Rgba,
     pub corner_radius: i32,
-    /// The windows stacked in the slot, when they are shown as tabs; they
-    /// then replace the badge, title and subtitle.
-    pub tabs: Vec<TabSpec>,
-}
-
-/// One tab of a stack.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TabSpec {
-    pub label: String,
-    pub icon: Option<String>,
-    pub badge: [u8; 3],
-    pub active: bool,
-    /// Hidden by the user: shown dimmed, a click brings it back.
-    pub minimized: bool,
 }
 
 /// What the placement bar's look depends on.
@@ -116,24 +102,16 @@ impl Painter {
             fill(&mut pixmap, &line, theme.separator);
         }
 
-        if spec.tabs.is_empty() {
-            let place = layout.icon;
-            let radius = BADGE_RADIUS;
-            self.app_mark(
-                &mut pixmap,
-                spec.icon.as_deref(),
-                spec.badge,
-                place,
-                radius,
-                1.0,
-            );
-            self.texts(&mut pixmap, spec, &theme, layout.text);
-        } else {
-            let cells = layout.tabs(spec.tabs.len());
-            for (tab, cell) in spec.tabs.iter().zip(cells) {
-                self.tab(&mut pixmap, tab, cell, spec.focused, &theme);
-            }
-        }
+        let place = layout.icon;
+        self.app_mark(
+            &mut pixmap,
+            spec.icon.as_deref(),
+            spec.badge,
+            place,
+            BADGE_RADIUS,
+            1.0,
+        );
+        self.texts(&mut pixmap, spec, &theme, layout.text);
 
         for (button, cell) in &layout.buttons {
             let hovered = spec.hovered == Some(*button);
@@ -198,50 +176,6 @@ impl Painter {
         if let Some(square) = rounded_rect(x, y, w, h, [radius; 4]) {
             fill(pixmap, &square, Rgba::from_array(badge));
         }
-    }
-
-    /// Draws one tab: a small badge and a label, on a pill when it is the
-    /// shown one.
-    fn tab(
-        &mut self,
-        pixmap: &mut Pixmap,
-        tab: &TabSpec,
-        cell: Rect,
-        focused: bool,
-        theme: &Theme,
-    ) {
-        const PADDING: i32 = 8;
-        const BADGE: i32 = 14;
-        const LABEL_LEFT: i32 = PADDING + BADGE + 6;
-        if cell.w <= LABEL_LEFT {
-            return;
-        }
-        let (x, y) = (cell.x as f32, cell.y as f32);
-        if tab.active {
-            let pill = rounded_rect(x, y, cell.w as f32, cell.h as f32, [8.0; 4]);
-            if let Some(pill) = pill {
-                fill(pixmap, &pill, theme.button_hover);
-            }
-        }
-        let place = Rect::new(
-            cell.x + PADDING,
-            cell.y + (cell.h - BADGE) / 2,
-            BADGE,
-            BADGE,
-        );
-        // A hidden window shows dimmed, its icon with the rest.
-        let opacity = if tab.minimized { 0.45 } else { 1.0 };
-        self.app_mark(pixmap, tab.icon.as_deref(), tab.badge, place, 4.0, opacity);
-
-        let (weight, color) = match (tab.active, focused, tab.minimized) {
-            (_, _, true) => (Weight::NORMAL, theme.disabled),
-            (true, true, _) => (Weight::SEMIBOLD, theme.text),
-            (true, false, _) => (Weight::SEMIBOLD, theme.text_muted),
-            (false, ..) => (Weight::NORMAL, theme.text_muted),
-        };
-        let left = (cell.x + LABEL_LEFT) as f32;
-        let room = (cell.w - LABEL_LEFT - PADDING) as f32;
-        self.text(pixmap, &tab.label, left, room, cell, weight, color);
     }
 
     /// Paints the placement bar. Returns `None` when it has no button.

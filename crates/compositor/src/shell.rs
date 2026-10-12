@@ -22,7 +22,7 @@ use tracing::{debug, info, warn};
 
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::naming::{badge_color, identity};
-use crate::decoration::paint::{Painter, TabSpec, TitlebarSpec};
+use crate::decoration::paint::{Painter, TitlebarSpec};
 use crate::focus::KeyFocus;
 use crate::input::Gesture;
 use crate::render::scene::Chrome;
@@ -52,9 +52,6 @@ pub struct ManagedWindow {
     pub geometry: WindowGeometry,
     /// Top-left corner of its screen in the global space.
     pub origin: ModelPoint,
-    /// The windows stacked in its slot when they show as tabs in its title
-    /// bar, in order; empty otherwise.
-    pub tabs: Vec<WindowId>,
     /// Floating: the size its client chose has been taken once already.
     pub sized: bool,
     /// Floating: its client wants more room than the screen has, so the
@@ -81,9 +78,10 @@ impl ManagedWindow {
         self.geometry.client.translated(self.origin)
     }
 
-    /// Whether its title bar shows buttons.
+    /// Whether its title bar shows buttons: in a slot, they are on its
+    /// capsule.
     pub fn buttons(&self) -> bool {
-        true
+        self.geometry.floating
     }
 }
 
@@ -215,12 +213,6 @@ impl Shell {
             .map_or_else(ModelPoint::default, |screen| screen.rect.origin())
     }
 
-    /// The stack a window belongs to, when it must show as tabs: as soon as
-    /// it holds two windows.
-    fn tabs_of(&self, id: WindowId) -> Vec<WindowId> {
-        self.desk.tab_strip(id).to_vec()
-    }
-
     /// Takes the model's arrangement: geometry of each window, and stacking.
     fn sync(&mut self) {
         let arrangement = self.desk.arrangement();
@@ -230,11 +222,9 @@ impl Shell {
             let id = self.windows[index].id;
             if let Some(geometry) = arrangement.iter().find(|geometry| geometry.id == id) {
                 let origin = self.origin_of(geometry);
-                let tabs = self.tabs_of(id);
                 let managed = &mut self.windows[index];
                 managed.geometry = *geometry;
                 managed.origin = origin;
-                managed.tabs = tabs;
             }
         }
     }
@@ -247,27 +237,6 @@ impl Shell {
         hover: Option<(WindowId, TitlebarButton)>,
     ) {
         let corner_radius = self.desk.metrics().corner_radius;
-        // What each window is called, for the tabs of its neighbours.
-        let labels: Vec<(WindowId, TabSpec)> = self
-            .windows
-            .iter()
-            .map(|managed| {
-                let label = if managed.title.is_empty() {
-                    managed.name.clone()
-                } else {
-                    managed.title.clone()
-                };
-                let tab = TabSpec {
-                    label,
-                    icon: managed.icon.clone(),
-                    badge: badge_color(&managed.app_id),
-                    active: false,
-                    minimized: managed.geometry.minimized,
-                };
-                (managed.id, tab)
-            })
-            .collect();
-
         for managed in &mut self.windows {
             let geometry = managed.geometry;
             let Some(bar) = geometry.titlebar.filter(|_| geometry.visible) else {
@@ -279,15 +248,6 @@ impl Shell {
             } else {
                 managed.title.clone()
             };
-            let tabs = managed
-                .tabs
-                .iter()
-                .filter_map(|id| labels.iter().find(|(known, _)| known == id))
-                .map(|(id, tab)| TabSpec {
-                    active: *id == managed.id,
-                    ..tab.clone()
-                })
-                .collect();
             let spec = TitlebarSpec {
                 size: bar.size(),
                 title: name,
@@ -302,7 +262,6 @@ impl Shell {
                 theme: theme.kind,
                 accent: theme.accent,
                 corner_radius,
-                tabs,
             };
             if managed.chrome.spec.as_ref() == Some(&spec) {
                 continue;
@@ -455,7 +414,6 @@ impl State {
             icon,
             geometry,
             origin,
-            tabs: Vec::new(),
             // The size of an X11 window is known and imposed from the start.
             sized: x11,
             oversized: false,
