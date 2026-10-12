@@ -749,15 +749,14 @@ impl Desk {
     }
 
     /// The windows shown as tabs in the title bar of `id`: its stack, as soon
-    /// as it holds two windows, and always in the `Tabs` layout. Empty for a
-    /// window alone in its slot, or floating.
+    /// as it holds two windows. Empty for a window alone in its slot, or
+    /// floating.
     pub fn tab_strip(&self, id: WindowId) -> &[WindowId] {
         let Some((index, Spot::Slot(slot))) = self.locate(id) else {
             return &[];
         };
-        let screen = &self.screens[index];
-        let stack = &screen.slots()[slot];
-        if stack.len() >= 2 || screen.layout() == LayoutKind::Tabs {
+        let stack = &self.screens[index].slots()[slot];
+        if stack.len() >= 2 {
             stack.windows()
         } else {
             &[]

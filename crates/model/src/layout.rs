@@ -83,8 +83,6 @@ pub enum LayoutKind {
     Columns,
     /// Two slots, top and bottom.
     Rows,
-    /// One slot whose tab strip is always shown.
-    Tabs,
     /// No slot: overlapping floating windows, like a classic desktop.
     Free,
     /// Two thirds plus one third; only on the ultra-wide center.
@@ -95,7 +93,7 @@ impl LayoutKind {
     pub const fn slot_count(self) -> usize {
         match self {
             Self::Free => 0,
-            Self::Full | Self::Tabs => 1,
+            Self::Full => 1,
             Self::Columns | Self::Rows | Self::TwoThirdsOneThird => 2,
         }
     }
@@ -122,7 +120,6 @@ impl LayoutKind {
             Self::Full => "Plein",
             Self::Columns => "Côte à côte",
             Self::Rows => "Haut / bas",
-            Self::Tabs => "Onglets",
             Self::Free => "Écran libre",
             Self::TwoThirdsOneThird => "Deux tiers + un tiers",
         }
@@ -161,7 +158,7 @@ impl LayoutKind {
         let inner = area.inset(Insets::uniform(gap));
         match self {
             Self::Free => Vec::new(),
-            Self::Full | Self::Tabs => vec![inner],
+            Self::Full => vec![inner],
             Self::Columns => {
                 let (left, right) = inner.split_columns(ratio.first_len(inner.w - gap), gap);
                 vec![left, right]
@@ -231,7 +228,6 @@ mod tests {
         assert_eq!(LayoutKind::Full.slot_count(), 1);
         assert_eq!(LayoutKind::Columns.slot_count(), 2);
         assert_eq!(LayoutKind::Rows.slot_count(), 2);
-        assert_eq!(LayoutKind::Tabs.slot_count(), 1);
         assert_eq!(LayoutKind::Free.slot_count(), 0);
         assert_eq!(LayoutKind::TwoThirdsOneThird.slot_count(), 2);
     }
@@ -249,7 +245,6 @@ mod tests {
             LayoutKind::Full,
             LayoutKind::Columns,
             LayoutKind::Rows,
-            LayoutKind::Tabs,
             LayoutKind::Free,
         ] {
             for role in [OutputRole::Left, OutputRole::Center, OutputRole::Right] {
@@ -279,14 +274,6 @@ mod tests {
         assert_eq!(
             LayoutKind::Full.slot_rects(SIDE, Ratio::HALF, 8),
             vec![Rect::new(60, 8, 1852, 1064)]
-        );
-    }
-
-    #[test]
-    fn tabs_has_the_same_single_slot_as_full() {
-        assert_eq!(
-            LayoutKind::Tabs.slot_rects(SIDE, Ratio::HALF, 8),
-            LayoutKind::Full.slot_rects(SIDE, Ratio::HALF, 8)
         );
     }
 
@@ -347,7 +334,6 @@ mod tests {
         let area = Rect::new(0, 0, 3440, 1440);
         for kind in [
             LayoutKind::Full,
-            LayoutKind::Tabs,
             LayoutKind::Free,
             LayoutKind::TwoThirdsOneThird,
         ] {

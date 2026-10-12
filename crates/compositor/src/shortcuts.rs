@@ -82,7 +82,6 @@ const KEY_2: u32 = 11;
 const KEY_3: u32 = 12;
 const KEY_4: u32 = 13;
 const KEY_5: u32 = 14;
-const KEY_6: u32 = 15;
 
 pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     let has = |sym: Keysym| press.syms.contains(&sym);
@@ -107,9 +106,8 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
         KEY_1 => Some(Action::SetLayout(LayoutKind::Full)),
         KEY_2 => Some(Action::SetLayout(LayoutKind::Columns)),
         KEY_3 => Some(Action::SetLayout(LayoutKind::Rows)),
-        KEY_4 => Some(Action::SetLayout(LayoutKind::Tabs)),
-        KEY_5 => Some(Action::SetLayout(LayoutKind::Free)),
-        KEY_6 => Some(Action::SetLayout(LayoutKind::TwoThirdsOneThird)),
+        KEY_4 => Some(Action::SetLayout(LayoutKind::Free)),
+        KEY_5 => Some(Action::SetLayout(LayoutKind::TwoThirdsOneThird)),
         _ if press.shift && has(Keysym::e) => Some(Action::Quit),
         _ if has(Keysym::Return) => Some(Action::SpawnTerminal),
         _ if has(Keysym::r) => Some(Action::RestoreWindow),
@@ -270,12 +268,12 @@ mod tests {
         let layout = |keycode| press(true, false, keycode, &[]);
 
         assert_eq!(layout(12), Some(Action::SetLayout(LayoutKind::Rows)));
-        assert_eq!(layout(13), Some(Action::SetLayout(LayoutKind::Tabs)));
-        assert_eq!(layout(14), Some(Action::SetLayout(LayoutKind::Free)));
+        assert_eq!(layout(13), Some(Action::SetLayout(LayoutKind::Free)));
         assert_eq!(
-            layout(15),
+            layout(14),
             Some(Action::SetLayout(LayoutKind::TwoThirdsOneThird))
         );
+        assert_eq!(layout(15), None);
     }
 
     #[test]

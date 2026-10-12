@@ -226,7 +226,7 @@ impl Shell {
     }
 
     /// The stack a window belongs to, when it must show as tabs: as soon as
-    /// it holds two windows, and always in the `Tabs` layout.
+    /// it holds two windows.
     fn tabs_of(&self, id: WindowId) -> Vec<WindowId> {
         self.desk.tab_strip(id).to_vec()
     }

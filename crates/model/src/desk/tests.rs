@@ -947,7 +947,7 @@ fn merging_slots_keeps_the_focused_window_visible() {
     open_in(&mut desk, 1, "guide", RIGHT, 0);
     open_in(&mut desk, 2, "notes", RIGHT, 1);
 
-    desk.set_layout(RIGHT, LayoutKind::Tabs).unwrap();
+    desk.set_layout(RIGHT, LayoutKind::Full).unwrap();
 
     assert_eq!(desk.focused(), Some(WindowId(2)));
     assert!(geo(&desk, 2).visible);
@@ -1816,18 +1816,6 @@ fn sharing_a_slot_brings_the_shell_bar_back_for_its_tabs() {
 }
 
 #[test]
-fn the_tabs_layout_always_shows_the_strip() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "nautilus", CENTER, 0);
-    desk.set_own_titlebar(WindowId(1), true).unwrap();
-
-    desk.set_layout(CENTER, LayoutKind::Tabs).unwrap();
-
-    assert!(geo(&desk, 1).titlebar.is_some());
-    assert_eq!(desk.tab_strip(WindowId(1)), [WindowId(1)]);
-}
-
-#[test]
 fn a_window_alone_in_its_slot_or_floating_has_no_tab_strip() {
     let mut desk = desk();
     open_in(&mut desk, 1, "guide", RIGHT, 0);
@@ -1871,11 +1859,10 @@ impl Lcg {
 #[test]
 fn any_sequence_of_operations_keeps_the_desk_consistent() {
     const OUTPUTS: [OutputId; 3] = [LEFT, CENTER, RIGHT];
-    const LAYOUTS: [LayoutKind; 6] = [
+    const LAYOUTS: [LayoutKind; 5] = [
         LayoutKind::Full,
         LayoutKind::Columns,
         LayoutKind::Rows,
-        LayoutKind::Tabs,
         LayoutKind::Free,
         LayoutKind::TwoThirdsOneThird,
     ];
@@ -1907,7 +1894,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                     desk.float_window(window, output, rect)
                 }
                 5 => desk.swap_with_center(window),
-                6 => desk.set_layout(output, LAYOUTS[rng.next(6) as usize]),
+                6 => desk.set_layout(output, LAYOUTS[rng.next(5) as usize]),
                 7 => desk.set_ratio(output, Ratio::from_permille(rng.next(1000) as u16)),
                 8 => desk.focus(window),
                 9 => desk.set_anchored(window, rng.next(2) == 0),
