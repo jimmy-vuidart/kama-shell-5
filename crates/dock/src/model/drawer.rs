@@ -11,6 +11,31 @@ pub const COLUMNS: usize = 6;
 pub const ROWS: usize = 3;
 pub const PAGE: usize = COLUMNS * ROWS;
 
+/// The width of the drawer unless the user gave it another one.
+pub const DEFAULT_WIDTH: u32 = 640;
+/// Narrower, the control center no longer fits.
+pub const MIN_WIDTH: u32 = 520;
+/// What the mixer takes beside the drawer, margins included: the drawer
+/// never grows into it.
+pub const MIXER_ROOM: u32 = 320;
+
+/// The width the drawer takes when `wanted` is asked for (the width kept in
+/// the configuration, or where the user drags its edge) on a screen of a
+/// given width: never narrower than its content, never so wide that the
+/// mixer would not fit beside it.
+pub fn width(wanted: Option<f32>, screen: Option<f32>) -> u32 {
+    let wanted = wanted.filter(|wanted| wanted.is_finite());
+    let Some(wanted) = wanted else {
+        return DEFAULT_WIDTH;
+    };
+    let widest = match screen.filter(|screen| screen.is_finite()) {
+        Some(screen) => (screen.round() as i64 - i64::from(MIXER_ROOM)).max(MIN_WIDTH.into()),
+        None => i64::from(u16::MAX),
+    };
+    let width = (wanted.round() as i64).clamp(MIN_WIDTH.into(), widest);
+    u32::try_from(width).unwrap_or(DEFAULT_WIDTH)
+}
+
 /// A text as it is compared: without case nor accents, so that "editeur"
 /// finds "Éditeur".
 pub fn fold(text: &str) -> String {
@@ -195,6 +220,35 @@ mod tests {
             names: vec![name.into(), format!("{name}-bin")],
             game,
         }
+    }
+
+    #[test]
+    fn the_drawer_is_640_wide_unless_told_otherwise() {
+        assert_eq!(width(None, Some(1920.0)), 640);
+        assert_eq!(width(Some(800.0), Some(1920.0)), 800);
+    }
+
+    #[test]
+    fn the_drawer_cannot_be_dragged_narrower_than_its_content() {
+        assert_eq!(width(Some(120.0), Some(1920.0)), MIN_WIDTH);
+        assert_eq!(width(Some(-40.0), None), MIN_WIDTH);
+    }
+
+    #[test]
+    fn a_wide_drawer_leaves_room_for_the_mixer_beside_it() {
+        assert_eq!(width(Some(5000.0), Some(1920.0)), 1920 - MIXER_ROOM);
+        // Dragged to a whole number of pixels.
+        assert_eq!(width(Some(700.6), Some(1920.0)), 701);
+    }
+
+    #[test]
+    fn on_a_narrow_screen_the_drawer_keeps_its_smallest_width() {
+        assert_eq!(width(Some(900.0), Some(700.0)), MIN_WIDTH);
+    }
+
+    #[test]
+    fn a_width_that_is_not_a_number_gives_the_usual_one() {
+        assert_eq!(width(Some(f32::NAN), Some(1920.0)), DEFAULT_WIDTH);
     }
 
     #[test]

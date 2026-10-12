@@ -18,6 +18,8 @@ pub struct Config {
     pub favorites: Vec<String>,
     /// The pinned applications of the drawer; the favorites when absent.
     pub pinned: Vec<String>,
+    /// The width the user gave the drawer by dragging its edge.
+    pub drawer_width: Option<u32>,
 }
 
 /// Reads the configuration. A file that is not valid TOML gives the
@@ -41,6 +43,10 @@ pub fn parse(text: &str) -> Config {
         },
         accent: text_of("accent").map(str::to_owned),
         pinned: names("drawer", "pinned").unwrap_or_else(|| favorites.clone()),
+        drawer_width: document
+            .get("drawer")
+            .and_then(|drawer| drawer.get("width")?.as_integer())
+            .and_then(|width| u32::try_from(width).ok()),
         favorites,
     }
 }
@@ -51,14 +57,25 @@ pub fn with_favorites(text: &str, favorites: &[String]) -> Option<String> {
     with_names(text, "dock", "favorites", favorites)
 }
 
+/// The file with another width for the drawer.
+pub fn with_drawer_width(text: &str, width: u32) -> Option<String> {
+    with_value(text, "drawer", "width", Value::from(i64::from(width)))
+}
+
 fn with_names(text: &str, section: &str, key: &str, names: &[String]) -> Option<String> {
+    let array: Array = names.iter().map(String::as_str).collect();
+    with_value(text, section, key, Value::Array(array))
+}
+
+/// The file with another value for a setting of a section, which is added
+/// at the end when the file has none.
+fn with_value(text: &str, section: &str, key: &str, new: Value) -> Option<String> {
     let mut document = text.parse::<DocumentMut>().ok()?;
     let table = document
         .entry(section)
         .or_insert_with(|| Item::Table(Table::new()))
         .as_table_mut()?;
-    let array: Array = names.iter().map(String::as_str).collect();
-    set(table, key, Value::Array(array));
+    set(table, key, new);
     Some(document.to_string())
 }
 
@@ -161,6 +178,35 @@ pinned = ["firefox", "mpv"]
         );
         // No pinned application of its own: the drawer shows the favorites.
         assert_eq!(config.pinned, config.favorites);
+        assert_eq!(config.drawer_width, None);
+    }
+
+    #[test]
+    fn the_width_of_the_drawer_is_read() {
+        let config = parse("[drawer]\nwidth = 720\n");
+
+        assert_eq!(config.drawer_width, Some(720));
+        assert_eq!(parse(FILE).drawer_width, None);
+        assert_eq!(parse("[drawer]\nwidth = \"wide\"\n").drawer_width, None);
+        assert_eq!(parse("[drawer]\nwidth = -3\n").drawer_width, None);
+    }
+
+    #[test]
+    fn resizing_the_drawer_keeps_the_rest_of_the_file() {
+        let changed = with_drawer_width(FILE, 812).unwrap();
+
+        assert_eq!(parse(&changed).drawer_width, Some(812));
+        assert_eq!(parse(&changed).pinned, ["firefox", "mpv"]);
+        assert!(changed.contains("# Mes applis de tous les jours."));
+    }
+
+    #[test]
+    fn the_width_of_the_drawer_is_added_to_a_file_without_drawer_section() {
+        let changed = with_drawer_width("theme = \"dark\"\n", 700).unwrap();
+
+        assert_eq!(parse(&changed).drawer_width, Some(700));
+        assert_eq!(parse(&changed).theme, Some(ThemeName::Dark));
+        assert_eq!(with_drawer_width("= 3", 700), None);
     }
 
     #[test]

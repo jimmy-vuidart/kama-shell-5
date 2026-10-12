@@ -58,3 +58,7 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # sans cette ligne, ce sont les favoris de la barre.
 [drawer]
 # pinned = ["firefox", "discord", "kitty", "code", "obsidian", "mpv", "org.gnome.Nautilus"]
+
+# Largeur du tiroir, en pixels. Tirer son bord droit à la souris la change
+# et réécrit cette ligne.
+# width = 640

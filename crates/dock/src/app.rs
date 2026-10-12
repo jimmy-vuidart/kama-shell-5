@@ -9,7 +9,7 @@ use chrono::{DateTime, Local};
 use coquille_ipc::{Command, Event, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use iced::widget::operation;
-use iced::{Color, Element, Subscription, Task, keyboard, window};
+use iced::{Color, Element, Subscription, Task, keyboard, mouse, window};
 use iced_layershell::actions::{ActionCallback, IcedNewPopupSettings};
 use iced_layershell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption, PopupAnchor,
@@ -81,6 +81,12 @@ pub struct Drawer {
     pub confirm: Option<SessionAction>,
     /// What the last session action did, when it was only simulated.
     pub note: Option<String>,
+    /// How wide the drawer is now.
+    pub width: f32,
+    /// The user is dragging its edge.
+    pub resizing: bool,
+    /// The width of the screen it is on, once the surface says.
+    screen: Option<f32>,
 }
 
 /// Something of the drawer that can be opened.
@@ -112,7 +118,11 @@ pub enum Message {
     Compositor(compositor::Update),
     Backend(backend::Update),
     IconsLoaded(Icons),
-    Opened(window::Id),
+    Window(window::Id, window::Event),
+    /// The edge of the drawer is grabbed, dragged to a place, let go.
+    ResizeStart,
+    ResizeTo(f32),
+    ResizeEnd,
     Closed(window::Id),
     BarHover(bool),
     EntryHover(Option<usize>),
@@ -412,6 +422,19 @@ impl Dock {
         })
     }
 
+    /// The surface of the drawer says how wide its screen is: the drawer
+    /// keeps inside it.
+    fn fit_drawer(&mut self, screen: f32) {
+        if let Some(drawer) = &mut self.drawer {
+            drawer.screen = Some(screen);
+        }
+        let wanted = self.drawer.as_ref().map(|drawer| drawer.width);
+        let width = self.drawer_width(wanted) as f32;
+        if let Some(drawer) = &mut self.drawer {
+            drawer.width = width;
+        }
+    }
+
     /// Asks the compositor for something; simulated, the made-up world
     /// follows as well as it can.
     fn send(&mut self, command: Command) {
@@ -531,8 +554,27 @@ impl Dock {
             mixer: false,
             confirm: None,
             note: None,
+            width: self.drawer_width(None) as f32,
+            resizing: false,
+            screen: None,
         });
         self.close_menu().chain(task)
+    }
+
+    /// The width of the drawer when `wanted` is asked for; without it, the
+    /// width kept in the configuration.
+    fn drawer_width(&self, wanted: Option<f32>) -> u32 {
+        let kept = self.config.drawer_width.map(|width| width as f32);
+        // The surface of the drawer covers its screen: its width is the
+        // most reliable one. Before it is known, the compositor's word.
+        let surface = self.drawer.as_ref().and_then(|drawer| drawer.screen);
+        let told = || {
+            let real = self.options.is_real(Backend::Compositor);
+            self.screen()
+                .filter(|_| real)
+                .map(|screen| screen.width as f32)
+        };
+        drawer::width(wanted.or(kept), surface.or_else(told))
     }
 
     fn close_menu(&mut self) -> Task<Message> {
@@ -613,12 +655,48 @@ impl Dock {
                 self.icons = icons;
                 Task::none()
             }
-            Message::Opened(id) => {
+            Message::Window(id, window::Event::Opened { size, .. }) => {
                 if self.bar == Some(id) {
                     return self.input_region();
                 }
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
+                    self.fit_drawer(size.width);
                     return operation::focus(SEARCH);
+                }
+                Task::none()
+            }
+            Message::Window(id, window::Event::Resized(size)) => {
+                if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
+                    self.fit_drawer(size.width);
+                }
+                Task::none()
+            }
+            Message::Window(_, _) => Task::none(),
+            Message::ResizeStart => {
+                if let Some(drawer) = &mut self.drawer {
+                    drawer.resizing = true;
+                }
+                Task::none()
+            }
+            Message::ResizeTo(edge) => {
+                if self.drawer.as_ref().is_some_and(|drawer| drawer.resizing) {
+                    let width = self.drawer_width(Some(edge)) as f32;
+                    if let Some(drawer) = &mut self.drawer {
+                        drawer.width = width;
+                    }
+                }
+                Task::none()
+            }
+            Message::ResizeEnd => {
+                let Some(drawer) = self.drawer.as_mut().filter(|drawer| drawer.resizing) else {
+                    return Task::none();
+                };
+                drawer.resizing = false;
+                // Kept for the next time, here and in the configuration.
+                let width = drawer.width.round() as u32;
+                if self.config.drawer_width != Some(width) {
+                    self.config.drawer_width = Some(width);
+                    self.save_config(move |text| config::with_drawer_width(text, width));
                 }
                 Task::none()
             }
@@ -1037,9 +1115,22 @@ impl Dock {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
-            window::open_events().map(Message::Opened),
+            window::events().map(|(id, event)| Message::Window(id, event)),
             window::close_events().map(Message::Closed),
         ];
+        // While the edge of the drawer is held, the pointer drags it
+        // wherever it goes on the screen.
+        if self.drawer.as_ref().is_some_and(|drawer| drawer.resizing) {
+            subscriptions.push(iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::ResizeTo(position.x))
+                }
+                iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Message::ResizeEnd)
+                }
+                _ => None,
+            }));
+        }
         // The clock; with the mixer open, the made-up levels move faster.
         let simulated_levels = !self.options.is_real(Backend::Audio)
             && self.drawer.as_ref().is_some_and(|drawer| drawer.mixer);

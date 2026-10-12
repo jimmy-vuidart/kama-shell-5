@@ -16,10 +16,11 @@ use crate::model::Identity;
 use crate::model::drawer::{self, COLUMNS};
 use crate::model::mixer;
 
-const PANEL: f32 = 640.0;
 /// The room of the bar, drawn again inside the drawer.
 const BAR: f32 = 60.0;
 const MIXER: f32 = 292.0;
+/// The strip beside the drawer that is dragged to resize it.
+const EDGE: f32 = 14.0;
 /// How many games fit in the row.
 const GAMES: usize = 5;
 /// How many pinned applications fit in the row.
@@ -34,7 +35,8 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
         .style(move |_| style::fill(palette.scrim, 0.0));
     let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
 
-    let mut front: Row<'_, Message> = row![opaque(panel(dock, drawer, palette))].spacing(14);
+    let mut front: Row<'_, Message> =
+        row![opaque(panel(dock, drawer, palette)), edge(drawer, palette)];
     if drawer.mixer {
         // Next to the button that opens it, at the foot of the drawer.
         let aligned = column![
@@ -47,6 +49,25 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
     stack![scrim, front].into()
 }
 
+/// The right edge of the drawer, which is dragged to make it wider or
+/// narrower. It shows as a small grip, brighter while it is held.
+fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
+    let color = if drawer.resizing {
+        palette.accent
+    } else {
+        style::alpha(Color::WHITE, 0.55)
+    };
+    let grip = container(space().width(4).height(44)).style(move |_| style::fill(color, 2.0));
+    let strip = container(grip)
+        .width(EDGE)
+        .center_x(EDGE)
+        .center_y(Length::Fill);
+    mouse_area(strip)
+        .on_press(Message::ResizeStart)
+        .interaction(mouse::Interaction::ResizingHorizontally)
+        .into()
+}
+
 fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
     let bar = container(super::bar::bar(dock, 0.0, false, palette))
         .width(BAR)
@@ -55,7 +76,7 @@ fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     let mut content: Column<'_, Message> = column![search(drawer, palette)].spacing(12);
     if drawer.query.trim().is_empty() {
         content = content
-            .push(pinned(dock, palette))
+            .push(pinned(dock, drawer, palette))
             .push(rule(palette))
             .push(applications(dock, drawer, palette))
             .push(rule(palette))
@@ -74,7 +95,7 @@ fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     });
 
     container(row![bar, content])
-        .width(PANEL)
+        .width(drawer.width)
         .height(Length::Fill)
         .style(move |_| container::Style {
             border: Border {
@@ -137,7 +158,9 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
 }
 
 /// The pinned applications, each with the place it opens in.
-fn pinned<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+fn pinned<'a>(dock: &'a Dock, drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
+    // The room a name has under its icon, whatever the width of the drawer.
+    let tile = (drawer.width - BAR - 20.0) / PINNED as f32 - 4.0;
     let mut tiles: Row<'_, Message> = row![].spacing(4);
     let mut shown = Vec::new();
     for name in &dock.config.pinned {
@@ -166,7 +189,7 @@ fn pinned<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
             .font(style::MEDIUM)
             .color(palette.text)
             .wrapping(Wrapping::None);
-        let name = container(name).max_width(76).height(16).clip(true);
+        let name = container(name).max_width(tile - 6.0).height(16).clip(true);
         let content = column![icons::app(&dock.icons, &identity, 42.0), name, pill]
             .spacing(6)
             .align_x(Alignment::Center);

@@ -64,14 +64,15 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
 [drawer]
 pinned = ["firefox", "discord", "kitty", "code", "obsidian", "mpv", "org.gnome.Nautilus"]
+width = 640
 ```
 
 Un nom est celui d'un fichier `.desktop` (sans l'extension), sa dernière
 partie (`nautilus` pour `org.gnome.Nautilus`), le programme qu'il lance, ou
 ce que les fenêtres annoncent (`app_id`, `WM_CLASS`).
 
-Le dock **réécrit ce fichier** quand on change les favoris à la souris
-(épingler, retirer, réordonner) ou le thème : seule la ligne concernée
+Le dock **réécrit ce fichier** quand on change à la souris les favoris
+(épingler, retirer, réordonner), le thème ou la largeur du tiroir : seule la ligne concernée
 change, les commentaires restent. Un fichier qui n'est pas du TOML valide
 n'est jamais réécrit.
 
@@ -84,7 +85,9 @@ n'est jamais réécrit.
 - **Tiroir** : clic sur le lanceur ou touche `Super` seule (`Alt` en
   imbriqué). La saisie filtre aussitôt, les flèches choisissent, `Entrée`
   ouvre, `Échap` ou un clic en dehors ferme ; la molette sur la grille change
-  de page.
+  de page. Tirer son bord droit (la petite poignée) le redimensionne : jamais
+  moins de 520 px, jamais au point de ne plus laisser de place au mixeur ; la
+  largeur est gardée dans `[drawer] width`.
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
   curseur pour le régler), « Par appli » ouvre le mixeur.
 

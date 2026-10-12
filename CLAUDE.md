@@ -181,7 +181,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 - Clients de test utiles en imbriqué : `kitty --start-as fullscreen` (plein écran Wayland), `kitty -o linux_display_server=x11` et `glxgears` (X11), `GDK_BACKEND=x11 gnome-calculator` (menus X11). Un client SDL2 (`SDL_VIDEODRIVER=wayland` ou `x11`, `SDL_SetRelativeMouseMode`) verrouille le pointeur ; `libSDL2` est là, quelques lignes de Python `ctypes` suffisent.
 - `--probe` exerce sur la vraie carte tout ce qui ne demande pas de posséder les écrans : EGL sur GBM, moteur de rendu, shaders, détection et rôles des écrans, capacité VRR de chacun. À lancer après tout changement du backend matériel.
 
-Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`) et `[drawer]` (`pinned`) sont lues par le dock, qui réécrit `favorites` et `theme` quand on les change à la souris.
+Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`) et `[drawer]` (`pinned`, `width`) sont lues par le dock, qui réécrit `favorites`, `theme` et `width` quand on les change à la souris (le tiroir se redimensionne en tirant son bord droit).
 
 ### Installer
 
