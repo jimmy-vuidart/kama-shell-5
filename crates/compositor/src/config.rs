@@ -181,6 +181,47 @@ mod tests {
         assert_eq!(parse("xwayland = false").unwrap().xwayland, Some(false));
     }
 
+    /// The file installed for the user, as it is and with every setting it
+    /// suggests switched on.
+    const SAMPLE: &str = include_str!("../../../config/config.toml");
+
+    #[test]
+    fn the_sample_file_is_valid() {
+        let config = parse(SAMPLE).unwrap();
+
+        assert_eq!(config.outputs.center.as_deref(), Some("DP-2"));
+    }
+
+    #[test]
+    fn the_sample_file_stays_valid_with_every_suggestion_switched_on() {
+        // A commented-out setting reads `# name = value`, a section `# [name]`;
+        // explanations are plain sentences.
+        let is_setting = |line: &str| {
+            let name = line.split(" = ").next().unwrap_or_default();
+            let named = line.contains(" = ")
+                && !name.is_empty()
+                && name.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+            named || (line.starts_with('[') && line.ends_with(']'))
+        };
+        let switched_on: Vec<&str> = SAMPLE
+            .lines()
+            .map(|line| match line.strip_prefix("# ") {
+                Some(setting) if is_setting(setting) => setting,
+                _ => line,
+            })
+            .collect();
+
+        let config = parse(&switched_on.join("\n")).unwrap();
+
+        assert_eq!(config.theme, Some(ThemeKind::Light));
+        assert_eq!(config.terminal.as_deref(), Some("kitty"));
+        assert_eq!(config.xwayland, Some(true));
+        assert_eq!(config.keyboard.layout.as_deref(), Some("fr"));
+        assert_eq!(config.game.sticky_edges_ms, Some(300));
+        assert_eq!(config.game.direct_scanout, Some(true));
+        assert_eq!(config.game.vrr, Some(true));
+    }
+
     #[test]
     fn an_unknown_setting_is_an_error() {
         assert!(parse("themes = \"dark\"").is_err());

@@ -1,5 +1,19 @@
 # Configuration de coquille : à placer dans ~/.config/coquille/config.toml.
 # Tout est facultatif ; une ligne absente garde la valeur par défaut.
+#
+# Les réglages généraux viennent d'abord : en TOML, tout ce qui suit un titre
+# de section comme [outputs] appartient à cette section.
+
+# Thème des décorations : "light" ou "dark".
+# theme = "light"
+
+# Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
+# kitty, alacritty et foot.
+# terminal = "kitty"
+
+# Applications X11 (dont beaucoup de jeux, via Steam et Proton) : elles
+# passent par XWayland, démarré avec le compositeur. `false` s'en passe.
+# xwayland = true
 
 # Quel connecteur est quel écran. Sans cette section, l'écran le plus large
 # est le centre et les deux autres sont pris dans l'ordre des connecteurs.
@@ -12,17 +26,6 @@ right = "DP-1"
 # [keyboard]
 # layout = "fr"
 # variant = ""
-
-# Thème des décorations : "light" ou "dark".
-# theme = "light"
-
-# Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
-# kitty, alacritty et foot.
-# terminal = "kitty"
-
-# Applications X11 (dont beaucoup de jeux, via Steam et Proton) : elles
-# passent par XWayland, démarré avec le compositeur. `false` s'en passe.
-# xwayland = true
 
 # Mode jeu : ce qui se passe sur un écran occupé par une fenêtre en plein écran.
 [game]

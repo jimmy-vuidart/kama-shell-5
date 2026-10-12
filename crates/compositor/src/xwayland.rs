@@ -296,7 +296,7 @@ impl XwmHandler for State {
 
         let (id, geometry) = (managed.id, managed.geometry);
         let resized = match self.shell.desk.placement(id) {
-            Some(Placement::Floating { rect, .. }) if !geometry.anchored => {
+            Some(Placement::Floating { output, rect }) if !geometry.anchored => {
                 // What the window asks for includes its own shadows.
                 let shadows = window.frame_extents();
                 let bar = geometry.frame.h - geometry.client.h;
@@ -306,9 +306,12 @@ impl XwmHandler for State {
                     width.map_or(rect.w, |w| w - shadows.left - shadows.right),
                     height.map_or(rect.h, |h| h - shadows.top - shadows.bottom + bar),
                 );
+                // The model keeps the window on its screen: it may refuse
+                // part of the size, or all of it.
                 wanted != rect
                     && !wanted.is_empty()
                     && self.shell.desk.set_floating_rect(id, wanted).is_ok()
+                    && self.shell.desk.placement(id) != Some(Placement::Floating { output, rect })
             }
             _ => false,
         };
