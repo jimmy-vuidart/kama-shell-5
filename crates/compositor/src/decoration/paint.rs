@@ -11,7 +11,7 @@ use tiny_skia::{
     PremultipliedColorU8, Stroke, Transform,
 };
 
-use super::capsules::{CapsuleButton, CapsuleCell, CapsuleWish, GroupLayout};
+use super::capsules::{CapsuleButton, CapsuleCell, GroupLayout};
 use super::icons::IconCache;
 use super::layout::{TitlebarButton, TitlebarLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
@@ -27,6 +27,8 @@ const BADGE_RADIUS: f32 = 5.0;
 const ICON_STROKE: f32 = 1.4;
 /// Width of the accent ring around the capsule of the active window.
 const RING_WIDTH: f32 = 2.0;
+/// Opacity of the highlight under the button of a capsule.
+const BUTTON_VEIL: u8 = 0x24;
 
 /// Everything a title bar's look depends on: repaint only when it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,15 +232,12 @@ impl Painter {
         /// How much of the backdrop shows through the box.
         const BOX_OPACITY: u8 = 217;
         let theme = Theme::new(spec.theme).with_accent(spec.accent);
-        let wishes: Vec<CapsuleWish> = spec
+        let label_widths: Vec<i32> = spec
             .capsules
             .iter()
-            .map(|capsule| CapsuleWish {
-                label_width: self.shaped(&capsule.label, capsule.weight()).1.ceil() as i32,
-                shown: capsule.shown,
-            })
+            .map(|capsule| self.shaped(&capsule.label, capsule.weight()).1.ceil() as i32)
             .collect();
-        let layout = GroupLayout::new(spec.size, &wishes);
+        let layout = GroupLayout::new(spec.size, &label_widths);
         if layout.capsules.is_empty() {
             return None;
         }
@@ -277,10 +276,13 @@ impl Painter {
         hovered_button: Option<CapsuleButton>,
         theme: &Theme,
     ) {
-        if capsule.shown {
-            if let Some(path) = pill(cell.rect, 0.0) {
-                fill(pixmap, &path, theme.button_hover);
-            }
+        let background = match (capsule.shown, hovered) {
+            (true, _) => Some(theme.button_hover),
+            (false, true) => Some(theme.separator),
+            (false, false) => None,
+        };
+        if let (Some(background), Some(path)) = (background, pill(cell.rect, 0.0)) {
+            fill(pixmap, &path, background);
         }
         if capsule.shown && capsule.focused {
             // Inside the capsule, so that the box keeps its margin.
@@ -300,12 +302,7 @@ impl Painter {
             opacity,
         );
 
-        let with_buttons = !cell.buttons.is_empty() && (capsule.shown || hovered);
-        let room = if with_buttons {
-            cell.label_before_buttons()
-        } else {
-            cell.label
-        };
+        let room = cell.label;
         let color = match (capsule.minimized, capsule.shown) {
             (true, _) => theme.disabled,
             (false, true) => theme.text,
@@ -321,14 +318,18 @@ impl Painter {
             color,
         );
 
-        if !with_buttons {
+        if !(capsule.shown || hovered) {
             return;
         }
         for (button, place) in &cell.buttons {
             let under = hovered_button == Some(*button);
             let highlight = match (button, under) {
                 (CapsuleButton::Close, true) => Some(theme.close_hover),
-                (CapsuleButton::Minimize, true) => Some(theme.separator),
+                // A veil of the text color: it shows on any capsule.
+                (CapsuleButton::Minimize, true) => Some(Rgba {
+                    a: BUTTON_VEIL,
+                    ..theme.text
+                }),
                 (_, false) => None,
             };
             if let (Some(highlight), Some(path)) = (highlight, pill(*place, 0.0)) {

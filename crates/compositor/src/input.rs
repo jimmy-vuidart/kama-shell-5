@@ -22,12 +22,13 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::{debug, info, warn};
 
 use crate::debug::Step;
+use crate::decoration::capsules::CapsuleButton;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
 use crate::game::{StickyEdges, confine};
 use crate::outputs::constrain;
 use crate::render::scene::Shape;
 use crate::resize::Edges;
-use crate::shell::ManagedWindow;
+use crate::shell::{CapsuleHit, ManagedWindow};
 use crate::shortcuts::{Action, KeyPress, action_for};
 use crate::state::State;
 use crate::theme::Rgba;
@@ -56,6 +57,8 @@ struct Hit {
     /// The point is on the window's title bar.
     titlebar: bool,
     button: Option<TitlebarButton>,
+    /// The capsule there, above a slot.
+    capsule: Option<CapsuleHit>,
     /// The point is on the placement bar, on this button of it if any.
     bar: Option<Option<usize>>,
     /// The point is on these edges of a floating window.
@@ -80,6 +83,12 @@ pub enum Gesture {
         window: WindowId,
         at: Point<f64, Logical>,
         button: Option<TitlebarButton>,
+    },
+    /// Down on a capsule, not moved yet: a click on it or on the button of
+    /// it that was under the pointer, or the start of a drag of its window.
+    CapsulePressed {
+        capsule: CapsuleHit,
+        at: Point<f64, Logical>,
     },
     /// Down on the placement bar, on this button of it if any.
     BarPressed { button: Option<usize> },
@@ -574,6 +583,7 @@ impl State {
         };
 
         self.hover = hit.window.zip(hit.button);
+        self.capsule_hover = hit.capsule;
         self.bar_hover = hit.bar.flatten();
         // Freed from a window, the pointer is free until it leaves it.
         if self.pointer_freed.is_some() && self.pointer_freed != hit.window {
@@ -617,12 +627,22 @@ impl State {
     /// Lets the gesture in progress react to the pointer moving.
     fn advance_gesture(&mut self, location: Point<f64, Logical>) {
         match self.gesture {
-            Some(Gesture::Pressed {
-                window,
-                at,
-                button: None,
-                ..
-            }) => {
+            Some(
+                Gesture::Pressed {
+                    window,
+                    at,
+                    button: None,
+                }
+                | Gesture::CapsulePressed {
+                    capsule:
+                        CapsuleHit {
+                            window,
+                            button: None,
+                            ..
+                        },
+                    at,
+                },
+            ) => {
                 let travelled = (location - at).to_i32_round::<i32>();
                 let far = f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt();
                 if far > DRAG_THRESHOLD {
@@ -840,8 +860,9 @@ impl State {
                     self.focus_window(window);
                 }
                 // A click on a panel that accepts the keyboard gives it to
-                // that panel; a click on a window takes it back.
-                if hit.panel.is_some() || hit.window.is_some() {
+                // that panel; a click on a window or on a capsule takes it
+                // back.
+                if hit.panel.is_some() || hit.window.is_some() || hit.capsule.is_some() {
                     self.panel_focus = hit.panel.clone();
                     self.sync_keyboard_focus();
                 }
@@ -862,6 +883,10 @@ impl State {
                         if hit.window.zip(hit.button) == Some((window, pressed)) {
                             self.click_titlebar_button(window, pressed);
                         }
+                    }
+                    Some(Gesture::CapsulePressed { capsule, .. }) => {
+                        let released = self.hit_test(location).capsule;
+                        self.click_capsule(capsule, released);
                     }
                     Some(Gesture::BarPressed {
                         button: Some(pressed),
@@ -925,6 +950,13 @@ impl State {
         // With the modifier, the separation wins over the windows next to it.
         if let Some(output) = self.separator_at(location).filter(|_| mod_held) {
             self.gesture = Some(Gesture::Splitting { output });
+            return true;
+        }
+        if let Some(capsule) = hit.capsule {
+            self.gesture = Some(Gesture::CapsulePressed {
+                capsule,
+                at: location,
+            });
             return true;
         }
         let Some(managed) = hit.window.and_then(|window| self.shell.by_id(window)) else {
@@ -997,6 +1029,24 @@ impl State {
         self.apply_arrangement();
     }
 
+    /// A press on a capsule ended without becoming a drag: on a button, it
+    /// counts when it ends on that same button; elsewhere, it shows the
+    /// window of the capsule, which also brings it back when minimized.
+    fn click_capsule(&mut self, pressed: CapsuleHit, released: Option<CapsuleHit>) {
+        match pressed.button {
+            Some(_) if released != Some(pressed) => {}
+            Some(CapsuleButton::Close) => self.close_window(pressed.window),
+            Some(CapsuleButton::Minimize) => self.minimize_window(pressed.window),
+            None => {
+                let desk = &mut self.shell.desk;
+                if let Err(error) = desk.activate_tab(pressed.slot, pressed.index) {
+                    warn!(%error, "cannot show the window of this capsule");
+                }
+                self.apply_arrangement();
+            }
+        }
+    }
+
     fn click_titlebar_button(&mut self, window: WindowId, button: TitlebarButton) {
         match button {
             TitlebarButton::Close => self.close_window(window),
@@ -1014,8 +1064,8 @@ impl State {
 
     /// Finds what is under `location`, in the order things are drawn: the
     /// panels above everything, the placement bar, menus, the panels above
-    /// the windows, the windows from the top one down, then the panels
-    /// under them.
+    /// the windows, the windows from the top one down, the capsules, then
+    /// the panels under them.
     fn hit_test(&self, location: Point<f64, Logical>) -> Hit {
         let panels = self.panels();
         let panel_at = |layers: &[Layer]| {
@@ -1124,6 +1174,14 @@ impl State {
                     ..Hit::default()
                 };
             }
+        }
+        // The capsules never cover a tidied window, and floating ones
+        // cover them.
+        if let Some(capsule) = self.shell.capsule_at(point) {
+            return Hit {
+                capsule: Some(capsule),
+                ..Hit::default()
+            };
         }
         panel_at(&[Layer::Bottom, Layer::Background]).unwrap_or_default()
     }
