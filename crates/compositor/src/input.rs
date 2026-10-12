@@ -8,7 +8,7 @@ use smithay::backend::input::{
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     PointerMotionEvent,
 };
-use smithay::desktop::WindowSurfaceType;
+use smithay::desktop::{LayerSurface, WindowSurfaceType};
 use smithay::input::keyboard::{FilterResult, Keycode};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, MotionEvent, RelativeMotionEvent,
@@ -18,6 +18,7 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use smithay::wayland::compositor::RegionAttributes;
 use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::{debug, info, warn};
 
 use crate::debug::Step;
@@ -31,8 +32,12 @@ use crate::shortcuts::{Action, KeyPress, action_for};
 use crate::state::State;
 use crate::theme::Rgba;
 
-/// Linux input code of the left mouse button.
+/// Linux input codes of the mouse buttons.
 const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
+const BTN_MIDDLE: u32 = 0x112;
+/// How far one notch of a mouse wheel scrolls, as libinput reports it.
+const WHEEL_NOTCH: f64 = 15.0;
 /// Gap between a drop zone's outline and the slot it stands for.
 const ZONE_INSET: i32 = 4;
 /// How far from the gap between two slots their separation can be grabbed.
@@ -57,6 +62,8 @@ struct Hit {
     bar: Option<Option<usize>>,
     /// The point is on these edges of a floating window.
     resize: Option<Edges>,
+    /// The panel of the shell there (the dock, its drawer).
+    panel: Option<LayerSurface>,
 }
 
 /// How a client holds the pointer where it is (pointer-constraints).
@@ -157,9 +164,25 @@ impl State {
             Step::Relative { dx, dy } => {
                 self.pointer_relative((dx, dy).into(), (dx, dy).into(), time);
             }
-            Step::Click => {
-                self.pointer_button(BTN_LEFT, ButtonState::Pressed, time);
-                self.pointer_button(BTN_LEFT, ButtonState::Released, time);
+            Step::Click | Step::RightClick | Step::MiddleClick => {
+                let button = match step {
+                    Step::RightClick => BTN_RIGHT,
+                    Step::MiddleClick => BTN_MIDDLE,
+                    _ => BTN_LEFT,
+                };
+                self.pointer_button(button, ButtonState::Pressed, time);
+                self.pointer_button(button, ButtonState::Released, time);
+            }
+            Step::Wheel(notches) => {
+                let Some(pointer) = self.seat.get_pointer() else {
+                    return;
+                };
+                let frame = AxisFrame::new(time)
+                    .source(AxisSource::Wheel)
+                    .value(Axis::Vertical, f64::from(notches) * WHEEL_NOTCH)
+                    .v120(Axis::Vertical, notches * 120);
+                pointer.axis(self, frame);
+                pointer.frame(self);
             }
             Step::ButtonDown => self.pointer_button(BTN_LEFT, ButtonState::Pressed, time),
             Step::ButtonUp => self.pointer_button(BTN_LEFT, ButtonState::Released, time),
@@ -513,6 +536,19 @@ impl State {
         (under == *surface).then_some(origin)
     }
 
+    /// Looks again at what is under the pointer when a panel drew: it may
+    /// have grown or shrunk under it. Nothing is said to clients unless the
+    /// surface under the pointer is another one.
+    pub fn refresh_pointer_focus_over_panels(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let under = self.hit_test(pointer.current_location()).surface;
+        if pointer.current_focus() != under.map(|(surface, _)| surface) {
+            self.refresh_pointer_focus();
+        }
+    }
+
     /// Looks again at what is under the pointer, after windows moved without
     /// it moving.
     pub fn refresh_pointer_focus(&mut self) {
@@ -813,6 +849,12 @@ impl State {
                 if let Some(window) = hit.window {
                     self.focus_window(window);
                 }
+                // A click on a panel that accepts the keyboard gives it to
+                // that panel; a click on a window takes it back.
+                if hit.panel.is_some() || hit.window.is_some() {
+                    self.panel_focus = hit.panel.clone();
+                    self.sync_keyboard_focus();
+                }
                 if button == BTN_LEFT {
                     for_clients = !self.start_gesture(&hit, location);
                     self.swallowed_press = !for_clients;
@@ -1012,9 +1054,29 @@ impl State {
         self.apply_arrangement();
     }
 
-    /// Finds what is under `location`: popups first, then windows from the
-    /// top one down.
+    /// Finds what is under `location`, in the order things are drawn: the
+    /// panels above everything, the placement bar, menus, the panels above
+    /// the windows, the windows from the top one down, then the panels
+    /// under them.
     fn hit_test(&self, location: Point<f64, Logical>) -> Hit {
+        let panels = self.panels();
+        let panel_at = |layers: &[Layer]| {
+            let mut on_layers = panels.iter().filter(|panel| layers.contains(&panel.layer));
+            on_layers.find_map(|panel| {
+                let origin = panel.origin.to_f64();
+                let kind = WindowSurfaceType::ALL;
+                let (surface, offset) = panel.surface.surface_under(location - origin, kind)?;
+                Some(Hit {
+                    surface: Some((surface, offset.to_f64() + origin)),
+                    panel: Some(panel.surface.clone()),
+                    ..Hit::default()
+                })
+            })
+        };
+        if let Some(hit) = panel_at(&[Layer::Overlay]) {
+            return hit;
+        }
+
         let visible = || {
             self.shell
                 .windows
@@ -1071,6 +1133,10 @@ impl State {
             }
         }
 
+        if let Some(hit) = panel_at(&[Layer::Top]) {
+            return hit;
+        }
+
         for managed in visible() {
             let resizable = managed.geometry.floating && !managed.geometry.anchored;
             if let Some(edges) = Edges::at(managed.frame(), point).filter(|_| resizable) {
@@ -1106,7 +1172,7 @@ impl State {
                 };
             }
         }
-        Hit::default()
+        panel_at(&[Layer::Bottom, Layer::Background]).unwrap_or_default()
     }
 }
 

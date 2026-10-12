@@ -534,6 +534,7 @@ impl State {
         let cursor = self.cursor(true);
         self.refresh_bar();
         let overlay = self.overlay();
+        let panels = self.panels();
         let Backend::Udev(udev) = &mut self.backend else {
             return;
         };
@@ -553,6 +554,7 @@ impl State {
                 view,
                 overlay: &overlay,
                 panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
+                panels: &panels,
                 cursor,
             },
         );

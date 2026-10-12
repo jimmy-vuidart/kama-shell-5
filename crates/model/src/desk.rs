@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::geometry::{Point, Rect, Size};
+use crate::geometry::{Insets, Point, Rect, Size};
 use crate::ids::{AppKey, OutputId, WindowId};
 use crate::layout::{LayoutKind, Ratio, SlotId};
 use crate::memory::{AppMemory, RememberedPlace};
@@ -470,6 +470,14 @@ impl Desk {
     pub fn set_output_size(&mut self, output: OutputId, size: Size) -> Result<(), ModelError> {
         let index = self.screen_index(output)?;
         self.screens[index].set_size(size, &self.metrics);
+        Ok(())
+    }
+
+    /// A panel of the shell takes (or gives back) room along the edges of an
+    /// output: slots and floating windows keep out of it.
+    pub fn set_reserved(&mut self, output: OutputId, reserved: Insets) -> Result<(), ModelError> {
+        let index = self.screen_index(output)?;
+        self.screens[index].set_reserved(reserved, &self.metrics);
         Ok(())
     }
 

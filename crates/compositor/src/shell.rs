@@ -748,7 +748,9 @@ impl State {
         }
     }
 
-    fn sync_keyboard_focus(&mut self) {
+    /// Gives the keyboard to who it belongs to: the panel that holds it if
+    /// there is one, else the focused window.
+    pub fn sync_keyboard_focus(&mut self) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
@@ -756,12 +758,13 @@ impl State {
         if keyboard.is_grabbed() {
             return;
         }
-        let wanted = self
-            .shell
-            .desk
-            .focused()
-            .and_then(|id| self.shell.by_id(id))
-            .and_then(|managed| KeyFocus::of(&managed.window));
+        let window = || {
+            let focused = self.shell.desk.focused()?;
+            KeyFocus::of(&self.shell.by_id(focused)?.window)
+        };
+        let panel = self.keyboard_panel();
+        let panel = panel.map(|panel| KeyFocus::from(panel.wl_surface().clone()));
+        let wanted = panel.or_else(window);
         if keyboard.current_focus() == wanted {
             return;
         }

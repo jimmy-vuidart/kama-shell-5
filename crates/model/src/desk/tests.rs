@@ -1268,6 +1268,48 @@ fn slots_stay_clear_of_the_reserved_zone() {
 }
 
 #[test]
+fn reserving_a_zone_moves_slots_and_floating_windows_out_of_it() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open(&mut desk, 2, "gimp", LEFT);
+    desk.float_window(WindowId(2), LEFT, Rect::new(8, 100, 600, 400))
+        .unwrap();
+
+    let dock = Insets {
+        left: 60,
+        ..Insets::ZERO
+    };
+    desk.set_reserved(LEFT, dock).unwrap();
+
+    assert_eq!(geo(&desk, 1).frame, Rect::new(68, 8, 918, 1064));
+    assert_eq!(geo(&desk, 2).frame, Rect::new(68, 100, 600, 400));
+}
+
+#[test]
+fn a_reserved_zone_given_back_returns_to_the_slots() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    let dock = Insets {
+        left: 60,
+        ..Insets::ZERO
+    };
+    desk.set_reserved(LEFT, dock).unwrap();
+
+    desk.set_reserved(LEFT, Insets::ZERO).unwrap();
+
+    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 8, 948, 1064));
+}
+
+#[test]
+fn a_zone_cannot_be_reserved_on_an_unknown_output() {
+    let mut desk = desk();
+
+    let result = desk.set_reserved(OutputId(9), Insets::uniform(10));
+
+    assert_eq!(result, Err(ModelError::UnknownOutput(OutputId(9))));
+}
+
+#[test]
 fn resizing_an_output_resizes_slots_and_keeps_floating_windows_inside() {
     let mut desk = desk();
     open_in(&mut desk, 1, "discord", LEFT, 0);

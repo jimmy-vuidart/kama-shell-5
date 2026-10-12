@@ -9,7 +9,7 @@ use coquille_model::{AppMemory, OutputId, Point as ModelPoint, SlotId, WindowId}
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
-use smithay::desktop::PopupManager;
+use smithay::desktop::{LayerSurface, PopupManager};
 use smithay::input::keyboard::XkbConfig;
 use smithay::input::pointer::{CursorImageAttributes, CursorImageStatus};
 use smithay::input::{Seat, SeatState};
@@ -25,6 +25,7 @@ use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
@@ -73,6 +74,7 @@ pub struct State {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
@@ -128,6 +130,9 @@ pub struct State {
     /// The slot whose "add a tab" button is armed: the next window that
     /// opens goes there.
     pub armed_slot: Option<SlotId>,
+    /// The panel the user clicked to type in: it has the keyboard until a
+    /// click elsewhere.
+    pub panel_focus: Option<LayerSurface>,
     /// What the left mouse button is doing since it went down.
     pub gesture: Option<Gesture>,
     /// The left button went down for the shell: its release is not for a
@@ -159,6 +164,8 @@ impl State {
 
         let compositor_state = CompositorState::new::<Self>(dh);
         let xdg_shell_state = XdgShellState::new::<Self>(dh);
+        // Panels of the shell: the dock and its drawer.
+        let layer_shell_state = WlrLayerShellState::new::<Self>(dh);
         let decoration_state = XdgDecorationState::new::<Self>(dh);
         let shm_state = ShmState::new::<Self>(dh, renderer.shm_formats());
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
@@ -227,6 +234,7 @@ impl State {
             socket_name,
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             shm_state,
             seat_state,
             data_device_state,
@@ -265,6 +273,7 @@ impl State {
             bar: None,
             bar_hover: None,
             armed_slot: None,
+            panel_focus: None,
             gesture: None,
             swallowed_press: false,
             redraw_needed: true,

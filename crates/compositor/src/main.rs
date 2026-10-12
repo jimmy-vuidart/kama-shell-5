@@ -11,6 +11,7 @@ mod handlers;
 mod input;
 mod keyboard_layout;
 mod outputs;
+mod panels;
 mod persist;
 mod placement;
 mod render;

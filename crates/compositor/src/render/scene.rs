@@ -14,11 +14,13 @@ use smithay::desktop::PopupManager;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Rectangle};
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::warn;
 
 use super::clipped::ClippedSurface;
 use super::shaders::Shaders;
 use crate::decoration::paint::TitlebarSpec;
+use crate::panels::Panel;
 use crate::shell::Shell;
 use crate::theme::{Rgba, Theme};
 
@@ -126,6 +128,8 @@ pub struct Layers<'a> {
     /// A panel of the shell above everything but the cursor (the placement
     /// bar), with its place in the global space.
     pub panel: Option<(&'a MemoryRenderBuffer, Rect)>,
+    /// Panels of other programs (the dock, its drawer), topmost first.
+    pub panels: &'a [Panel],
     pub cursor: Option<Cursor>,
 }
 
@@ -141,9 +145,52 @@ fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }
 
-/// Every element of a frame, topmost first: cursor, shell panel, shell hints,
-/// popups, then windows from the top one down. Positions are relative to the
-/// corner of the view.
+/// The surfaces of the panels on some layers, with their menus, topmost
+/// first.
+fn panel_elements(
+    renderer: &mut GlesRenderer,
+    panels: &[Panel],
+    layers: &[Layer],
+    view: Rect,
+) -> Vec<SceneElement> {
+    let to_view = Point::<i32, Logical>::from((-view.x, -view.y));
+    let mut elements = Vec::new();
+    for panel in panels.iter().filter(|panel| layers.contains(&panel.layer)) {
+        let covered = panel.surface.bbox_with_popups();
+        let corner = panel.origin + covered.loc;
+        let covered = Rect::new(corner.x, corner.y, covered.size.w, covered.size.h);
+        if !overlaps(covered, view) {
+            continue;
+        }
+        let surface = panel.surface.wl_surface();
+        let origin = panel.origin + to_view;
+        for (popup, offset) in PopupManager::popups_for_surface(surface) {
+            let location = physical(origin + offset - popup.geometry().loc);
+            elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+                renderer,
+                popup.wl_surface(),
+                location,
+                SCALE,
+                1.0,
+                Kind::Unspecified,
+            ));
+        }
+        elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+            renderer,
+            surface,
+            physical(origin),
+            SCALE,
+            1.0,
+            Kind::Unspecified,
+        ));
+    }
+    elements
+}
+
+/// Every element of a frame, topmost first: cursor, panels above everything,
+/// placement bar, shell hints, menus, panels above the windows, windows from
+/// the top one down, panels under them. Positions are relative to the corner
+/// of the view.
 pub fn build(
     renderer: &mut GlesRenderer,
     shaders: &Shaders,
@@ -155,6 +202,7 @@ pub fn build(
         view,
         overlay,
         panel,
+        panels,
         cursor,
     } = layers;
     let metrics = *shell.desk.metrics();
@@ -334,6 +382,7 @@ pub fn build(
         }
         None => {}
     }
+    elements.extend(panel_elements(renderer, panels, &[Layer::Overlay], view));
     if let Some((buffer, place)) = panel.filter(|(_, place)| overlaps(*place, view)) {
         let corner = ModelPoint::new(place.x + shift.x, place.y + shift.y);
         let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
@@ -383,6 +432,9 @@ pub fn build(
         ));
     }
     elements.extend(popups);
+    elements.extend(panel_elements(renderer, panels, &[Layer::Top], view));
     elements.extend(windows);
+    let under = [Layer::Bottom, Layer::Background];
+    elements.extend(panel_elements(renderer, panels, &under, view));
     elements
 }

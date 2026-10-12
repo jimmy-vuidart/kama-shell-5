@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/model", "crates/compositor"]
+members = ["crates/model", "crates/compositor", "crates/dock"]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +13,14 @@ publish = false
 coquille-model = { path = "crates/model" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+# iced_layershell (the dock) is written for winit-core 0.31.0-beta.2, Smithay
+# (the compositor) pins 0.31.0-beta.3, and a workspace holds only one of the
+# two. This copy of iced_exdevtools 0.19.1 differs from the published one by a
+# single match arm, see `vendor/README.md`. To drop once iced_layershell
+# follows winit.
+[patch.crates-io]
+iced_exdevtools = { path = "vendor/iced_exdevtools" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

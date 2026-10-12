@@ -173,6 +173,15 @@ impl Screen {
 
     pub(crate) fn set_size(&mut self, size: Size, metrics: &Metrics) {
         self.info.size = size;
+        self.keep_floating_inside(metrics);
+    }
+
+    pub(crate) fn set_reserved(&mut self, reserved: Insets, metrics: &Metrics) {
+        self.info.reserved = reserved;
+        self.keep_floating_inside(metrics);
+    }
+
+    fn keep_floating_inside(&mut self, metrics: &Metrics) {
         let area = self.floating_area(metrics);
         for window in &mut self.floating {
             window.rect = window.rect.clamped_to(area);

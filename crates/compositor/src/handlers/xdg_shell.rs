@@ -147,23 +147,30 @@ impl State {
         }
     }
 
-    /// Keeps a popup inside the screen of its window.
-    fn unconstrain_popup(&self, popup: &PopupSurface) {
+    /// Keeps a popup inside the screen of its window, or of its panel.
+    pub fn unconstrain_popup(&self, popup: &PopupSurface) {
         let kind = PopupKind::Xdg(popup.clone());
         let Ok(root) = find_popup_root_surface(&kind) else {
             return;
         };
-        let Some(managed) = self.shell.by_surface(&root) else {
+        // Where the popup's parent tree starts, and on which screen.
+        let window = self.shell.by_surface(&root).map(|managed| {
+            let client = managed.client();
+            (Point::from((client.x, client.y)), managed.geometry.output)
+        });
+        let panel = || {
+            self.panel_of(&root)
+                .map(|panel| (panel.origin, panel.output))
+        };
+        let Some((origin, output)): Option<(Point<i32, Logical>, _)> = window.or_else(panel) else {
             return;
         };
-        let Some(screen) = self.shell.screen(managed.geometry.output) else {
+        let Some(screen) = self.shell.screen(output) else {
             return;
         };
 
         // The positioner works relative to the parent, so the screen is
         // expressed from there.
-        let client = managed.client();
-        let origin: Point<i32, Logical> = (client.x, client.y).into();
         let mut target = crate::render::scene::rectangle(screen.rect);
         target.loc -= origin;
         target.loc -= get_popup_toplevel_coords(&kind);

@@ -94,6 +94,8 @@ impl CompositorHandler for State {
             self.refresh_pointer_focus();
         }
 
+        self.commit_panel(surface);
+
         self.popups.commit(surface);
         if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface) {
             if !popup.is_initial_configure_sent() {

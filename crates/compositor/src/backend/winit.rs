@@ -163,7 +163,12 @@ impl State {
                 place(output, info.rect);
             }
         }
+        let ids: Vec<OutputId> = screens.iter().map(|screen| screen.id).collect();
         self.shell.move_screens(screens);
+        // Panels follow their screen, and what they reserve with them.
+        for id in ids {
+            self.arrange_panels(id);
+        }
         self.apply_arrangement();
     }
 
@@ -185,6 +190,7 @@ impl State {
         let cursor = self.cursor(false);
         self.refresh_bar();
         let overlay = self.overlay();
+        let panels = self.panels();
         let full_redraw = std::mem::take(&mut self.full_redraw);
         let Backend::Winit(winit) = &mut self.backend else {
             return;
@@ -226,6 +232,7 @@ impl State {
                         view,
                         overlay: &overlay,
                         panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
+                        panels: &panels,
                         cursor,
                     },
                 );
@@ -283,6 +290,14 @@ impl State {
                     .window
                     .send_frame(output, time, throttle, |_, _| Some(output.clone()));
                 managed.window.refresh();
+            }
+        }
+        for panel in self.panels() {
+            let on_screen = screen.is_none_or(|id| id == panel.output);
+            if let Some(output) = self.output(panel.output).filter(|_| on_screen) {
+                panel
+                    .surface
+                    .send_frame(output, time, throttle, |_, _| Some(output.clone()));
             }
         }
         // X11 menus draw again only once told that a frame went out.

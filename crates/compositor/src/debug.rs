@@ -8,10 +8,12 @@
 //! 0 move 100 27; 0 down; 200 move 900 400; 100 up
 //! 0 press alt; 0 down; 100 move 500 500; 0 up; 0 release alt
 //! 0 rel 40 -10
+//! 0 rclick; 0 mclick; 0 wheel 3; 0 wheel -1
 //! ```
 //!
 //! `move` puts the pointer at a position, as the host window does; `rel`
 //! moves it by a distance, as a real mouse does on the hardware backend.
+//! `wheel` turns the wheel by notches, down when positive.
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
 const KEYS: [(&str, u32); 13] = [
@@ -44,6 +46,10 @@ pub enum Step {
     },
     /// Presses and releases the left mouse button.
     Click,
+    RightClick,
+    MiddleClick,
+    /// Turns the wheel by this many notches, down when positive.
+    Wheel(i32),
     /// Holds the left mouse button down, to drag.
     ButtonDown,
     ButtonUp,
@@ -75,6 +81,12 @@ pub fn parse(script: &str) -> Result<Vec<TimedStep>, String> {
 
         let parsed = match (command, arguments.as_slice()) {
             ("click", []) => vec![Step::Click],
+            ("rclick", []) => vec![Step::RightClick],
+            ("mclick", []) => vec![Step::MiddleClick],
+            ("wheel", [notches]) => match notches.parse() {
+                Ok(notches) => vec![Step::Wheel(notches)],
+                Err(_) => return Err(format!("`{text}`: the wheel turns by whole notches")),
+            },
             ("down", []) => vec![Step::ButtonDown],
             ("up", []) => vec![Step::ButtonUp],
             ("press", [key]) => vec![Step::Press(keycode(key)?)],
@@ -247,6 +259,24 @@ mod tests {
                 (0, Step::Release(64)),
             ]
         );
+    }
+
+    #[test]
+    fn the_other_mouse_buttons_can_be_clicked() {
+        assert_eq!(
+            steps("0 rclick; 10 mclick"),
+            [(0, Step::RightClick), (10, Step::MiddleClick)]
+        );
+    }
+
+    #[test]
+    fn the_wheel_turns_by_notches_in_either_direction() {
+        assert_eq!(
+            steps("0 wheel 3; 0 wheel -1"),
+            [(0, Step::Wheel(3)), (0, Step::Wheel(-1))]
+        );
+        assert!(parse("0 wheel").is_err());
+        assert!(parse("0 wheel far").is_err());
     }
 
     #[test]

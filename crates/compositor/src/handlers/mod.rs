@@ -1,6 +1,7 @@
 //! Implementations of the Smithay protocol handlers.
 
 mod compositor;
+mod layer_shell;
 mod xdg_shell;
 
 use std::os::fd::OwnedFd;
@@ -52,6 +53,11 @@ impl SeatHandler for State {
         let dh = &self.display_handle;
         let client = focused.and_then(|focus| dh.get_client(focus.surface().id()).ok());
         set_data_device_focus(dh, seat, client);
+        // A menu that closes hands the keyboard back to what it belongs to;
+        // when that is a panel that never wanted it (the dock), the keyboard
+        // returns to the focused window instead.
+        self.loop_handle
+            .insert_idle(|state| state.sync_keyboard_focus());
     }
 }
 
