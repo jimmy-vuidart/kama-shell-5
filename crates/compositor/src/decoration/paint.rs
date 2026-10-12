@@ -1,5 +1,5 @@
-//! Painting title bars to pixels, with tiny-skia for shapes and cosmic-text
-//! for text.
+//! Painting title bars and capsules to pixels, with tiny-skia for shapes and
+//! cosmic-text for text.
 
 use coquille_model::{Rect, Size};
 use cosmic_text::{
@@ -11,6 +11,7 @@ use tiny_skia::{
     PremultipliedColorU8, Stroke, Transform,
 };
 
+use super::capsules::{CapsuleButton, CapsuleCell, CapsuleWish, GroupLayout};
 use super::icons::IconCache;
 use super::layout::{TitlebarButton, TitlebarLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
@@ -24,6 +25,8 @@ const SUBTITLE_GAP: f32 = 10.0;
 const SUBTITLE_MIN_WIDTH: f32 = 24.0;
 const BADGE_RADIUS: f32 = 5.0;
 const ICON_STROKE: f32 = 1.4;
+/// Width of the accent ring around the capsule of the active window.
+const RING_WIDTH: f32 = 2.0;
 
 /// Everything a title bar's look depends on: repaint only when it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +45,49 @@ pub struct TitlebarSpec {
     pub theme: ThemeKind,
     pub accent: Rgba,
     pub corner_radius: i32,
+}
+
+/// Everything the look of a group of capsules depends on: repaint only when
+/// it changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSpec {
+    /// Size of the band the group sits in.
+    pub size: Size,
+    pub capsules: Vec<CapsuleSpec>,
+    /// The capsule under the pointer, and its button there if any.
+    pub hovered: Option<(usize, Option<CapsuleButton>)>,
+    pub theme: ThemeKind,
+    pub accent: Rgba,
+}
+
+/// One window of a slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapsuleSpec {
+    pub label: String,
+    pub icon: Option<String>,
+    pub badge: [u8; 3],
+    /// Its slot shows it.
+    pub shown: bool,
+    pub focused: bool,
+    /// Hidden by the user: shown dimmed, a click brings it back.
+    pub minimized: bool,
+}
+
+impl CapsuleSpec {
+    fn weight(&self) -> Weight {
+        if self.shown {
+            Weight::SEMIBOLD
+        } else {
+            Weight::NORMAL
+        }
+    }
+}
+
+/// A group painted to pixels, as large as its band, with where its capsules
+/// ended up.
+pub struct PaintedGroup {
+    pub pixmap: Pixmap,
+    pub layout: GroupLayout,
 }
 
 /// What the placement bar's look depends on.
@@ -175,6 +221,126 @@ impl Painter {
         );
         if let Some(square) = rounded_rect(x, y, w, h, [radius; 4]) {
             fill(pixmap, &square, Rgba::from_array(badge));
+        }
+    }
+
+    /// Paints the capsules of a slot: a rounded box, and in it one capsule
+    /// per window. Returns `None` when there is nothing to show.
+    pub fn capsule_group(&mut self, spec: &GroupSpec) -> Option<PaintedGroup> {
+        /// How much of the backdrop shows through the box.
+        const BOX_OPACITY: u8 = 217;
+        let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        let wishes: Vec<CapsuleWish> = spec
+            .capsules
+            .iter()
+            .map(|capsule| CapsuleWish {
+                label_width: self.shaped(&capsule.label, capsule.weight()).1.ceil() as i32,
+                shown: capsule.shown,
+            })
+            .collect();
+        let layout = GroupLayout::new(spec.size, &wishes);
+        if layout.capsules.is_empty() {
+            return None;
+        }
+        let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
+
+        let frame = Rgba {
+            a: BOX_OPACITY,
+            ..theme.titlebar
+        };
+        if let Some(frame_path) = pill(layout.rect, 0.0) {
+            fill(&mut pixmap, &frame_path, frame);
+        }
+        for (index, (capsule, cell)) in spec.capsules.iter().zip(&layout.capsules).enumerate() {
+            let hovered = spec.hovered.filter(|(under, _)| *under == index);
+            let button = hovered.and_then(|(_, button)| button);
+            self.capsule(
+                &mut pixmap,
+                capsule,
+                cell,
+                hovered.is_some(),
+                button,
+                &theme,
+            );
+        }
+        Some(PaintedGroup { pixmap, layout })
+    }
+
+    /// Draws one capsule: its icon and its name, on a pill when its slot
+    /// shows it, with its buttons when it is shown or under the pointer.
+    fn capsule(
+        &mut self,
+        pixmap: &mut Pixmap,
+        capsule: &CapsuleSpec,
+        cell: &CapsuleCell,
+        hovered: bool,
+        hovered_button: Option<CapsuleButton>,
+        theme: &Theme,
+    ) {
+        if capsule.shown {
+            if let Some(path) = pill(cell.rect, 0.0) {
+                fill(pixmap, &path, theme.button_hover);
+            }
+        }
+        if capsule.shown && capsule.focused {
+            // Inside the capsule, so that the box keeps its margin.
+            if let Some(path) = pill(cell.rect, RING_WIDTH / 2.0) {
+                outline(pixmap, &path, theme.accent, RING_WIDTH);
+            }
+        }
+
+        // A hidden window shows dimmed, its icon with the rest.
+        let opacity = if capsule.minimized { 0.45 } else { 1.0 };
+        self.app_mark(
+            pixmap,
+            capsule.icon.as_deref(),
+            capsule.badge,
+            cell.icon,
+            4.0,
+            opacity,
+        );
+
+        let with_buttons = !cell.buttons.is_empty() && (capsule.shown || hovered);
+        let room = if with_buttons {
+            cell.label_before_buttons()
+        } else {
+            cell.label
+        };
+        let color = match (capsule.minimized, capsule.shown) {
+            (true, _) => theme.disabled,
+            (false, true) => theme.text,
+            (false, false) => theme.text_muted,
+        };
+        self.text(
+            pixmap,
+            &capsule.label,
+            room.x as f32,
+            room.w as f32,
+            room,
+            capsule.weight(),
+            color,
+        );
+
+        if !with_buttons {
+            return;
+        }
+        for (button, place) in &cell.buttons {
+            let under = hovered_button == Some(*button);
+            let highlight = match (button, under) {
+                (CapsuleButton::Close, true) => Some(theme.close_hover),
+                (CapsuleButton::Minimize, true) => Some(theme.separator),
+                (_, false) => None,
+            };
+            if let (Some(highlight), Some(path)) = (highlight, pill(*place, 0.0)) {
+                fill(pixmap, &path, highlight);
+            }
+            // White on the colored highlight, the text color otherwise.
+            let on_color = under && *button == CapsuleButton::Close;
+            let color = if on_color { Rgba::WHITE } else { theme.text };
+            let cross = *button == CapsuleButton::Close;
+            if let Some(icon) = line_icon(cross, *place, 3.5) {
+                stroke(pixmap, &icon, color);
+            }
         }
     }
 
@@ -375,13 +541,24 @@ fn fill(pixmap: &mut Pixmap, path: &Path, color: Rgba) {
 }
 
 fn stroke(pixmap: &mut Pixmap, path: &Path, color: Rgba) {
+    outline(pixmap, path, color, ICON_STROKE);
+}
+
+fn outline(pixmap: &mut Pixmap, path: &Path, color: Rgba, width: f32) {
     let stroke = Stroke {
-        width: ICON_STROKE,
+        width,
         line_cap: LineCap::Round,
         line_join: LineJoin::Round,
         ..Stroke::default()
     };
     pixmap.stroke_path(path, &paint(color), &stroke, Transform::identity(), None);
+}
+
+/// A rectangle with fully rounded ends, drawn `inset` pixels inside `rect`.
+fn pill(rect: Rect, inset: f32) -> Option<Path> {
+    let (w, h) = (rect.w as f32 - 2.0 * inset, rect.h as f32 - 2.0 * inset);
+    let (x, y) = (rect.x as f32 + inset, rect.y as f32 + inset);
+    rounded_rect(x, y, w, h, [h / 2.0; 4])
 }
 
 /// A rectangle with one radius per corner: top-left, top-right, bottom-right,
@@ -428,8 +605,13 @@ fn rounded_rect(x: f32, y: f32, w: f32, h: f32, radii: [f32; 4]) -> Option<Path>
     path.finish()
 }
 
-/// The line icon of a button, centered in its cell.
+/// The line icon of a title bar button, centered in its cell.
 fn button_icon(button: TitlebarButton, cell: Rect) -> Option<Path> {
+    line_icon(button == TitlebarButton::Close, cell, 5.0)
+}
+
+/// A cross, or else a dash, `reach` pixels around the center of `cell`.
+fn line_icon(cross: bool, cell: Rect, reach: f32) -> Option<Path> {
     let cx = cell.x as f32 + cell.w as f32 / 2.0;
     let cy = cell.y as f32 + cell.h as f32 / 2.0;
     let mut path = PathBuilder::new();
@@ -437,12 +619,11 @@ fn button_icon(button: TitlebarButton, cell: Rect) -> Option<Path> {
         path.move_to(cx + from.0, cy + from.1);
         path.line_to(cx + to.0, cy + to.1);
     };
-    match button {
-        TitlebarButton::Close => {
-            line((-5.0, -5.0), (5.0, 5.0));
-            line((5.0, -5.0), (-5.0, 5.0));
-        }
-        TitlebarButton::Minimize => line((-5.5, 0.0), (5.5, 0.0)),
+    if cross {
+        line((-reach, -reach), (reach, reach));
+        line((reach, -reach), (-reach, reach));
+    } else {
+        line((-reach - 0.5, 0.0), (reach + 0.5, 0.0));
     }
     path.finish()
 }
@@ -570,5 +751,56 @@ mod tests {
             );
             assert!(bounds.top() >= 0.0 && bounds.bottom() <= 38.0, "{button:?}");
         }
+    }
+
+    fn group(capsules: Vec<CapsuleSpec>) -> GroupSpec {
+        GroupSpec {
+            size: Size::new(600, 32),
+            capsules,
+            hovered: None,
+            theme: ThemeKind::Light,
+            accent: Theme::new(ThemeKind::Light).accent,
+        }
+    }
+
+    fn capsule(label: &str, shown: bool) -> CapsuleSpec {
+        CapsuleSpec {
+            label: label.to_owned(),
+            icon: None,
+            badge: [0x2f, 0x6f, 0xed],
+            shown,
+            focused: false,
+            minimized: false,
+        }
+    }
+
+    #[test]
+    fn a_group_is_painted_as_large_as_its_band_and_clear_around_its_box() {
+        let spec = group(vec![capsule("kitty", true), capsule("Discord", false)]);
+
+        let painted = Painter::new().capsule_group(&spec).unwrap();
+
+        assert_eq!((painted.pixmap.width(), painted.pixmap.height()), (600, 32));
+        assert_eq!(painted.layout.capsules.len(), 2);
+        assert_eq!(pixel(&painted.pixmap, 2, 16), [0, 0, 0, 0]);
+        let middle = painted.layout.rect.x + painted.layout.rect.w / 2;
+        assert_ne!(pixel(&painted.pixmap, middle as u32, 1)[3], 0);
+    }
+
+    #[test]
+    fn the_capsule_of_the_active_window_is_ringed_with_the_accent() {
+        let mut spec = group(vec![capsule("kitty", true)]);
+        spec.capsules[0].focused = true;
+
+        let painted = Painter::new().capsule_group(&spec).unwrap();
+
+        let cell = painted.layout.capsules[0].rect;
+        let top = pixel(&painted.pixmap, (cell.x + cell.w / 2) as u32, cell.y as u32);
+        assert_eq!(&top[..3], &[0x2f, 0x6f, 0xed]);
+    }
+
+    #[test]
+    fn a_group_without_capsule_is_not_painted() {
+        assert!(Painter::new().capsule_group(&group(Vec::new())).is_none());
     }
 }

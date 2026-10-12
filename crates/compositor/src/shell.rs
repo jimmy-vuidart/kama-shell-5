@@ -4,8 +4,9 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, AppMemory, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo,
-    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, WindowGeometry, WindowId,
+    AppKey, AppMemory, CapsuleGroup, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo,
+    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowGeometry,
+    WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -20,9 +21,10 @@ use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::xwayland::X11Surface;
 use tracing::{debug, info, warn};
 
+use crate::decoration::capsules::{CapsuleButton, GroupLayout};
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::naming::{badge_color, identity};
-use crate::decoration::paint::{Painter, TitlebarSpec};
+use crate::decoration::paint::{CapsuleSpec, GroupSpec, Painter, TitlebarSpec};
 use crate::focus::KeyFocus;
 use crate::input::Gesture;
 use crate::render::scene::Chrome;
@@ -85,6 +87,37 @@ impl ManagedWindow {
     }
 }
 
+/// The capsules of one slot, as they are drawn above it.
+pub struct CapsuleGroupView {
+    pub group: CapsuleGroup,
+    /// Top-left corner of its screen in the global space.
+    pub origin: ModelPoint,
+    /// Where things ended up at the last paint, relative to the band; empty
+    /// before it.
+    pub layout: GroupLayout,
+    /// What `buffer` was painted from.
+    spec: Option<GroupSpec>,
+    pub buffer: Option<MemoryRenderBuffer>,
+}
+
+impl CapsuleGroupView {
+    /// The band the group sits in, in the global space.
+    pub fn band(&self) -> Rect {
+        self.group.band.translated(self.origin)
+    }
+}
+
+/// A capsule under a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapsuleHit {
+    pub slot: SlotId,
+    /// Its position in the stack of the slot.
+    pub index: usize,
+    pub window: WindowId,
+    /// The button of the capsule there, if any.
+    pub button: Option<CapsuleButton>,
+}
+
 /// A toplevel that has not made its first commit yet.
 pub struct Unmapped {
     pub window: Window,
@@ -117,6 +150,8 @@ pub struct Shell {
     pub screens: Vec<ScreenInfo>,
     /// Bottom to top, as the model orders them.
     pub windows: Vec<ManagedWindow>,
+    /// One group of capsules per occupied slot.
+    pub capsules: Vec<CapsuleGroupView>,
     pub unmapped: Vec<Unmapped>,
     /// X11 windows that manage themselves (menus, tooltips, dropdowns),
     /// bottom to top. They are shown where they say, above everything.
@@ -135,6 +170,7 @@ impl Shell {
             desk: Desk::new(outputs, Metrics::default()).with_memory(memory),
             screens,
             windows: Vec::new(),
+            capsules: Vec::new(),
             unmapped: Vec::new(),
             overrides: Vec::new(),
             next_id: 1,
@@ -213,8 +249,63 @@ impl Shell {
             .map_or_else(ModelPoint::default, |screen| screen.rect.origin())
     }
 
+    /// The capsule under a point of the global space.
+    pub fn capsule_at(&self, point: ModelPoint) -> Option<CapsuleHit> {
+        self.capsules.iter().find_map(|view| {
+            let band = view.band();
+            if !band.contains(point) {
+                return None;
+            }
+            let local = ModelPoint::new(point.x - band.x, point.y - band.y);
+            let index = view.layout.capsule_at(local)?;
+            // The layout is the one of the last paint: the stack may have
+            // lost windows since.
+            let window = *view.group.windows.get(index)?;
+            Some(CapsuleHit {
+                slot: view.group.slot,
+                index,
+                window,
+                button: view.layout.button_at(local).map(|(_, button)| button),
+            })
+        })
+    }
+
+    /// Takes the model's capsules, keeping what is already painted for the
+    /// slots that still have some.
+    fn sync_capsules(&mut self) {
+        let mut painted = std::mem::take(&mut self.capsules);
+        let groups = self.desk.capsule_groups();
+        self.capsules = groups
+            .into_iter()
+            .map(|group| {
+                let origin = self
+                    .screen(group.slot.output)
+                    .map_or_else(ModelPoint::default, |screen| screen.rect.origin());
+                let known = painted
+                    .iter()
+                    .position(|view| view.group.slot == group.slot)
+                    .map(|index| painted.swap_remove(index));
+                match known {
+                    Some(view) => CapsuleGroupView {
+                        group,
+                        origin,
+                        ..view
+                    },
+                    None => CapsuleGroupView {
+                        group,
+                        origin,
+                        layout: GroupLayout::default(),
+                        spec: None,
+                        buffer: None,
+                    },
+                }
+            })
+            .collect();
+    }
+
     /// Takes the model's arrangement: geometry of each window, and stacking.
     fn sync(&mut self) {
+        self.sync_capsules();
         let arrangement = self.desk.arrangement();
         let rank = |id: WindowId| arrangement.iter().position(|geometry| geometry.id == id);
         self.windows.sort_by_key(|managed| rank(managed.id));
@@ -229,13 +320,56 @@ impl Shell {
         }
     }
 
-    /// Repaints the title bars whose look changed.
+    /// Repaints the capsules whose look changed.
+    fn refresh_capsules(
+        &mut self,
+        painter: &mut Painter,
+        theme: &Theme,
+        hover: Option<CapsuleHit>,
+    ) {
+        let Self {
+            windows, capsules, ..
+        } = self;
+        for view in capsules {
+            let capsule = |id: &WindowId| {
+                let managed = windows.iter().find(|managed| managed.id == *id)?;
+                Some(CapsuleSpec {
+                    label: managed.name.clone(),
+                    icon: managed.icon.clone(),
+                    badge: badge_color(&managed.app_id),
+                    shown: view.group.shown == Some(*id),
+                    focused: managed.geometry.focused,
+                    minimized: managed.geometry.minimized,
+                })
+            };
+            let spec = GroupSpec {
+                size: view.group.band.size(),
+                capsules: view.group.windows.iter().filter_map(capsule).collect(),
+                hovered: hover
+                    .filter(|hit| hit.slot == view.group.slot)
+                    .map(|hit| (hit.index, hit.button)),
+                theme: theme.kind,
+                accent: theme.accent,
+            };
+            if view.spec.as_ref() == Some(&spec) {
+                continue;
+            }
+            let painted = painter.capsule_group(&spec);
+            view.buffer = painted.as_ref().map(|group| texture(&group.pixmap));
+            view.layout = painted.map(|group| group.layout).unwrap_or_default();
+            view.spec = Some(spec);
+        }
+    }
+
+    /// Repaints the title bars and the capsules whose look changed.
     pub fn refresh_chrome(
         &mut self,
         painter: &mut Painter,
         theme: &Theme,
         hover: Option<(WindowId, TitlebarButton)>,
+        capsule_hover: Option<CapsuleHit>,
     ) {
+        self.refresh_capsules(painter, theme, capsule_hover);
         let corner_radius = self.desk.metrics().corner_radius;
         for managed in &mut self.windows {
             let geometry = managed.geometry;
@@ -266,22 +400,25 @@ impl Shell {
             if managed.chrome.spec.as_ref() == Some(&spec) {
                 continue;
             }
-            managed.chrome.titlebar = painter.titlebar(&spec).map(|pixmap| {
-                // tiny-skia stores premultiplied RGBA bytes, which is ABGR8888
-                // in DRM's little-endian naming.
-                let size = (pixmap.width() as i32, pixmap.height() as i32);
-                MemoryRenderBuffer::from_slice(
-                    pixmap.data(),
-                    Fourcc::Abgr8888,
-                    size,
-                    1,
-                    Transform::Normal,
-                    None,
-                )
-            });
+            managed.chrome.titlebar = painter.titlebar(&spec).as_ref().map(texture);
             managed.chrome.spec = Some(spec);
         }
     }
+}
+
+/// What the renderer draws a painted image from.
+fn texture(pixmap: &tiny_skia::Pixmap) -> MemoryRenderBuffer {
+    // tiny-skia stores premultiplied RGBA bytes, which is ABGR8888 in DRM's
+    // little-endian naming.
+    let size = (pixmap.width() as i32, pixmap.height() as i32);
+    MemoryRenderBuffer::from_slice(
+        pixmap.data(),
+        Fourcc::Abgr8888,
+        size,
+        1,
+        Transform::Normal,
+        None,
+    )
 }
 
 /// `surface` is the main surface of `window`. An X11 window has none until

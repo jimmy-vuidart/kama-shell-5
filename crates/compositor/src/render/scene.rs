@@ -189,7 +189,7 @@ fn panel_elements(
 
 /// Every element of a frame, topmost first: cursor, panels above everything,
 /// placement bar, shell hints, menus, panels above the windows, windows from
-/// the top one down, panels under them. Positions are relative to the corner
+/// the top one down, capsules, panels under them. Positions are relative to the corner
 /// of the view.
 pub fn build(
     renderer: &mut GlesRenderer,
@@ -434,6 +434,28 @@ pub fn build(
     elements.extend(popups);
     elements.extend(panel_elements(renderer, panels, &[Layer::Top], view));
     elements.extend(windows);
+    // The capsules never cover a tidied window: under all of them is under
+    // the floating ones too.
+    for group in &shell.capsules {
+        let band = group.band();
+        let Some(buffer) = group.buffer.as_ref().filter(|_| overlaps(band, view)) else {
+            continue;
+        };
+        let corner = band.translated(shift);
+        let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
+        match MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            location,
+            buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        ) {
+            Ok(element) => elements.push(SceneElement::Texture(element)),
+            Err(error) => warn!(?error, "cannot upload the capsules of a slot"),
+        }
+    }
     let under = [Layer::Bottom, Layer::Background];
     elements.extend(panel_elements(renderer, panels, &under, view));
     elements

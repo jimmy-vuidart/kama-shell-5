@@ -185,8 +185,12 @@ impl State {
     /// Draws every simulated screen into the host window, then tells visible
     /// clients they may draw their next frame.
     pub fn render_window(&mut self) {
-        self.shell
-            .refresh_chrome(&mut self.painter, &self.theme, self.hover);
+        self.shell.refresh_chrome(
+            &mut self.painter,
+            &self.theme,
+            self.hover,
+            self.capsule_hover,
+        );
         let cursor = self.cursor(false);
         self.refresh_bar();
         let overlay = self.overlay();

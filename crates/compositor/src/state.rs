@@ -45,7 +45,7 @@ use crate::ipc::Ipc;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::placement::Bar;
 use crate::render::scene::Cursor;
-use crate::shell::{ScreenInfo, Shell};
+use crate::shell::{CapsuleHit, ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
 use crate::theme::{Rgba, Theme, ThemeKind};
 
@@ -132,6 +132,8 @@ pub struct State {
     pub ipc: Option<Ipc>,
     /// The title bar button under the pointer.
     pub hover: Option<(WindowId, TitlebarButton)>,
+    /// The capsule under the pointer.
+    pub capsule_hover: Option<CapsuleHit>,
     /// The window, freshly opened floating, the placement bar is offered for.
     pub placement_offer: Option<WindowId>,
     pub bar: Option<Bar>,
@@ -282,6 +284,7 @@ impl State {
             painter: Painter::new(),
             ipc: None,
             hover: None,
+            capsule_hover: None,
             placement_offer: None,
             bar: None,
             bar_hover: None,

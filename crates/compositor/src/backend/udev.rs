@@ -529,8 +529,12 @@ impl State {
 
     /// Draws one screen and sends the frame on its way.
     fn render_screen(&mut self, index: usize) {
-        self.shell
-            .refresh_chrome(&mut self.painter, &self.theme, self.hover);
+        self.shell.refresh_chrome(
+            &mut self.painter,
+            &self.theme,
+            self.hover,
+            self.capsule_hover,
+        );
         let cursor = self.cursor(true);
         self.refresh_bar();
         let overlay = self.overlay();
