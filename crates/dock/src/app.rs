@@ -401,7 +401,7 @@ impl Dock {
             return Task::none();
         };
         let width = if self.hovered || self.unfold > 0.0 {
-            ui::bar::SURFACE_WIDTH
+            ui::bar::UNFOLDED_REACH
         } else {
             ui::bar::EXCLUSIVE_ZONE.unsigned_abs()
         };

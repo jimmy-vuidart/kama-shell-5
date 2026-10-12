@@ -10,13 +10,15 @@ use crate::app::{Dock, Message};
 use crate::model::bar::{Entry, Indicator};
 
 /// The surface is as wide as the unfolded bar, with room for its shadow.
-pub const SURFACE_WIDTH: u32 = 216;
+pub const SURFACE_WIDTH: u32 = 236;
+/// What takes the pointer when the bar is unfolded: the bar, not its shadow.
+pub const UNFOLDED_REACH: u32 = 212;
 /// What the bar keeps for itself along the edge: windows start after it.
 pub const EXCLUSIVE_ZONE: i32 = 60;
 /// Between the edge of the screen and the bar.
 const MARGIN: f32 = 8.0;
 /// Above and under the bar, for its shadow.
-const SHADOW: f32 = 12.0;
+const SHADOW: f32 = 24.0;
 const WIDTH: f32 = 44.0;
 const UNFOLDED: f32 = 200.0;
 const RADIUS: f32 = 14.0;
