@@ -441,11 +441,12 @@ impl Desk {
         Ok(())
     }
 
-    /// The ⇄ button (rule 5): a side window goes to the center, and the
-    /// window shown at the center takes its exact place.
+    /// "To the center": the user tidies a side window into the center
+    /// screen, in the slot used last there. An occupied slot stacks it as a
+    /// tab (rule 3); a `Free` center takes it floating, at its size.
     ///
-    /// Refused while a game is anchored. Habits are left alone.
-    pub fn swap_with_center(&mut self, id: WindowId) -> Result<(), ModelError> {
+    /// Refused while a game is anchored on either screen.
+    pub fn send_to_center(&mut self, id: WindowId) -> Result<(), ModelError> {
         let (side, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         if !self.screens[side].role().is_side() {
             return Err(ModelError::NotOnSideScreen(id));
@@ -458,42 +459,17 @@ impl Desk {
         self.ensure_not_anchored(center)?;
         self.ensure_not_anchored(side)?;
 
+        let output = self.screens[center].id();
         if self.screens[center].slots().is_empty() {
-            // A `Free` center has no window to give back.
-            self.screens[side].remove(id);
+            let area = self.screens[center].floating_area(&self.metrics);
             let size = match spot {
-                Spot::Floating(rect) => Some(rect.size()),
-                Spot::Slot(_) => None,
+                Spot::Floating(rect) => rect.size(),
+                Spot::Slot(_) => Size::new(area.w * 3 / 5, area.h * 7 / 10),
             };
-            self.open_floating(id, center, size);
+            self.float_window(id, output, Rect::centered(size, area))
         } else {
-            let target = self.center_swap_slot(center);
-            let partner = self.screens[center].slots()[target].active();
-            match partner {
-                Some(partner) => {
-                    if let Some(stack) = self.screens[center].slot_mut(target) {
-                        stack.replace(partner, id);
-                    }
-                    match spot {
-                        Spot::Slot(index) => {
-                            if let Some(stack) = self.screens[side].slot_mut(index) {
-                                stack.replace(id, partner);
-                            }
-                        }
-                        Spot::Floating(_) => self.screens[side].replace_floating(id, partner),
-                    }
-                }
-                None => {
-                    self.screens[side].remove(id);
-                    if let Some(stack) = self.screens[center].slot_mut(target) {
-                        stack.push(id);
-                    }
-                }
-            }
+            self.move_to_slot(id, SlotId::new(output, self.center_slot(center)))
         }
-        self.settle();
-        self.mark_focused(id);
-        Ok(())
     }
 
     /// Changes the layout of a screen; see [`Screen`] for how windows are
@@ -696,9 +672,9 @@ impl Desk {
         Some(screen.id())
     }
 
-    /// The ⇄ button applies to `id`: it is on a side screen, there is a
-    /// center, and no game holds either of them (rule 5).
-    pub fn can_swap_with_center(&self, id: WindowId) -> bool {
+    /// "To the center" applies to `id`: it is on a side screen, there is a
+    /// center, and no game holds either of them.
+    pub fn can_send_to_center(&self, id: WindowId) -> bool {
         let Some((side, _)) = self.locate(id) else {
             return false;
         };
@@ -919,9 +895,9 @@ impl Desk {
         }
     }
 
-    /// The center slot a side window swaps with: the one focused last, else
+    /// The center slot a side window is sent to: the one focused last, else
     /// the first occupied one.
-    fn center_swap_slot(&self, center: usize) -> usize {
+    fn center_slot(&self, center: usize) -> usize {
         let screen = &self.screens[center];
         let mut recent = self.focus_order.iter().rev();
         recent

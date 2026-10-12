@@ -12,7 +12,7 @@ use tiny_skia::{
 };
 
 use super::icons::IconCache;
-use super::layout::{Buttons, TitlebarButton, TitlebarLayout};
+use super::layout::{TitlebarButton, TitlebarLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
 
 const UI_FONT: &str = "Figtree";
@@ -37,7 +37,8 @@ pub struct TitlebarSpec {
     pub badge: [u8; 3],
     pub focused: bool,
     pub hovered: Option<TitlebarButton>,
-    pub buttons: Buttons,
+    /// Whether the bar has its buttons.
+    pub buttons: bool,
     pub theme: ThemeKind,
     pub accent: Rgba,
     pub corner_radius: i32,
@@ -508,15 +509,6 @@ fn button_icon(button: TitlebarButton, cell: Rect) -> Option<Path> {
             line((5.0, -5.0), (-5.0, 5.0));
         }
         TitlebarButton::Minimize => line((-5.5, 0.0), (5.5, 0.0)),
-        TitlebarButton::Swap => {
-            // Two arrows: the upper one points right, the lower one left.
-            line((-6.0, -3.0), (6.0, -3.0));
-            line((3.0, -6.0), (6.0, -3.0));
-            line((6.0, -3.0), (3.0, 0.0));
-            line((6.0, 3.0), (-6.0, 3.0));
-            line((-3.0, 0.0), (-6.0, 3.0));
-            line((-6.0, 3.0), (-3.0, 6.0));
-        }
     }
     path.finish()
 }
@@ -635,11 +627,7 @@ mod tests {
     #[test]
     fn every_button_has_an_icon_inside_its_cell() {
         let cell = Rect::new(100, 0, 38, 38);
-        for button in [
-            TitlebarButton::Swap,
-            TitlebarButton::Minimize,
-            TitlebarButton::Close,
-        ] {
+        for button in [TitlebarButton::Minimize, TitlebarButton::Close] {
             let bounds = button_icon(button, cell).unwrap().bounds();
 
             assert!(

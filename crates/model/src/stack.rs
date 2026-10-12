@@ -86,17 +86,6 @@ impl TabStack {
         self.activate_index((self.active + step) % len)
     }
 
-    /// Puts `new` where `old` is, keeping the position and the active tab.
-    pub fn replace(&mut self, old: WindowId, new: WindowId) -> bool {
-        match self.position(old) {
-            Some(index) => {
-                self.windows[index] = new;
-                true
-            }
-            None => false,
-        }
-    }
-
     /// Appends the tabs of `other`. The active tab is kept; an empty stack
     /// adopts the active tab of `other`.
     pub fn absorb(&mut self, other: TabStack) {
@@ -230,17 +219,6 @@ mod tests {
     #[test]
     fn cycling_an_empty_stack_gives_nothing() {
         assert_eq!(TabStack::default().cycle(true), None);
-    }
-
-    #[test]
-    fn replacing_keeps_the_position_and_the_active_tab() {
-        let mut stack = stack(&[A, B]);
-        stack.activate(A);
-
-        assert!(stack.replace(A, C));
-
-        assert_eq!(stack.windows(), &[C, B]);
-        assert_eq!(stack.active(), Some(C));
     }
 
     #[test]

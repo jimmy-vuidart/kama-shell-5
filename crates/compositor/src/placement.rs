@@ -1,9 +1,7 @@
 //! The small bar offered under a window that just opened floating: leave it,
 //! tidy it on its screen, or send it to the center.
 
-use coquille_model::{
-    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowId,
-};
+use coquille_model::{Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowId};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::utils::Transform;
@@ -22,7 +20,7 @@ pub enum BarAction {
     Keep,
     /// Tidy it into this slot of its screen.
     Tidy(SlotId),
-    /// Swap it with what the center shows.
+    /// Tidy it into the center screen.
     Center,
 }
 
@@ -71,15 +69,7 @@ impl State {
             choices.push((BarAction::Tidy(slot), label.to_owned()));
         }
 
-        let on_side = self
-            .shell
-            .by_id(window)
-            .is_some_and(|managed| managed.show_swap);
-        let center_free = desk
-            .screens()
-            .iter()
-            .any(|screen| screen.role() == OutputRole::Center && screen.anchored().is_none());
-        if on_side && center_free {
+        if desk.can_send_to_center(window) {
             choices.push((BarAction::Center, "Au centre".to_owned()));
         }
         choices
@@ -172,7 +162,7 @@ impl State {
         let result = match *action {
             BarAction::Keep => Ok(()),
             BarAction::Tidy(slot) => desk.move_to_slot(bar.window, slot),
-            BarAction::Center => desk.swap_with_center(bar.window),
+            BarAction::Center => desk.send_to_center(bar.window),
         };
         if let Err(error) = result {
             warn!(%error, "cannot place the window as asked");

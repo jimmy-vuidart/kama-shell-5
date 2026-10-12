@@ -20,7 +20,7 @@ use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::xwayland::X11Surface;
 use tracing::{debug, info, warn};
 
-use crate::decoration::layout::{Buttons, TitlebarButton};
+use crate::decoration::layout::TitlebarButton;
 use crate::decoration::naming::{badge_color, identity};
 use crate::decoration::paint::{Painter, TabSpec, TitlebarSpec};
 use crate::focus::KeyFocus;
@@ -52,8 +52,6 @@ pub struct ManagedWindow {
     pub geometry: WindowGeometry,
     /// Top-left corner of its screen in the global space.
     pub origin: ModelPoint,
-    /// The "swap with the center" button applies to this window.
-    pub show_swap: bool,
     /// The windows stacked in its slot when they show as tabs in its title
     /// bar, in order; empty otherwise.
     pub tabs: Vec<WindowId>,
@@ -83,11 +81,9 @@ impl ManagedWindow {
         self.geometry.client.translated(self.origin)
     }
 
-    /// The buttons its title bar shows.
-    pub fn buttons(&self) -> Buttons {
-        Buttons {
-            swap: self.show_swap,
-        }
+    /// Whether its title bar shows buttons.
+    pub fn buttons(&self) -> bool {
+        true
     }
 }
 
@@ -213,16 +209,10 @@ impl Shell {
             .collect()
     }
 
-    /// What a window needs besides the model's geometry: where its screen is,
-    /// and whether it can be swapped with the center.
-    fn placement_of(&self, geometry: &WindowGeometry) -> (ModelPoint, bool) {
-        match self.screen(geometry.output) {
-            Some(screen) => (
-                screen.rect.origin(),
-                self.desk.can_swap_with_center(geometry.id),
-            ),
-            None => (ModelPoint::default(), false),
-        }
+    /// Top-left corner, in the global space, of the screen a window is on.
+    fn origin_of(&self, geometry: &WindowGeometry) -> ModelPoint {
+        self.screen(geometry.output)
+            .map_or_else(ModelPoint::default, |screen| screen.rect.origin())
     }
 
     /// The stack a window belongs to, when it must show as tabs: as soon as
@@ -239,12 +229,11 @@ impl Shell {
         for index in 0..self.windows.len() {
             let id = self.windows[index].id;
             if let Some(geometry) = arrangement.iter().find(|geometry| geometry.id == id) {
-                let (origin, show_swap) = self.placement_of(geometry);
+                let origin = self.origin_of(geometry);
                 let tabs = self.tabs_of(id);
                 let managed = &mut self.windows[index];
                 managed.geometry = *geometry;
                 managed.origin = origin;
-                managed.show_swap = show_swap;
                 managed.tabs = tabs;
             }
         }
@@ -455,7 +444,7 @@ impl State {
         let x11 = window.x11_surface().is_some();
         debug!(?id, app_id, title, x11, "window mapped");
 
-        let (origin, show_swap) = self.shell.placement_of(&geometry);
+        let origin = self.shell.origin_of(&geometry);
         let (name, icon) = identity(&self.catalog, &app_id);
         self.shell.windows.push(ManagedWindow {
             id,
@@ -466,7 +455,6 @@ impl State {
             icon,
             geometry,
             origin,
-            show_swap,
             tabs: Vec::new(),
             // The size of an X11 window is known and imposed from the start.
             sized: x11,

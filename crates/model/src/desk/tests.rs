@@ -370,125 +370,121 @@ fn a_habit_on_a_screen_that_is_not_plugged_opens_floating() {
     assert_eq!(desk.memory().len(), 1);
 }
 
-// Rule 5: swap with the center.
+// "To the center": tidying a side window into the center screen.
 
 #[test]
-fn swapping_exchanges_the_side_window_and_the_center_window() {
+fn sending_to_the_center_tidies_the_window_there() {
+    let mut desk = desk();
+    open(&mut desk, 1, "editor", RIGHT);
+
+    desk.send_to_center(WindowId(1)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert!(geo(&desk, 1).visible);
+}
+
+#[test]
+fn sending_to_an_occupied_center_stacks_and_leaves_its_window_there() {
     let mut desk = desk();
     open_in(&mut desk, 1, "product", CENTER, 0);
     open_in(&mut desk, 2, "editor", RIGHT, 0);
 
-    desk.swap_with_center(WindowId(2)).unwrap();
+    desk.send_to_center(WindowId(2)).unwrap();
 
-    assert_eq!(place(&desk, 2), Placement::Slot(slot(CENTER, 0)));
-    assert_eq!(place(&desk, 1), Placement::Slot(slot(RIGHT, 0)));
-    assert_eq!(desk.focused(), Some(WindowId(2)));
+    assert_eq!(tabs(&desk, CENTER, 0), [1, 2]);
+    assert_eq!(active_tab(&desk, CENTER, 0), Some(2));
+    assert!(tabs(&desk, RIGHT, 0).is_empty());
 }
 
 #[test]
-fn swapping_with_an_empty_center_moves_the_window() {
+fn sending_to_a_split_center_goes_to_the_slot_used_last() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "editor", RIGHT, 1);
+    desk.set_layout(CENTER, LayoutKind::TwoThirdsOneThird)
+        .unwrap();
+    open_in(&mut desk, 1, "product", CENTER, 0);
+    open_in(&mut desk, 2, "admin", CENTER, 1);
+    open_in(&mut desk, 3, "editor", RIGHT, 0);
 
-    desk.swap_with_center(WindowId(1)).unwrap();
+    desk.send_to_center(WindowId(3)).unwrap();
+
+    assert_eq!(place(&desk, 3), Placement::Slot(slot(CENTER, 1)));
+}
+
+#[test]
+fn sending_to_an_empty_split_center_goes_to_its_first_slot() {
+    let mut desk = desk();
+    desk.set_layout(CENTER, LayoutKind::TwoThirdsOneThird)
+        .unwrap();
+    open_in(&mut desk, 1, "editor", RIGHT, 0);
+
+    desk.send_to_center(WindowId(1)).unwrap();
 
     assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
-    assert!(tabs(&desk, RIGHT, 1).is_empty());
 }
 
 #[test]
-fn swapping_a_tab_leaves_its_neighbours_in_place() {
+fn sending_to_a_free_center_floats_the_window_at_its_size() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open_in(&mut desk, 2, "discord", RIGHT, 0);
-    open_in(&mut desk, 3, "editor", RIGHT, 0);
+    desk.set_layout(CENTER, LayoutKind::Free).unwrap();
+    open(&mut desk, 1, "editor", RIGHT);
+    desk.float_window(WindowId(1), RIGHT, Rect::new(100, 120, 900, 700))
+        .unwrap();
 
-    desk.swap_with_center(WindowId(3)).unwrap();
+    desk.send_to_center(WindowId(1)).unwrap();
 
-    assert_eq!(tabs(&desk, RIGHT, 0), [2, 1]);
-    assert_eq!(active_tab(&desk, RIGHT, 0), Some(1));
-    assert_eq!(tabs(&desk, CENTER, 0), [3]);
-}
-
-#[test]
-fn swapping_only_takes_the_active_center_tab() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open_in(&mut desk, 2, "admin", CENTER, 0);
-    open_in(&mut desk, 3, "editor", RIGHT, 0);
-
-    desk.swap_with_center(WindowId(3)).unwrap();
-
-    assert_eq!(tabs(&desk, CENTER, 0), [1, 3]);
-    assert_eq!(active_tab(&desk, CENTER, 0), Some(3));
-    assert_eq!(tabs(&desk, RIGHT, 0), [2]);
-}
-
-#[test]
-fn swapping_a_floating_window_gives_its_rect_to_the_center_window() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open(&mut desk, 2, "editor", RIGHT);
-    let rect = Rect::new(100, 120, 900, 700);
-    desk.float_window(WindowId(2), RIGHT, rect).unwrap();
-
-    desk.swap_with_center(WindowId(2)).unwrap();
-
-    assert_eq!(place(&desk, 2), Placement::Slot(slot(CENTER, 0)));
-    assert_eq!(
-        place(&desk, 1),
-        Placement::Floating {
-            output: RIGHT,
-            rect,
+    match place(&desk, 1) {
+        Placement::Floating { output, rect } => {
+            assert_eq!(output, CENTER);
+            assert_eq!(rect.size(), Size::new(900, 700));
         }
-    );
+        other => panic!("expected a floating window, got {other:?}"),
+    }
 }
 
 #[test]
-fn swapping_is_refused_while_a_game_is_anchored() {
+fn sending_to_the_center_is_refused_while_a_game_is_anchored() {
     let mut desk = desk();
     anchor_game(&mut desk, 1);
     open_in(&mut desk, 2, "discord", LEFT, 0);
 
-    let result = desk.swap_with_center(WindowId(2));
+    let result = desk.send_to_center(WindowId(2));
 
     assert_eq!(result, Err(ModelError::Anchored(CENTER)));
     assert_eq!(place(&desk, 2), Placement::Slot(slot(LEFT, 0)));
-    assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
 }
 
 #[test]
-fn swapping_a_window_already_at_the_center_is_refused() {
+fn sending_a_window_already_at_the_center_is_refused() {
     let mut desk = desk();
     open_in(&mut desk, 1, "product", CENTER, 0);
 
-    let result = desk.swap_with_center(WindowId(1));
+    let result = desk.send_to_center(WindowId(1));
 
     assert_eq!(result, Err(ModelError::NotOnSideScreen(WindowId(1))));
 }
 
 #[test]
-fn swapping_without_a_center_screen_is_refused() {
+fn sending_to_the_center_without_a_center_screen_is_refused() {
     let only_left = vec![OutputInfo::new(LEFT, OutputRole::Left, SIDE_SIZE)];
     let mut desk = Desk::new(only_left, Metrics::default());
     open_in(&mut desk, 1, "editor", LEFT, 0);
 
-    assert_eq!(
-        desk.swap_with_center(WindowId(1)),
-        Err(ModelError::NoCenter)
-    );
+    assert_eq!(desk.send_to_center(WindowId(1)), Err(ModelError::NoCenter));
 }
 
 #[test]
-fn swapping_does_not_change_habits() {
+fn sending_to_the_center_becomes_the_habit_of_the_application() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open_in(&mut desk, 2, "editor", RIGHT, 0);
-    let before = desk.memory().clone();
+    open(&mut desk, 1, "editor", RIGHT);
 
-    desk.swap_with_center(WindowId(2)).unwrap();
+    desk.send_to_center(WindowId(1)).unwrap();
+    desk.close_window(WindowId(1)).unwrap();
 
-    assert_eq!(desk.memory(), &before);
+    assert_eq!(
+        open(&mut desk, 2, "editor", LEFT),
+        Placement::Slot(slot(CENTER, 0))
+    );
 }
 
 // Rule 7: never in front of an anchored game.
@@ -831,29 +827,29 @@ fn a_window_hidden_under_a_game_gets_the_focus_back_when_the_game_leaves() {
 }
 
 #[test]
-fn the_swap_button_is_offered_on_side_screens_only_without_a_game() {
+fn the_center_is_offered_to_side_windows_only_without_a_game() {
     let mut desk = desk();
     open_in(&mut desk, 1, "discord", LEFT, 0);
     open_in(&mut desk, 2, "browser", CENTER, 0);
-    assert!(desk.can_swap_with_center(WindowId(1)));
-    assert!(!desk.can_swap_with_center(WindowId(2)));
-    assert!(!desk.can_swap_with_center(WindowId(99)));
+    assert!(desk.can_send_to_center(WindowId(1)));
+    assert!(!desk.can_send_to_center(WindowId(2)));
+    assert!(!desk.can_send_to_center(WindowId(99)));
 
     desk.set_anchored(WindowId(2), true).unwrap();
 
-    assert!(!desk.can_swap_with_center(WindowId(1)));
+    assert!(!desk.can_send_to_center(WindowId(1)));
 }
 
 #[test]
-fn a_window_under_a_side_game_cannot_be_swapped() {
+fn a_window_under_a_side_game_cannot_be_sent_to_the_center() {
     let mut desk = desk();
     open_in(&mut desk, 1, "discord", LEFT, 0);
     open_in(&mut desk, 2, "video", LEFT, 1);
 
     desk.set_anchored(WindowId(2), true).unwrap();
 
-    assert!(!desk.can_swap_with_center(WindowId(1)));
-    assert!(!desk.can_swap_with_center(WindowId(2)));
+    assert!(!desk.can_send_to_center(WindowId(1)));
+    assert!(!desk.can_send_to_center(WindowId(2)));
 }
 
 #[test]
@@ -1893,7 +1889,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                     let rect = Rect::new(x, x / 2, 300 + x.abs(), 200 + x.abs() / 2);
                     desk.float_window(window, output, rect)
                 }
-                5 => desk.swap_with_center(window),
+                5 => desk.send_to_center(window),
                 6 => desk.set_layout(output, LAYOUTS[rng.next(5) as usize]),
                 7 => desk.set_ratio(output, Ratio::from_permille(rng.next(1000) as u16)),
                 8 => desk.focus(window),

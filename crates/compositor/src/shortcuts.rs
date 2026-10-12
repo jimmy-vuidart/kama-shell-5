@@ -50,9 +50,6 @@ pub enum Action {
     SpawnTerminal,
     /// Brings back the window minimized last.
     RestoreWindow,
-    /// Swaps the focused window with what the center shows: the keyboard
-    /// twin of the ⇄ button, for windows that have no shell title bar.
-    SwapWithCenter,
     /// Puts the fullscreen window (the game) back in a window.
     LeaveFullscreen,
     /// Switches to another virtual terminal: the way out if all else fails.
@@ -111,7 +108,6 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
         _ if press.shift && has(Keysym::e) => Some(Action::Quit),
         _ if has(Keysym::Return) => Some(Action::SpawnTerminal),
         _ if has(Keysym::r) => Some(Action::RestoreWindow),
-        _ if has(Keysym::c) => Some(Action::SwapWithCenter),
         _ if has(Keysym::Escape) => Some(Action::LeaveFullscreen),
         _ if has(Keysym::Next) => Some(Action::CycleTab { forward: true }),
         _ if has(Keysym::Prior) => Some(Action::CycleTab { forward: false }),
@@ -143,15 +139,6 @@ mod tests {
         syms: &[],
         modified: Keysym::NoSymbol,
     };
-
-    #[test]
-    fn mod_c_swaps_the_focused_window_with_the_center() {
-        assert_eq!(
-            press(true, false, 54, &[Keysym::c]),
-            Some(Action::SwapWithCenter)
-        );
-        assert_eq!(press(false, false, 54, &[Keysym::c]), None);
-    }
 
     #[test]
     fn mod_r_restores_the_last_minimized_window() {

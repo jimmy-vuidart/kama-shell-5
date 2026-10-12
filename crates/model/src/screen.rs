@@ -149,13 +149,6 @@ impl Screen {
         }
     }
 
-    /// Puts `new` where the floating window `old` is, keeping its stacking.
-    pub(crate) fn replace_floating(&mut self, old: WindowId, new: WindowId) {
-        if let Some(window) = self.floating.iter_mut().find(|window| window.id == old) {
-            window.id = new;
-        }
-    }
-
     pub(crate) fn raise(&mut self, id: WindowId) {
         if let Some(index) = self.floating.iter().position(|window| window.id == id) {
             let window = self.floating.remove(index);
