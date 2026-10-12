@@ -5,21 +5,63 @@
 use std::path::{Path, PathBuf};
 
 use coquille_ipc::ThemeName;
+use coquille_model::OutputRole;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
+
+use crate::model::Orientation;
 
 /// What the dock reads from the configuration. Anything else in the file
 /// belongs to the compositor and is ignored here.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub theme: Option<ThemeName>,
     /// `#rrggbb`.
     pub accent: Option<String>,
     /// The applications of the bar, in order.
     pub favorites: Vec<String>,
+    /// The screens that have a dock, and which way each lies.
+    pub docks: Vec<(OutputRole, Orientation)>,
     /// The pinned applications of the drawer; the favorites when absent.
     pub pinned: Vec<String>,
     /// The width the user gave the drawer by dragging its edge.
     pub drawer_width: Option<u32>,
+    /// The height the user gave the horizontal launcher.
+    pub drawer_height: Option<u32>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            theme: None,
+            accent: None,
+            favorites: Vec::new(),
+            docks: docks(|_| None),
+            pinned: Vec::new(),
+            drawer_width: None,
+            drawer_height: None,
+        }
+    }
+}
+
+/// The docks, given what the configuration says of each screen
+/// (`"vertical"`, `"horizontal"`, `"off"`). A screen it says nothing of
+/// keeps its usual dock: one on the left screen, upright, none elsewhere.
+fn docks(said: impl Fn(&str) -> Option<String>) -> Vec<(OutputRole, Orientation)> {
+    let screens = [
+        ("left", OutputRole::Left, Some(Orientation::Vertical)),
+        ("center", OutputRole::Center, None),
+        ("right", OutputRole::Right, None),
+    ];
+    let dock = |(name, screen, usual): (&str, OutputRole, Option<Orientation>)| {
+        let orientation = match said(name).as_deref() {
+            Some("vertical") => Some(Orientation::Vertical),
+            Some("horizontal") => Some(Orientation::Horizontal),
+            Some("off") => None,
+            _ => usual,
+        };
+        Some((screen, orientation?))
+    };
+    screens.into_iter().filter_map(dock).collect()
 }
 
 /// Reads the configuration. A file that is not valid TOML gives the
@@ -34,6 +76,14 @@ pub fn parse(text: &str) -> Config {
         Some(names.map(str::to_owned).collect())
     };
     let text_of = |key: &str| document.get(key).and_then(Item::as_str);
+    let length = |key: &str| {
+        let value = document.get("drawer")?.get(key)?.as_integer()?;
+        u32::try_from(value).ok()
+    };
+    let screen = |name: &str| {
+        let said = document.get("dock")?.get("screens")?.get(name)?.as_str()?;
+        Some(said.to_owned())
+    };
     let favorites = names("dock", "favorites").unwrap_or_default();
     Config {
         theme: match text_of("theme") {
@@ -42,11 +92,10 @@ pub fn parse(text: &str) -> Config {
             _ => None,
         },
         accent: text_of("accent").map(str::to_owned),
+        docks: docks(screen),
         pinned: names("drawer", "pinned").unwrap_or_else(|| favorites.clone()),
-        drawer_width: document
-            .get("drawer")
-            .and_then(|drawer| drawer.get("width")?.as_integer())
-            .and_then(|width| u32::try_from(width).ok()),
+        drawer_width: length("width"),
+        drawer_height: length("height"),
         favorites,
     }
 }
@@ -60,6 +109,11 @@ pub fn with_favorites(text: &str, favorites: &[String]) -> Option<String> {
 /// The file with another width for the drawer.
 pub fn with_drawer_width(text: &str, width: u32) -> Option<String> {
     with_value(text, "drawer", "width", Value::from(i64::from(width)))
+}
+
+/// The file with another height for the horizontal launcher.
+pub fn with_drawer_height(text: &str, height: u32) -> Option<String> {
+    with_value(text, "drawer", "height", Value::from(i64::from(height)))
 }
 
 fn with_names(text: &str, section: &str, key: &str, names: &[String]) -> Option<String> {
@@ -179,6 +233,7 @@ pinned = ["firefox", "mpv"]
         // No pinned application of its own: the drawer shows the favorites.
         assert_eq!(config.pinned, config.favorites);
         assert_eq!(config.drawer_width, None);
+        assert_eq!(config.docks, [(OutputRole::Left, Orientation::Vertical)]);
     }
 
     #[test]
@@ -210,8 +265,71 @@ pinned = ["firefox", "mpv"]
     }
 
     #[test]
+    fn without_a_word_the_dock_stands_on_the_left_screen() {
+        assert_eq!(parse("").docks, [(OutputRole::Left, Orientation::Vertical)]);
+        assert_eq!(
+            parse(FILE).docks,
+            [(OutputRole::Left, Orientation::Vertical)]
+        );
+    }
+
+    #[test]
+    fn each_screen_has_its_dock_and_its_direction() {
+        let config = parse(
+            "[dock.screens]\nleft = \"off\"\ncenter = \"horizontal\"\nright = \"vertical\"\n",
+        );
+
+        assert_eq!(
+            config.docks,
+            [
+                (OutputRole::Center, Orientation::Horizontal),
+                (OutputRole::Right, Orientation::Vertical)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_screen_left_unsaid_keeps_its_usual_dock() {
+        let config = parse("[dock.screens]\nright = \"horizontal\"\n");
+
+        assert_eq!(
+            config.docks,
+            [
+                (OutputRole::Left, Orientation::Vertical),
+                (OutputRole::Right, Orientation::Horizontal)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_direction_that_means_nothing_is_ignored() {
+        let config = parse("[dock.screens]\nleft = \"diagonal\"\ncenter = 3\n");
+
+        assert_eq!(config.docks, [(OutputRole::Left, Orientation::Vertical)]);
+    }
+
+    #[test]
+    fn every_dock_can_be_turned_off() {
+        assert!(parse("[dock.screens]\nleft = \"off\"\n").docks.is_empty());
+    }
+
+    #[test]
+    fn the_height_of_the_launcher_is_read_and_written() {
+        assert_eq!(parse("[drawer]\nheight = 520\n").drawer_height, Some(520));
+        assert_eq!(parse(FILE).drawer_height, None);
+
+        let changed = with_drawer_height(FILE, 512).unwrap();
+
+        assert_eq!(parse(&changed).drawer_height, Some(512));
+        assert_eq!(parse(&changed).pinned, ["firefox", "mpv"]);
+    }
+
+    #[test]
     fn an_empty_file_gives_an_empty_dock() {
-        assert_eq!(parse(""), Config::default());
+        let config = parse("");
+
+        assert!(config.favorites.is_empty() && config.pinned.is_empty());
+        assert_eq!((config.theme, config.drawer_width), (None, None));
     }
 
     #[test]
@@ -223,7 +341,7 @@ pinned = ["firefox", "mpv"]
 
     #[test]
     fn a_broken_file_gives_the_defaults() {
-        assert_eq!(parse("theme = \n[dock"), Config::default());
+        assert_eq!(parse("theme = \n[dock"), parse(""));
     }
 
     #[test]

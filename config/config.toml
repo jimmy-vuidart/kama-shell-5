@@ -54,6 +54,15 @@ right = "DP-1"
 [dock]
 favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
+# Quel écran a un dock, et dans quel sens : "vertical" (colonne sur le bord
+# gauche, lanceur en tiroir), "horizontal" (rangée sur le bord bas, lanceur
+# en panneau au-dessus) ou "off". Sans cette section : un dock vertical sur
+# l'écran gauche, aucun ailleurs.
+[dock.screens]
+# left = "vertical"
+# center = "off"
+# right = "off"
+
 # Le tiroir d'applications. Les applications épinglées en haut du tiroir ;
 # sans cette ligne, ce sont les favoris de la barre.
 [drawer]
@@ -62,3 +71,7 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # Largeur du tiroir, en pixels. Tirer son bord droit à la souris la change
 # et réécrit cette ligne.
 # width = 640
+
+# Hauteur du lanceur d'un dock horizontal, en pixels. Tirer son bord haut la
+# change et réécrit cette ligne.
+# height = 500

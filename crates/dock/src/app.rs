@@ -9,7 +9,7 @@ use chrono::{DateTime, Local};
 use coquille_ipc::{Command, Event, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use iced::widget::operation;
-use iced::{Color, Element, Subscription, Task, keyboard, mouse, window};
+use iced::{Color, Element, Point, Size, Subscription, Task, keyboard, mouse, window};
 use iced_layershell::actions::{ActionCallback, IcedNewPopupSettings};
 use iced_layershell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption, PopupAnchor,
@@ -26,7 +26,7 @@ use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
-use crate::model::{Identity, identify};
+use crate::model::{Identity, Orientation, identify};
 use crate::steam::{self, Game};
 use crate::ui;
 use crate::ui::icons::Icons;
@@ -67,10 +67,38 @@ pub struct Drag {
     pub moved: bool,
 }
 
-/// The drawer, while it is open.
+/// A bar of the dock, on its screen. Each screen may have one, upright on
+/// its left edge or lying on its bottom edge.
+pub struct BarState {
+    pub id: window::Id,
+    pub screen: OutputRole,
+    pub orientation: Orientation,
+    /// What it shows: the same applications on every bar, but "here" is
+    /// its own screen.
+    pub entries: Vec<Entry>,
+    /// The size of its surface.
+    size: (u32, u32),
+    hovered: bool,
+    /// From 0 (folded) to 1 (unfolded): an upright bar only.
+    pub unfold: f32,
+    pub hover_entry: Option<usize>,
+}
+
+impl BarState {
+    /// How many of its entries are favorites; they come first.
+    pub fn pinned(&self) -> usize {
+        self.entries.iter().filter(|entry| entry.pinned).count()
+    }
+}
+
+/// The launcher, while it is open: a drawer beside an upright bar, a panel
+/// above a lying one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drawer {
     pub id: window::Id,
+    /// The screen it is on: the one of the bar that opened it.
+    pub screen: OutputRole,
+    pub orientation: Orientation,
     pub query: String,
     /// The page of the grid of applications, from 0.
     pub page: usize,
@@ -81,12 +109,21 @@ pub struct Drawer {
     pub confirm: Option<SessionAction>,
     /// What the last session action did, when it was only simulated.
     pub note: Option<String>,
-    /// How wide the drawer is now.
+    /// How wide the drawer is now (upright).
     pub width: f32,
+    /// How high the panel is now (lying).
+    pub height: f32,
     /// The user is dragging its edge.
     pub resizing: bool,
-    /// The width of the screen it is on, once the surface says.
-    screen: Option<f32>,
+    /// The size of the screen it is on, once the surface says.
+    pub surface: Option<Size>,
+}
+
+impl Drawer {
+    /// How many columns the grid the arrow keys walk has.
+    pub fn columns(&self) -> usize {
+        drawer::columns(self.orientation, !self.query.trim().is_empty())
+    }
 }
 
 /// Something of the drawer that can be opened.
@@ -121,16 +158,18 @@ pub enum Message {
     Window(window::Id, window::Event),
     /// The edge of the drawer is grabbed, dragged to a place, let go.
     ResizeStart,
-    ResizeTo(f32),
+    ResizeTo(Point),
     ResizeEnd,
     Closed(window::Id),
-    BarHover(bool),
-    EntryHover(Option<usize>),
-    EntryPress(usize),
-    EntryRelease(usize),
-    EntryMiddle(usize),
-    EntryMenu(usize),
-    Launcher,
+    /// What happens on a bar says which bar.
+    BarHover(window::Id, bool),
+    EntryHover(window::Id, Option<usize>),
+    EntryPress(window::Id, usize),
+    EntryRelease(window::Id, usize),
+    EntryMiddle(window::Id, usize),
+    EntryMenu(window::Id, usize),
+    /// Opens or closes the launcher, on this screen if it can be.
+    Launcher(Option<OutputRole>),
     Menu(MenuAction),
     Key(keyboard::Event),
     Query(String),
@@ -166,23 +205,17 @@ pub struct Dock {
     pub snapshot: Snapshot,
     link: Option<UnboundedSender<Command>>,
     links: HashMap<Backend, UnboundedSender<Request>>,
-    /// The screen the dock lives on.
-    pub here: OutputRole,
-    pub entries: Vec<Entry>,
+    /// The bars shown, one per screen that has a dock.
+    pub bars: Vec<BarState>,
     pub unread: Vec<(String, u32)>,
     pub now: DateTime<Local>,
     pub user: String,
 
-    pub bar: Option<window::Id>,
-    bar_height: u32,
-    hovered: bool,
-    /// From 0 (folded) to 1 (unfolded).
-    pub unfold: f32,
     last_frame: Option<Instant>,
-    pub hover_entry: Option<usize>,
     pub drag: Option<Drag>,
-    /// The menu, with the key of its application.
-    pub menu: Option<(window::Id, String)>,
+    /// The menu, with the bar it opened from and the key of its
+    /// application.
+    pub menu: Option<(window::Id, window::Id, String)>,
     pub drawer: Option<Drawer>,
 
     pub audio: Audio,
@@ -258,16 +291,10 @@ impl Dock {
             snapshot,
             link: None,
             links: HashMap::new(),
-            here: OutputRole::Left,
-            entries: Vec::new(),
+            bars: Vec::new(),
             now: Local::now(),
             user: user_name(),
-            bar: None,
-            bar_height: 0,
-            hovered: false,
-            unfold: 0.0,
             last_frame: None,
-            hover_entry: None,
             drag: None,
             menu: None,
             drawer: None,
@@ -277,19 +304,15 @@ impl Dock {
             night_light: false,
             ticks: 0,
         };
-        dock.rebuild_entries();
-
         // Looking icons up reads many directories: off the interface.
         let mut names: Vec<String> = dock
-            .apps
+            .catalog
+            .apps()
             .iter()
             .filter_map(|app| app.icon.clone())
             .collect();
-        names.extend(
-            dock.entries
-                .iter()
-                .filter_map(|entry| entry.identity.icon.clone()),
-        );
+        let favorites = dock.config.favorites.iter();
+        names.extend(favorites.filter_map(|name| dock.identify(name).icon));
         let icons = Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || Icons::load(names))
@@ -298,9 +321,9 @@ impl Dock {
             },
             Message::IconsLoaded,
         );
-        let mut tasks = vec![icons, dock.show_bar()];
+        let mut tasks = vec![icons, dock.show_bars()];
         if dock.options.drawer {
-            tasks.push(Task::done(Message::Launcher));
+            tasks.push(Task::done(Message::Launcher(None)));
         }
         (dock, Task::batch(tasks))
     }
@@ -314,11 +337,6 @@ impl Dock {
         identify(&self.catalog, &self.games, name)
     }
 
-    /// How many entries of the bar are favorites; they come first.
-    pub fn pinned(&self) -> usize {
-        self.entries.iter().filter(|entry| entry.pinned).count()
-    }
-
     pub fn unread_of(&self, entry: &Entry) -> u32 {
         let named = |name: &String| entry.identity.names.iter().any(|own| own == name);
         let found = self
@@ -328,112 +346,157 @@ impl Dock {
         found.map_or(0, |(_, count)| *count)
     }
 
-    /// The screen of the dock, as the compositor describes it.
-    fn screen(&self) -> Option<&coquille_ipc::Screen> {
+    pub fn bar(&self, id: window::Id) -> Option<&BarState> {
+        self.bars.iter().find(|bar| bar.id == id)
+    }
+
+    fn bar_mut(&mut self, id: window::Id) -> Option<&mut BarState> {
+        self.bars.iter_mut().find(|bar| bar.id == id)
+    }
+
+    /// The bar of a screen, when it has one.
+    pub fn bar_on(&self, screen: OutputRole) -> Option<&BarState> {
+        self.bars.iter().find(|bar| bar.screen == screen)
+    }
+
+    /// A screen, as the compositor describes it.
+    fn screen(&self, role: OutputRole) -> Option<&coquille_ipc::Screen> {
         self.snapshot
             .screens
             .iter()
-            .find(|screen| screen.role == self.here)
+            .find(|screen| screen.role == role)
     }
 
-    fn rebuild_entries(&mut self) {
+    /// What a bar on `here` shows.
+    fn entries_for(&self, here: OutputRole) -> Vec<Entry> {
         let world = bar::World {
             favorites: &self.config.favorites,
             windows: &self.snapshot.windows,
             screens: &self.snapshot.screens,
             habits: &self.snapshot.habits,
-            here: self.here,
+            here,
         };
-        let (catalog, games) = (&self.catalog, &self.games);
-        self.entries = bar::entries(&world, &|name| identify(catalog, games, name));
+        bar::entries(&world, &|name| self.identify(name))
     }
 
-    /// Opens the bar once the dock knows which output is its screen.
-    fn show_bar(&mut self) -> Task<Message> {
-        if self.bar.is_some() {
-            return Task::none();
+    fn rebuild_entries(&mut self) {
+        let lists: Vec<Vec<Entry>> = self
+            .bars
+            .iter()
+            .map(|bar| self.entries_for(bar.screen))
+            .collect();
+        for (bar, entries) in self.bars.iter_mut().zip(lists) {
+            bar.entries = entries;
         }
+    }
+
+    /// Opens the bar of each screen that must have one, once the dock knows
+    /// which output that screen is.
+    fn show_bars(&mut self) -> Task<Message> {
         let simulated = !self.options.is_real(Backend::Compositor);
-        let named = self.options.output.clone();
-        let from_compositor = || self.screen().map(|screen| screen.name.clone());
-        let output = match (named, simulated) {
-            (Some(name), _) => OutputOption::OutputName(name),
-            (None, true) => OutputOption::Active,
-            (None, false) => match from_compositor() {
-                Some(name) => OutputOption::OutputName(name),
-                // Not known yet: the state of the compositor will tell.
-                None => return Task::none(),
-            },
-        };
-        let height = self.wanted_bar_height();
-        self.bar_height = height;
-        let (id, task) = Message::layershell_open(NewLayerShellSettings {
-            size: Some((ui::bar::SURFACE_WIDTH, height)),
-            layer: Layer::Top,
-            anchor: Anchor::Left,
-            exclusive_zone: Some(ui::bar::EXCLUSIVE_ZONE),
-            margin: None,
-            keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: output,
-            events_transparent: false,
-            namespace: Some("coquille-dock".to_owned()),
-        });
-        self.bar = Some(id);
-        task
-    }
-
-    fn wanted_bar_height(&self) -> u32 {
-        let pinned = self.pinned();
-        ui::bar::surface_height(pinned, self.entries.len() - pinned)
-    }
-
-    /// Gives the bar the height its entries need, and limits what takes
-    /// the pointer to what shows.
-    fn fit_bar(&mut self) -> Task<Message> {
-        let Some(id) = self.bar else {
-            return Task::none();
-        };
-        let height = self.wanted_bar_height();
-        let resize = if height == self.bar_height {
-            Task::none()
-        } else {
-            self.bar_height = height;
-            Task::done(Message::SizeChange {
+        let mut tasks = Vec::new();
+        for (index, (screen, orientation)) in self.config.docks.clone().into_iter().enumerate() {
+            if self.bar_on(screen).is_some() {
+                continue;
+            }
+            // `--output` names the screen of the first dock; a made-up
+            // world has no real output to put the others on.
+            let named = self.options.output.clone().filter(|_| index == 0);
+            let output = match (named, simulated) {
+                (Some(name), _) => OutputOption::OutputName(name),
+                (None, true) if index == 0 => OutputOption::Active,
+                (None, true) => continue,
+                (None, false) => match self.screen(screen) {
+                    Some(known) => OutputOption::OutputName(known.name.clone()),
+                    // Not known yet: the state of the compositor will tell.
+                    None => continue,
+                },
+            };
+            let entries = self.entries_for(screen);
+            let pinned = entries.iter().filter(|entry| entry.pinned).count();
+            let size = ui::bar::surface_size(orientation, pinned, entries.len() - pinned);
+            let anchor = match orientation {
+                Orientation::Vertical => Anchor::Left,
+                Orientation::Horizontal => Anchor::Bottom,
+            };
+            let (id, task) = Message::layershell_open(NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Top,
+                anchor,
+                exclusive_zone: Some(ui::bar::EXCLUSIVE_ZONE),
+                margin: None,
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: output,
+                events_transparent: false,
+                namespace: Some("coquille-dock".to_owned()),
+            });
+            self.bars.push(BarState {
                 id,
-                size: (ui::bar::SURFACE_WIDTH, height),
-            })
-        };
-        resize.chain(self.input_region())
+                screen,
+                orientation,
+                entries,
+                size,
+                hovered: false,
+                unfold: 0.0,
+                hover_entry: None,
+            });
+            tasks.push(task);
+        }
+        Task::batch(tasks)
     }
 
-    /// The bar takes the pointer where it shows only: folded, the windows
-    /// beside it stay clickable.
-    fn input_region(&self) -> Task<Message> {
-        let Some(id) = self.bar else {
+    /// Gives each bar the size its entries need, and limits what takes the
+    /// pointer to what shows.
+    fn fit_bars(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        for index in 0..self.bars.len() {
+            let bar = &self.bars[index];
+            let (id, pinned) = (bar.id, bar.pinned());
+            let size = ui::bar::surface_size(bar.orientation, pinned, bar.entries.len() - pinned);
+            let resize = if size == bar.size {
+                Task::none()
+            } else {
+                self.bars[index].size = size;
+                Task::done(Message::SizeChange { id, size })
+            };
+            tasks.push(resize.chain(self.input_region(id)));
+        }
+        Task::batch(tasks)
+    }
+
+    /// A bar takes the pointer where it shows only: the windows beside it
+    /// stay clickable.
+    fn input_region(&self, id: window::Id) -> Task<Message> {
+        let Some(bar) = self.bar(id) else {
             return Task::none();
         };
-        let width = if self.hovered || self.unfold > 0.0 {
-            ui::bar::UNFOLDED_REACH
-        } else {
-            ui::bar::EXCLUSIVE_ZONE.unsigned_abs()
-        };
-        let (width, height) = (width as i32, self.bar_height as i32);
+        let unfolded = bar.hovered || bar.unfold > 0.0;
+        let (x, y, width, height) = ui::bar::input_region(bar.orientation, bar.size, unfolded);
         Task::done(Message::SetInputRegion {
             id,
-            callback: ActionCallback::new(move |region| region.add(0, 0, width, height)),
+            callback: ActionCallback::new(move |region| region.add(x, y, width, height)),
         })
     }
 
-    /// The surface of the drawer says how wide its screen is: the drawer
-    /// keeps inside it.
-    fn fit_drawer(&mut self, screen: f32) {
+    /// The surface of the launcher says how large its screen is: the
+    /// launcher keeps inside it.
+    fn fit_drawer(&mut self, screen: Size) {
         if let Some(drawer) = &mut self.drawer {
-            drawer.screen = Some(screen);
+            drawer.surface = Some(screen);
         }
-        let wanted = self.drawer.as_ref().map(|drawer| drawer.width);
-        let width = self.drawer_width(wanted) as f32;
+        let wanted = self
+            .drawer
+            .as_ref()
+            .map(|drawer| (drawer.width, drawer.height));
+        let Some((width, height)) = wanted else {
+            return;
+        };
+        let (width, height) = (
+            self.drawer_width(Some(width)) as f32,
+            self.drawer_height(Some(height)) as f32,
+        );
         if let Some(drawer) = &mut self.drawer {
-            drawer.width = width;
+            (drawer.width, drawer.height) = (width, height);
         }
     }
 
@@ -521,18 +584,29 @@ impl Dock {
         self.save_config(move |text| config::with_favorites(text, &favorites));
     }
 
-    fn toggle_drawer(&mut self) -> Task<Message> {
-        if let Some(drawer) = self.drawer.take() {
-            return window::close(drawer.id);
+    /// Opens the launcher, or closes it. It opens on the screen asked for
+    /// when that screen has a dock and no game, else on the first screen
+    /// that does; its shape follows the bar of that screen.
+    fn toggle_drawer(&mut self, asked: Option<OutputRole>) -> Task<Message> {
+        if self.drawer.is_some() {
+            return self.update(Message::CloseDrawer);
         }
-        // No panel on a screen held by a game.
-        if self.screen().is_some_and(|screen| screen.anchored) {
+        let held = |role| self.screen(role).is_some_and(|screen| screen.anchored);
+        let docks: Vec<(OutputRole, bool)> = self
+            .bars
+            .iter()
+            .map(|bar| (bar.screen, held(bar.screen)))
+            .collect();
+        let picked = bar::launcher_screen(&docks, asked).and_then(|screen| self.bar_on(screen));
+        let Some((screen, orientation)) = picked.map(|bar| (bar.screen, bar.orientation)) else {
             return Task::none();
-        }
-        let output = match (&self.options.output, self.screen()) {
-            (Some(name), _) => OutputOption::OutputName(name.clone()),
-            (None, Some(screen)) if self.options.is_real(Backend::Compositor) => {
-                OutputOption::OutputName(screen.name.clone())
+        };
+        let first = self.config.docks.first().map(|(first, _)| *first) == Some(screen);
+        let named = self.options.output.clone().filter(|_| first);
+        let output = match (named, self.screen(screen)) {
+            (Some(name), _) => OutputOption::OutputName(name),
+            (None, Some(known)) if self.options.is_real(Backend::Compositor) => {
+                OutputOption::OutputName(known.name.clone())
             }
             _ => OutputOption::Active,
         };
@@ -540,7 +614,7 @@ impl Dock {
             size: None,
             layer: Layer::Overlay,
             anchor: Anchor::Left | Anchor::Right | Anchor::Top | Anchor::Bottom,
-            // Over everything, the bar included: the drawer draws its own.
+            // Over everything, the bar included: the launcher draws its own.
             exclusive_zone: Some(-1),
             margin: None,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
@@ -550,6 +624,8 @@ impl Dock {
         });
         self.drawer = Some(Drawer {
             id,
+            screen,
+            orientation,
             query: String::new(),
             page: 0,
             selected: None,
@@ -557,31 +633,43 @@ impl Dock {
             confirm: None,
             note: None,
             width: self.drawer_width(None) as f32,
+            height: self.drawer_height(None) as f32,
             resizing: false,
-            screen: None,
+            surface: None,
         });
         self.close_menu().chain(task)
+    }
+
+    /// The size of the screen of the launcher: what its surface says, and
+    /// before that the compositor's word.
+    fn drawer_screen(&self) -> Option<Size> {
+        let drawer = self.drawer.as_ref()?;
+        let told = || {
+            let real = self.options.is_real(Backend::Compositor);
+            let screen = self.screen(drawer.screen).filter(|_| real)?;
+            Some(Size::new(screen.width as f32, screen.height as f32))
+        };
+        drawer.surface.or_else(told)
     }
 
     /// The width of the drawer when `wanted` is asked for; without it, the
     /// width kept in the configuration.
     fn drawer_width(&self, wanted: Option<f32>) -> u32 {
         let kept = self.config.drawer_width.map(|width| width as f32);
-        // The surface of the drawer covers its screen: its width is the
-        // most reliable one. Before it is known, the compositor's word.
-        let surface = self.drawer.as_ref().and_then(|drawer| drawer.screen);
-        let told = || {
-            let real = self.options.is_real(Backend::Compositor);
-            self.screen()
-                .filter(|_| real)
-                .map(|screen| screen.width as f32)
-        };
-        drawer::width(wanted.or(kept), surface.or_else(told))
+        let screen = self.drawer_screen().map(|screen| screen.width);
+        drawer::width(wanted.or(kept), screen)
+    }
+
+    /// The height of the horizontal launcher, likewise.
+    fn drawer_height(&self, wanted: Option<f32>) -> u32 {
+        let kept = self.config.drawer_height.map(|height| height as f32);
+        let screen = self.drawer_screen().map(|screen| screen.height);
+        drawer::height(wanted.or(kept), screen)
     }
 
     fn close_menu(&mut self) -> Task<Message> {
         match self.menu.take() {
-            Some((id, _)) => window::close(id),
+            Some((id, ..)) => window::close(id),
             None => Task::none(),
         }
     }
@@ -636,20 +724,27 @@ impl Dock {
                     .replace(now)
                     .map_or(Duration::ZERO, |last| now - last);
                 let step = elapsed.as_secs_f32() / UNFOLD.as_secs_f32();
-                let target = if self.hovered { 1.0 } else { 0.0 };
-                let before = self.unfold;
-                self.unfold = if target > before {
-                    (before + step).min(1.0)
-                } else {
-                    (before - step).max(0.0)
-                };
-                if self.unfold == target {
-                    self.last_frame = None;
-                    // Folded again: the windows beside the bar get the
-                    // pointer back.
-                    return self.input_region();
+                let mut settled = Vec::new();
+                for bar in &mut self.bars {
+                    let target = unfold_target(bar);
+                    if bar.unfold == target {
+                        continue;
+                    }
+                    bar.unfold = if target > bar.unfold {
+                        (bar.unfold + step).min(1.0)
+                    } else {
+                        (bar.unfold - step).max(0.0)
+                    };
+                    if bar.unfold == target {
+                        settled.push(bar.id);
+                    }
                 }
-                Task::none()
+                if self.bars.iter().all(|bar| bar.unfold == unfold_target(bar)) {
+                    self.last_frame = None;
+                }
+                // Folded again: the windows beside the bar get the pointer
+                // back.
+                Task::batch(settled.into_iter().map(|id| self.input_region(id)))
             }
             Message::Compositor(update) => self.compositor(update),
             Message::Backend(update) => self.backend(update),
@@ -658,18 +753,18 @@ impl Dock {
                 Task::none()
             }
             Message::Window(id, window::Event::Opened { size, .. }) => {
-                if self.bar == Some(id) {
-                    return self.input_region();
+                if self.bar(id).is_some() {
+                    return self.input_region(id);
                 }
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
-                    self.fit_drawer(size.width);
+                    self.fit_drawer(size);
                     return operation::focus(SEARCH);
                 }
                 Task::none()
             }
             Message::Window(id, window::Event::Resized(size)) => {
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
-                    self.fit_drawer(size.width);
+                    self.fit_drawer(size);
                 }
                 Task::none()
             }
@@ -680,11 +775,29 @@ impl Dock {
                 }
                 Task::none()
             }
-            Message::ResizeTo(edge) => {
-                if self.drawer.as_ref().is_some_and(|drawer| drawer.resizing) {
-                    let width = self.drawer_width(Some(edge)) as f32;
-                    if let Some(drawer) = &mut self.drawer {
-                        drawer.width = width;
+            Message::ResizeTo(pointer) => {
+                let Some(drawer) = self.drawer.as_ref().filter(|drawer| drawer.resizing) else {
+                    return Task::none();
+                };
+                match drawer.orientation {
+                    // The right edge of the drawer follows the pointer.
+                    Orientation::Vertical => {
+                        let width = self.drawer_width(Some(pointer.x)) as f32;
+                        if let Some(drawer) = &mut self.drawer {
+                            drawer.width = width;
+                        }
+                    }
+                    // The top edge of the panel does; its foot stays on
+                    // the dock.
+                    Orientation::Horizontal => {
+                        let screen = self
+                            .drawer_screen()
+                            .map_or(pointer.y, |screen| screen.height);
+                        let foot = screen - ui::bar::EXCLUSIVE_ZONE as f32;
+                        let height = self.drawer_height(Some(foot - pointer.y)) as f32;
+                        if let Some(drawer) = &mut self.drawer {
+                            drawer.height = height;
+                        }
                     }
                 }
                 Task::none()
@@ -695,49 +808,62 @@ impl Dock {
                 };
                 drawer.resizing = false;
                 // Kept for the next time, here and in the configuration.
-                let width = drawer.width.round() as u32;
-                if self.config.drawer_width != Some(width) {
-                    self.config.drawer_width = Some(width);
-                    self.save_config(move |text| config::with_drawer_width(text, width));
+                let (width, height) = (drawer.width.round() as u32, drawer.height.round() as u32);
+                match drawer.orientation {
+                    Orientation::Vertical if self.config.drawer_width != Some(width) => {
+                        self.config.drawer_width = Some(width);
+                        self.save_config(move |text| config::with_drawer_width(text, width));
+                    }
+                    Orientation::Horizontal if self.config.drawer_height != Some(height) => {
+                        self.config.drawer_height = Some(height);
+                        self.save_config(move |text| config::with_drawer_height(text, height));
+                    }
+                    _ => {}
                 }
                 Task::none()
             }
             Message::Closed(id) => {
                 // A click outside the menu closes it without telling more;
-                // the bar, kept unfolded for it, folds again.
-                if self.menu.as_ref().is_some_and(|(menu, _)| *menu == id) {
-                    self.menu = None;
-                    self.hovered = false;
-                    self.hover_entry = None;
-                    return self.input_region();
+                // the bar, kept as it was for it, folds again.
+                if let Some((_, bar, _)) = self.menu.take_if(|(menu, ..)| *menu == id) {
+                    if let Some(bar) = self.bar_mut(bar) {
+                        bar.hovered = false;
+                        bar.hover_entry = None;
+                    }
+                    return self.input_region(bar);
                 }
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
                     self.drawer = None;
                 }
-                if self.bar == Some(id) {
-                    self.bar = None;
-                }
+                self.bars.retain(|bar| bar.id != id);
                 Task::none()
             }
-            Message::BarHover(hovered) => {
-                // The menu keeps the bar as it is while it is open.
-                if self.menu.is_some() && !hovered {
+            Message::BarHover(id, hovered) => {
+                // The menu keeps its bar as it is while it is open.
+                let has_menu = self.menu.as_ref().is_some_and(|(_, bar, _)| *bar == id);
+                if has_menu && !hovered {
                     return Task::none();
                 }
-                self.hovered = hovered;
+                let Some(bar) = self.bar_mut(id) else {
+                    return Task::none();
+                };
+                bar.hovered = hovered;
                 if !hovered {
-                    self.hover_entry = None;
+                    bar.hover_entry = None;
                     if let Some(drag) = self.drag.take() {
                         if drag.moved {
                             self.save_favorites();
                         }
                     }
                 }
-                self.input_region()
+                self.input_region(id)
             }
-            Message::EntryHover(index) => {
-                self.hover_entry = index;
-                let pinned = self.pinned();
+            Message::EntryHover(id, index) => {
+                let Some(bar) = self.bar_mut(id) else {
+                    return Task::none();
+                };
+                bar.hover_entry = index;
+                let pinned = bar.pinned();
                 if let (Some(drag), Some(to)) = (self.drag.as_mut(), index) {
                     if to < pinned && to != drag.at {
                         bar::reorder(&mut self.config.favorites, drag.at, to);
@@ -748,20 +874,22 @@ impl Dock {
                 }
                 Task::none()
             }
-            Message::EntryPress(index) => {
-                let pinned = self.entries.get(index).is_some_and(|entry| entry.pinned);
+            Message::EntryPress(id, index) => {
+                let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
+                let pinned = entry.is_some_and(|entry| entry.pinned);
                 self.drag = pinned.then_some(Drag {
                     at: index,
                     moved: false,
                 });
                 self.close_menu()
             }
-            Message::EntryRelease(index) => {
+            Message::EntryRelease(id, index) => {
                 if let Some(Drag { moved: true, .. }) = self.drag.take() {
                     self.save_favorites();
                     return Task::none();
                 }
-                let Some(entry) = self.entries.get(index).cloned() else {
+                let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
+                let Some(entry) = entry.cloned() else {
                     return Task::none();
                 };
                 match bar::left_click(&entry) {
@@ -773,44 +901,50 @@ impl Dock {
                 }
                 Task::none()
             }
-            Message::EntryMiddle(index) => {
-                if let Some(command) = self
-                    .entries
-                    .get(index)
-                    .and_then(|entry| entry.identity.command.as_ref())
-                {
+            Message::EntryMiddle(id, index) => {
+                let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
+                if let Some(command) = entry.and_then(|entry| entry.identity.command.as_ref()) {
                     spawn(command);
                 }
                 Task::none()
             }
-            Message::EntryMenu(index) => {
-                let (Some(bar), Some(entry)) = (self.bar, self.entries.get(index)) else {
+            Message::EntryMenu(id, index) => {
+                let Some(bar) = self.bar(id) else {
+                    return Task::none();
+                };
+                let Some(entry) = bar.entries.get(index) else {
                     return Task::none();
                 };
                 let menu = bar::menu(entry);
                 let size = (ui::menu::WIDTH, ui::menu::height(&menu));
-                let anchor = ui::bar::entry_rect(index, self.pinned(), self.unfold > 0.5);
-                let settings = IcedNewPopupSettings::new(bar, size, anchor)
-                    .anchor(PopupAnchor::TopRight)
-                    .gravity(PopupGravity::BottomRight);
+                let unfolded = bar.unfold > 0.5;
+                let anchor = ui::bar::entry_rect(bar.orientation, index, bar.pinned(), unfolded);
+                // Beside an upright bar, above a lying one.
+                let (corner, grows) = match bar.orientation {
+                    Orientation::Vertical => (PopupAnchor::TopRight, PopupGravity::BottomRight),
+                    Orientation::Horizontal => (PopupAnchor::Top, PopupGravity::Top),
+                };
+                let settings = IcedNewPopupSettings::new(id, size, anchor)
+                    .anchor(corner)
+                    .gravity(grows);
                 let key = entry.identity.key.clone();
                 let close = self.close_menu();
-                let (id, open) = Message::popup_open(settings);
-                self.menu = Some((id, key));
+                let (popup, open) = Message::popup_open(settings);
+                self.menu = Some((popup, id, key));
                 self.drag = None;
                 close.chain(open)
             }
-            Message::Launcher => self.toggle_drawer(),
+            Message::Launcher(asked) => self.toggle_drawer(asked),
             Message::Menu(action) => {
-                let Some((_, key)) = &self.menu else {
+                let Some((_, bar, key)) = self.menu.clone() else {
                     return Task::none();
                 };
-                let Some(entry) = self
-                    .entries
+                let entries = self.bar(bar).map(|bar| bar.entries.as_slice());
+                let entry = entries
+                    .unwrap_or_default()
                     .iter()
-                    .find(|entry| entry.identity.key == *key)
-                    .cloned()
-                else {
+                    .find(|entry| entry.identity.key == key);
+                let Some(entry) = entry.cloned() else {
                     return self.close_menu();
                 };
                 match action {
@@ -848,8 +982,10 @@ impl Dock {
                     MenuAction::Close(window) => self.send(Command::Close { window }),
                 }
                 self.rebuild_entries();
-                self.hovered = false;
-                Task::batch([self.close_menu(), self.fit_bar()])
+                if let Some(bar) = self.bar_mut(bar) {
+                    bar.hovered = false;
+                }
+                Task::batch([self.close_menu(), self.fit_bars()])
             }
             Message::Key(event) => self.key(event),
             Message::Query(query) => {
@@ -1062,17 +1198,22 @@ impl Dock {
                 self.link = None;
                 Task::none()
             }
-            compositor::Update::Event(Event::ToggleLauncher) => self.toggle_drawer(),
+            compositor::Update::Event(Event::ToggleLauncher { screen }) => {
+                self.toggle_drawer(screen)
+            }
             compositor::Update::Event(Event::State(snapshot)) => {
                 self.snapshot = snapshot;
+                let show = self.show_bars();
                 self.rebuild_entries();
-                // A game took the screen of the dock: the drawer goes.
-                let anchored = self.screen().is_some_and(|screen| screen.anchored);
-                let close = match self.drawer.take_if(|_| anchored) {
-                    Some(drawer) => window::close(drawer.id),
-                    None => Task::none(),
+                // A game took the screen of the launcher: the launcher goes.
+                let screen = self.drawer.as_ref().map(|drawer| drawer.screen);
+                let held = screen.and_then(|role| self.screen(role));
+                let close = if held.is_some_and(|screen| screen.anchored) {
+                    self.update(Message::CloseDrawer)
+                } else {
+                    Task::none()
                 };
-                Task::batch([close, self.show_bar(), self.fit_bar()])
+                Task::batch([close, show, self.fit_bars()])
             }
         }
     }
@@ -1139,7 +1280,7 @@ impl Dock {
             self.hits(&open.query).len()
         };
         if let Some(open) = &mut self.drawer {
-            open.selected = drawer::step(open.selected, count, drawer::COLUMNS, step);
+            open.selected = drawer::step(open.selected, count, open.columns(), step);
         }
         Task::none()
     }
@@ -1154,7 +1295,7 @@ impl Dock {
         if self.drawer.as_ref().is_some_and(|drawer| drawer.resizing) {
             subscriptions.push(iced::event::listen_with(|event, _, _| match event {
                 iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                    Some(Message::ResizeTo(position.x))
+                    Some(Message::ResizeTo(position))
                 }
                 iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                     Some(Message::ResizeEnd)
@@ -1172,8 +1313,7 @@ impl Dock {
         };
         subscriptions.push(iced::time::every(pace).map(|_| Message::Tick));
 
-        let target = if self.hovered { 1.0 } else { 0.0 };
-        if self.unfold != target {
+        if self.bars.iter().any(|bar| bar.unfold != unfold_target(bar)) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
         if self.drawer.is_some() {
@@ -1206,11 +1346,13 @@ impl Dock {
     }
 
     pub fn view(&self, id: window::Id) -> Element<'_, Message> {
-        if self.bar == Some(id) {
-            return ui::bar::view(self);
+        if let Some(bar) = self.bar(id) {
+            return ui::bar::view(self, bar);
         }
-        if let Some((_, key)) = self.menu.as_ref().filter(|(menu, _)| *menu == id) {
-            if let Some(entry) = self.entries.iter().find(|entry| entry.identity.key == *key) {
+        if let Some((_, bar, key)) = self.menu.as_ref().filter(|(menu, ..)| *menu == id) {
+            let entries = self.bar(*bar).map(|bar| bar.entries.as_slice());
+            let mut entries = entries.unwrap_or_default().iter();
+            if let Some(entry) = entries.find(|entry| entry.identity.key == *key) {
                 return ui::menu::view(self, entry);
             }
         }
@@ -1225,6 +1367,16 @@ impl Dock {
             background_color: Color::TRANSPARENT,
             text_color: self.palette().text,
         }
+    }
+}
+
+/// How far a bar should be unfolded: an upright bar unfolds under the
+/// pointer, a lying one shows a label above the icon instead.
+fn unfold_target(bar: &BarState) -> f32 {
+    if bar.hovered && bar.orientation == Orientation::Vertical {
+        1.0
+    } else {
+        0.0
     }
 }
 

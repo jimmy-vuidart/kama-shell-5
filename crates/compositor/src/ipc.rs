@@ -307,8 +307,11 @@ impl State {
     /// holds the pointer lets go of it, or the drawer could not be clicked.
     pub fn toggle_launcher(&mut self) {
         self.free_pointer();
+        // Each screen may have its dock: the launcher opens where the
+        // pointer is.
+        let screen = self.pointer_screen().map(|screen| screen.role);
         if let Some(ipc) = self.ipc.as_mut() {
-            ipc.broadcast(&Event::ToggleLauncher);
+            ipc.broadcast(&Event::ToggleLauncher { screen });
         }
     }
 

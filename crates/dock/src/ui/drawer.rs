@@ -1,5 +1,6 @@
-//! The drawer: search, pinned applications, every application by pages,
-//! games, and at its foot the control center with its mixer.
+//! The launcher: search, pinned applications, every application by pages,
+//! games, and the control center with its mixer. Beside an upright bar it is
+//! a drawer as high as the screen; above a lying bar, a wide panel.
 
 use iced::widget::text::Wrapping;
 use iced::widget::{
@@ -12,9 +13,9 @@ use super::icons::{self, Glyph};
 use super::style::{self, Palette};
 use crate::app::{Dock, Drawer, Message, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
-use crate::model::Identity;
-use crate::model::drawer::{self, COLUMNS};
+use crate::model::drawer::{self, PAGE};
 use crate::model::mixer;
+use crate::model::{Identity, Orientation};
 
 /// The room of the bar, drawn again inside the drawer.
 const BAR: f32 = 60.0;
@@ -28,6 +29,9 @@ const PINNED: usize = 7;
 
 pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
     let palette = dock.palette();
+    if drawer.orientation == Orientation::Horizontal {
+        return lying(dock, drawer, palette);
+    }
     // What is left of the screen is dimmed, and a click there closes.
     let scrim = container(space())
         .width(Length::Fill)
@@ -69,16 +73,18 @@ fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
 }
 
 fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
-    let bar = container(super::bar::bar(dock, 0.0, false, palette))
-        .width(BAR)
-        .center_y(Length::Fill);
+    let bar: Element<'_, Message> = match dock.bar_on(drawer.screen) {
+        Some(state) => super::bar::still(dock, state, palette),
+        None => space().into(),
+    };
+    let bar = container(bar).width(BAR).center_y(Length::Fill);
 
     let mut content: Column<'_, Message> = column![search(drawer, palette)].spacing(12);
     if drawer.query.trim().is_empty() {
         // Nothing pinned: no empty heading.
         if !dock.config.pinned.is_empty() {
             content = content
-                .push(pinned(dock, drawer, palette))
+                .push(pinned(dock, drawer.width, palette))
                 .push(rule(palette));
         }
         content = content
@@ -162,9 +168,9 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
 }
 
 /// The pinned applications, each with the place it opens in.
-fn pinned<'a>(dock: &'a Dock, drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
+fn pinned<'a>(dock: &'a Dock, width: f32, palette: Palette) -> Element<'a, Message> {
     // The room a name has under its icon, whatever the width of the drawer.
-    let tile = (drawer.width - BAR - 20.0) / PINNED as f32 - 4.0;
+    let tile = (width - BAR - 20.0) / PINNED as f32 - 4.0;
     let mut tiles: Row<'_, Message> = row![].spacing(4);
     let mut shown = Vec::new();
     for name in &dock.config.pinned {
@@ -217,6 +223,7 @@ fn cell<'a>(
     target: Target,
     identity: &Identity,
     selected: bool,
+    height: f32,
     palette: Palette,
 ) -> Element<'a, Message> {
     // Two lines at most, as in the design; a longer name is cut.
@@ -240,21 +247,21 @@ fn cell<'a>(
     };
     button(container(content).center_y(Length::Fill))
         .width(Length::FillPortion(1))
-        .height(44)
+        .height(height)
         .padding(Padding::from([0.0, 5.0]))
         .on_press(Message::Open(target))
         .style(style::tinted(idle, palette.hover, 10.0))
         .into()
 }
 
-/// Cells in rows of six; the last row is filled with blanks so that the
-/// cells keep their width.
-fn grid<'a>(cells: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+/// Cells in rows of `columns`; the last row is filled with blanks so that
+/// the cells keep their width.
+fn grid<'a>(cells: Vec<Element<'a, Message>>, columns: usize) -> Element<'a, Message> {
     let mut rows: Column<'_, Message> = column![].spacing(4);
     let mut cells = cells.into_iter().peekable();
     while cells.peek().is_some() {
         let mut line: Row<'_, Message> = row![].spacing(4);
-        for _ in 0..COLUMNS {
+        for _ in 0..columns {
             line = line.push(match cells.next() {
                 Some(cell) => cell,
                 None => space().width(Length::FillPortion(1)).into(),
@@ -287,8 +294,11 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
             arrow
         }
     };
+    // Lying down the grid is a narrow column: no room for a button per page.
+    let compact = drawer.orientation == Orientation::Horizontal;
+    let numbered = if compact { 0 } else { pages };
     let mut pager: Row<'_, Message> = row![arrow(Glyph::ChevronLeft, false, page > 0)].spacing(4);
-    for number in 0..pages {
+    for number in 0..numbered {
         let current = number == page;
         let color = if current {
             palette.on_accent()
@@ -320,9 +330,17 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
     }
     pager = pager.push(arrow(Glyph::ChevronRight, true, page + 1 < pages));
 
-    let header = heading("Applications", drawer::summary(count, page), palette)
+    let summary = if compact {
+        format!("page {} sur {pages}", page + 1)
+    } else {
+        drawer::summary(count, page)
+    };
+    let header = heading("Applications", summary, palette)
         .push(space().width(Length::Fill))
         .push(pager);
+    let columns = drawer::columns(drawer.orientation, false);
+    let rows = PAGE / columns;
+    let height = if compact { 34.0 } else { 44.0 };
     let cells = drawer::page(&dock.apps, page)
         .iter()
         .enumerate()
@@ -334,12 +352,13 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
                 Target::App(app.id.clone()),
                 &identity,
                 selected,
+                height,
                 palette,
             )
         });
-    // Always three rows high, so that the games do not jump on the last
-    // page.
-    let rows = container(grid(cells.collect())).height(3 * 44 + 2 * 4);
+    // Always as high as a full page, so that nothing jumps on the last one.
+    let full = rows as f32 * height + (rows - 1) as f32 * 4.0;
+    let rows = container(grid(cells.collect(), columns)).height(full);
     let body = mouse_area(rows).on_scroll(|delta| {
         let down = match delta {
             mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => y < 0.0,
@@ -358,15 +377,100 @@ fn results<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<
     };
     // Without an arrow key, Enter opens the first one: show it.
     let selected = drawer.selected.unwrap_or(0);
+    let columns = drawer.columns();
     let cells =
         hits.into_iter()
-            .take(4 * COLUMNS)
+            .take(4 * columns)
             .enumerate()
             .map(|(index, (target, identity))| {
-                cell(dock, target, &identity, index == selected, palette)
+                cell(dock, target, &identity, index == selected, 44.0, palette)
             });
-    column![heading("Résultats", detail, palette), grid(cells.collect())]
-        .spacing(8)
+    column![
+        heading("Résultats", detail, palette),
+        grid(cells.collect(), columns)
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// The picture of a game with its play mark, as wide as its place.
+fn cover<'a>(game: &crate::steam::Game, height: f32) -> Element<'a, Message> {
+    let picture: Element<'_, Message> = match &game.cover {
+        Some(path) => image(image::Handle::from_path(path))
+            .width(Length::Fill)
+            .height(height)
+            .content_fit(ContentFit::Cover)
+            .border_radius(8)
+            .into(),
+        None => {
+            let color = icons::tile_color(&game.name);
+            container(space())
+                .width(Length::Fill)
+                .height(height)
+                .style(move |_| style::fill(color, 8.0))
+                .into()
+        }
+    };
+    let play = container(icons::glyph(
+        Glyph::Play,
+        12.0,
+        Color::from_rgb8(0x1c, 0x22, 0x30),
+    ))
+    .center(18)
+    .style(|_| style::fill(Color::WHITE, 9.0));
+    let play = container(play)
+        .width(Length::Fill)
+        .height(height)
+        .padding(5)
+        .align_x(Alignment::End)
+        .align_y(Alignment::End);
+    stack![picture, play].into()
+}
+
+/// A game: its picture, its name under it.
+fn game_card<'a>(game: &crate::steam::Game, height: f32, palette: Palette) -> Element<'a, Message> {
+    let name = text(game.name.clone())
+        .size(12)
+        .font(style::SEMIBOLD)
+        .color(palette.text)
+        .wrapping(Wrapping::None);
+    let name = container(name).width(Length::Fill).height(16).clip(true);
+    button(column![cover(game, height), name].spacing(6))
+        .width(Length::FillPortion(1))
+        .padding(4)
+        .on_press(Message::Open(Target::Game(game.id)))
+        .style(style::flat(palette.hover, 10.0))
+        .into()
+}
+
+/// The games of the lying launcher: a column of the ones played last.
+fn games_column<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+    let count = dock.games.len();
+    let title = text("Jeux")
+        .size(15)
+        .font(style::SEMIBOLD)
+        .color(palette.text);
+    let mut cards: Column<'_, Message> = column![title].spacing(6);
+    if count == 0 {
+        let nothing = text("Aucun jeu Steam installé.")
+            .size(12)
+            .color(palette.muted);
+        return cards.push(nothing).into();
+    }
+    for game in dock.games.iter().take(3) {
+        cards = cards.push(game_card(game, 62.0, palette));
+    }
+    let library = text(format!("Toute la ludothèque · {count} ›"))
+        .size(12)
+        .font(style::MEDIUM)
+        .color(palette.text);
+    cards
+        .push(
+            button(library)
+                .padding(Padding::from([5.0, 10.0]))
+                .on_press(Message::Library)
+                .style(style::tinted(palette.card, palette.hover, 8.0)),
+        )
         .into()
 }
 
@@ -393,49 +497,7 @@ fn games<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
 
     let mut cards: Row<'_, Message> = row![].spacing(10);
     for game in dock.games.iter().take(GAMES) {
-        let cover: Element<'_, Message> = match &game.cover {
-            Some(path) => image(image::Handle::from_path(path))
-                .width(Length::Fill)
-                .height(58)
-                .content_fit(ContentFit::Cover)
-                .border_radius(8)
-                .into(),
-            None => {
-                let color = icons::tile_color(&game.name);
-                container(space())
-                    .width(Length::Fill)
-                    .height(58)
-                    .style(move |_| style::fill(color, 8.0))
-                    .into()
-            }
-        };
-        let play = container(icons::glyph(
-            Glyph::Play,
-            12.0,
-            Color::from_rgb8(0x1c, 0x22, 0x30),
-        ))
-        .center(18)
-        .style(|_| style::fill(Color::WHITE, 9.0));
-        let play = container(play)
-            .width(Length::Fill)
-            .height(58)
-            .padding(5)
-            .align_x(Alignment::End)
-            .align_y(Alignment::End);
-        let name = text(game.name.clone())
-            .size(12)
-            .font(style::SEMIBOLD)
-            .color(palette.text)
-            .wrapping(Wrapping::None);
-        let name = container(name).width(Length::Fill).height(16).clip(true);
-        let content = column![stack![cover, play], name].spacing(6);
-        cards = cards.push(
-            button(content)
-                .width(Length::FillPortion(1))
-                .padding(4)
-                .on_press(Message::Open(Target::Game(game.id)))
-                .style(style::flat(palette.hover, 10.0)),
-        );
+        cards = cards.push(game_card(game, 58.0, palette));
     }
     for _ in count.min(GAMES)..GAMES {
         cards = cards.push(space().width(Length::FillPortion(1)));
@@ -555,19 +617,40 @@ fn control_center<'a>(
     let tile = |glyph, name, (detail, on, available): (String, bool, bool), toggle| {
         switch(glyph, name, detail, on, available, toggle, palette)
     };
-    let switches = row![
+    // Lying down, the control center is a narrow column: its switches go
+    // two by two, its sliders one under the other.
+    let narrow = drawer.orientation == Orientation::Horizontal;
+    let mut tiles = vec![
         tile(Glyph::Network, "Réseau", network, Toggle::Network),
         tile(Glyph::Bluetooth, "Bluetooth", bluetooth, Toggle::Bluetooth),
         tile(
             Glyph::DoNotDisturb,
             "Ne pas déranger",
             quiet,
-            Toggle::DoNotDisturb
+            Toggle::DoNotDisturb,
         ),
         tile(Glyph::Moon, "Éclairage nocturne", night, Toggle::NightLight),
-        tile(Glyph::Contrast, "Thème sombre", dark, Toggle::DarkTheme)
+        tile(Glyph::Contrast, "Thème sombre", dark, Toggle::DarkTheme),
     ]
-    .spacing(6);
+    .into_iter();
+    let per_row = if narrow { 2 } else { 5 };
+    let mut switches: Column<'_, Message> = column![].spacing(6);
+    loop {
+        let mut line: Row<'_, Message> = row![].spacing(6);
+        let mut filled = 0;
+        for tile in tiles.by_ref().take(per_row) {
+            line = line.push(tile);
+            filled += 1;
+        }
+        if filled == 0 {
+            break;
+        }
+        // A last row that is not full keeps the width of the others.
+        for _ in filled..per_row {
+            line = line.push(space().width(Length::FillPortion(1)));
+        }
+        switches = switches.push(line);
+    }
 
     let speaker = if dock.audio.muted {
         Glyph::Muted
@@ -617,21 +700,34 @@ fn control_center<'a>(
         Some(value) => level(value, palette, Message::Brightness),
         None => space().width(Length::Fill).into(),
     };
-    let sliders = row![
+    let volume = row![
         mute,
         level(dock.audio.volume, palette, Message::Volume),
-        per_app,
-        space().width(6),
-        icons::glyph(Glyph::Sun, 18.0, palette.text),
+        per_app
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    let light = row![
+        container(icons::glyph(Glyph::Sun, 18.0, palette.text)).center_x(30),
         brightness,
         screens_pill
     ]
     .spacing(10)
     .align_y(Alignment::Center);
+    let sliders: Element<'_, Message> = if narrow {
+        column![volume, light].spacing(8).into()
+    } else {
+        row![
+            volume.width(Length::FillPortion(1)),
+            light.width(Length::FillPortion(1))
+        ]
+        .spacing(16)
+        .into()
+    };
 
     let foot = match (drawer.confirm, &drawer.note) {
-        (Some(action), _) => confirmation(action, palette),
-        (None, note) => session(dock, note.as_deref(), palette),
+        (Some(action), _) => confirmation(action, narrow, palette),
+        (None, note) => session(dock, note.as_deref(), narrow, palette),
     };
     container(column![switches, sliders, rule(palette), foot].spacing(12))
         .padding(12)
@@ -640,7 +736,15 @@ fn control_center<'a>(
 }
 
 /// The user on the left; settings and the three ways out on the right.
-fn session<'a>(dock: &'a Dock, note: Option<&'a str>, palette: Palette) -> Element<'a, Message> {
+fn session<'a>(
+    dock: &'a Dock,
+    note: Option<&'a str>,
+    narrow: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
+    // In a narrow column the buttons are smaller, and the name does without
+    // its disc.
+    let (side, gap) = if narrow { (34.0, 6.0) } else { (40.0, 10.0) };
     let initials: String = dock
         .user
         .split_whitespace()
@@ -670,40 +774,39 @@ fn session<'a>(dock: &'a Dock, note: Option<&'a str>, palette: Palette) -> Eleme
         };
         let hover = style::mix(idle, color, 0.12);
         button(container(icons::glyph(glyph, 18.0, color)).center(Length::Fill))
-            .width(40)
-            .height(40)
+            .width(side)
+            .height(side)
             .padding(0)
             .on_press(message)
             .style(style::tinted(idle, hover, 10.0))
     };
-    row![
-        avatar,
-        who,
-        space().width(Length::Fill),
-        action(Glyph::Sliders, Message::Settings, false),
-        action(
+    let who = container(who).width(Length::Fill).clip(true);
+    let mut line: Row<'_, Message> = row![].spacing(gap).align_y(Alignment::Center);
+    if !narrow {
+        line = line.push(avatar);
+    }
+    line.push(who)
+        .push(action(Glyph::Sliders, Message::Settings, false))
+        .push(action(
             Glyph::Logout,
             Message::Session(SessionAction::Logout),
-            false
-        ),
-        action(
+            false,
+        ))
+        .push(action(
             Glyph::Restart,
             Message::Session(SessionAction::Restart),
-            false
-        ),
-        action(
+            false,
+        ))
+        .push(action(
             Glyph::Power,
             Message::Session(SessionAction::PowerOff),
-            true
-        )
-    ]
-    .spacing(10)
-    .align_y(Alignment::Center)
-    .into()
+            true,
+        ))
+        .into()
 }
 
 /// Nothing ends the session without a second click.
-fn confirmation<'a>(action: SessionAction, palette: Palette) -> Element<'a, Message> {
+fn confirmation<'a>(action: SessionAction, narrow: bool, palette: Palette) -> Element<'a, Message> {
     let question = text(action.question())
         .size(14)
         .font(style::SEMIBOLD)
@@ -730,11 +833,95 @@ fn confirmation<'a>(action: SessionAction, palette: Palette) -> Element<'a, Mess
         style::mix(style::DANGER, Color::BLACK, 0.12),
         10.0,
     ));
+    // In a narrow column the question goes above its two answers.
+    if narrow {
+        let answers = row![space().width(Length::Fill), cancel, confirm].spacing(10);
+        return column![question, answers].spacing(8).into();
+    }
     row![question, space().width(Length::Fill), cancel, confirm]
         .spacing(10)
         .height(40)
         .align_y(Alignment::Center)
         .into()
+}
+
+/// The launcher above a lying bar: a wide panel, centered, that never takes
+/// the whole width of the screen. Search on top, then three columns:
+/// applications, games, control center.
+fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
+    let scrim = container(space())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| style::fill(palette.scrim, 0.0));
+    let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
+
+    let screen = drawer.surface.map_or(1920.0, |surface| surface.width);
+    let width = drawer::panel_width(screen) as f32;
+
+    let body: Element<'_, Message> = if drawer.query.trim().is_empty() {
+        let mut apps: Column<'_, Message> = column![].spacing(10);
+        if !dock.config.pinned.is_empty() {
+            // Its column takes about half of the panel.
+            apps = apps.push(pinned(dock, width * 0.47 + BAR, palette));
+        }
+        apps = apps.push(applications(dock, drawer, palette));
+        row![
+            apps.width(Length::FillPortion(19)),
+            container(games_column(dock, palette)).width(Length::FillPortion(9)),
+            container(control_center(dock, drawer, palette)).width(Length::FillPortion(12))
+        ]
+        .spacing(14)
+        .into()
+    } else {
+        row![
+            container(results(dock, drawer, palette)).width(Length::FillPortion(28)),
+            container(control_center(dock, drawer, palette)).width(Length::FillPortion(12))
+        ]
+        .spacing(14)
+        .into()
+    };
+    let panel = container(column![search(drawer, palette), body].spacing(12))
+        .width(width)
+        .height(drawer.height)
+        .padding(14)
+        .clip(true)
+        .style(move |_| container::Style {
+            shadow: palette.shadow(),
+            ..style::fill(palette.panel, 16.0)
+        });
+
+    // Its top edge is dragged to make it higher or lower.
+    let color = if drawer.resizing {
+        palette.accent
+    } else {
+        style::alpha(Color::WHITE, 0.55)
+    };
+    let grip = container(space().width(44).height(4)).style(move |_| style::fill(color, 2.0));
+    let edge = mouse_area(container(grip).width(width).center_x(width).center_y(EDGE))
+        .on_press(Message::ResizeStart)
+        .interaction(mouse::Interaction::ResizingVertically);
+
+    // The mixer stands beside the panel, at its foot.
+    let beside: Element<'_, Message> = if drawer.mixer {
+        container(opaque(mixer_panel(dock, palette)))
+            .padding(Padding::from([0.0, 14.0]))
+            .align_y(Alignment::End)
+            .height(Length::Fill)
+            .into()
+    } else {
+        space().into()
+    };
+    let middle = row![
+        space().width(Length::Fill),
+        column![space().height(Length::Fill), edge, opaque(panel)],
+        container(beside).width(Length::Fill)
+    ];
+    // The bar is drawn again under the panel, as the launcher covers it.
+    let bar: Element<'_, Message> = match dock.bar_on(drawer.screen) {
+        Some(state) => super::bar::still(dock, state, palette),
+        None => space().height(BAR).into(),
+    };
+    stack![scrim, column![middle.height(Length::Fill), bar]].into()
 }
 
 /// The mixer: the general volume, then one line per application playing.

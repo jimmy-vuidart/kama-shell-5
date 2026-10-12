@@ -78,8 +78,12 @@ pub struct Habit {
 pub enum Event {
     /// The state, whole, sent on connection and after each change.
     State(Snapshot),
-    /// The shortcut of the drawer was pressed.
-    ToggleLauncher,
+    /// The shortcut of the launcher was pressed, with the pointer on this
+    /// screen.
+    ToggleLauncher {
+        #[serde(default)]
+        screen: Option<OutputRole>,
+    },
 }
 
 /// From a program of the shell to the compositor.
@@ -231,9 +235,14 @@ mod tests {
         let line = encode(&event);
 
         assert_eq!(decode::<Event>(&line).unwrap(), event);
+        let toggle = Event::ToggleLauncher {
+            screen: Some(OutputRole::Right),
+        };
+        assert_eq!(decode::<Event>(&encode(&toggle)).unwrap(), toggle);
+        // An older compositor does not say where the pointer is.
         assert_eq!(
-            decode::<Event>(&encode(&Event::ToggleLauncher)).unwrap(),
-            Event::ToggleLauncher
+            decode::<Event>(r#"{"event":"toggle_launcher"}"#).unwrap(),
+            Event::ToggleLauncher { screen: None }
         );
     }
 

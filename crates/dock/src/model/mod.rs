@@ -6,6 +6,15 @@ pub mod drawer;
 pub mod mixer;
 
 use crate::steam::Game;
+
+/// Which way a dock lies on its screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Orientation {
+    /// A column on the left edge; its launcher is a drawer beside it.
+    Vertical,
+    /// A row on the bottom edge; its launcher is a panel above it.
+    Horizontal,
+}
 use coquille_apps::Catalog;
 
 /// An application as the dock knows it, whatever led to it: a name of the

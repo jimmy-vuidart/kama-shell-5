@@ -1,9 +1,16 @@
 # coquille-dock
 
-Le dock de coquille : une barre fine sur le bord gauche de l'écran gauche,
-le tiroir d'applications qu'elle ouvre, le centre de contrôle en pied de
-tiroir et son mixeur par application. Un seul programme, plusieurs surfaces
-layer-shell, un seul état.
+Le dock de coquille : une barre fine sur le bord d'un écran, le lanceur
+d'applications qu'elle ouvre, son centre de contrôle et son mixeur par
+application. Un seul programme, plusieurs surfaces layer-shell, un seul état.
+
+Chaque écran peut avoir sa barre, dans un sens ou dans l'autre :
+
+- **verticale** : colonne sur le bord gauche, qui se déploie au survol ; le
+  lanceur est un tiroir sur toute la hauteur ;
+- **horizontale** : rangée centrée sur le bord bas, qui nomme l'icône
+  survolée dans une étiquette ; le lanceur est un panneau large et centré
+  au-dessus d'elle, en trois colonnes.
 
 Il tourne **dans coquille** : il lui faut le protocole layer-shell et, pour
 montrer les vraies fenêtres, le socket du compositeur (`COQUILLE_SOCKET`,
@@ -79,17 +86,28 @@ accent = "#7aa7ff"
 [dock]
 favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
+[dock.screens]
+left = "vertical"      # "vertical", "horizontal" ou "off"
+center = "off"
+right = "horizontal"
+
 [drawer]
 pinned = ["firefox", "discord", "kitty", "code", "obsidian", "mpv", "org.gnome.Nautilus"]
-width = 640
+width = 640            # tiroir d'un dock vertical
+height = 500           # lanceur d'un dock horizontal
 ```
+
+Sans `[dock.screens]`, il y a un dock vertical sur l'écran gauche et aucun
+ailleurs. Toutes les barres montrent les mêmes applis ; « Ici » y désigne
+l'écran de la barre. La touche `Super` ouvre le lanceur sur l'écran du
+pointeur s'il a un dock, sinon sur le premier écran qui en a un.
 
 Un nom est celui d'un fichier `.desktop` (sans l'extension), sa dernière
 partie (`nautilus` pour `org.gnome.Nautilus`), le programme qu'il lance, ou
 ce que les fenêtres annoncent (`app_id`, `WM_CLASS`).
 
 Le dock **réécrit ce fichier** quand on change à la souris les favoris
-(épingler, retirer, réordonner), le thème ou la largeur du tiroir : seule la ligne concernée
+(épingler, retirer, réordonner), le thème ou la taille du lanceur : seule la ligne concernée
 change, les commentaires restent. Un fichier qui n'est pas du TOML valide
 n'est jamais réécrit.
 
@@ -104,9 +122,10 @@ n'est jamais réécrit.
 - **Tiroir** : clic sur le lanceur ou touche `Super` seule (`Alt` en
   imbriqué). La saisie filtre aussitôt, les flèches choisissent, `Entrée`
   ouvre, `Échap` ou un clic en dehors ferme ; la molette sur la grille change
-  de page. Tirer son bord droit (la petite poignée) le redimensionne : jamais
-  moins de 520 px, jamais au point de ne plus laisser de place au mixeur ; la
-  largeur est gardée dans `[drawer] width`.
+  de page. Tirer sa poignée le redimensionne : le bord droit du tiroir
+  vertical (`[drawer] width`, jamais moins de 520 px ni au point de ne plus
+  laisser de place au mixeur), le bord haut du lanceur horizontal
+  (`[drawer] height`, jamais moins de 480 px).
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
   curseur pour le régler), « Par appli » ouvre le mixeur.
 
@@ -125,6 +144,12 @@ n'est jamais réécrit.
   binaire.
 
 ## Limites
+
+- **Dock horizontal** : le lanceur fait au plus 1100 px de large, moins sur
+  un écran étroit ; sa grille a trois colonnes de six lignes. Les bascules
+  du centre de contrôle y vont deux par deux.
+- **Avec `--mock`**, une seule barre s'affiche (celle du premier écran
+  configuré) : les écrans simulés n'existent pas pour de vrai.
 
 - **Luminosité** : il faut `ddcutil` et l'accès aux bus `i2c` des écrans ;
   sans eux le curseur est remplacé par « indisponible ».

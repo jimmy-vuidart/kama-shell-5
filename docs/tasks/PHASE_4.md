@@ -41,8 +41,11 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
   de chaque emplacement ; l'échange avec le centre (⇄, `Mod+C`) et la
   disposition « Onglets » sont supprimés. Détail :
   `docs/superpowers/specs/2026-10-12-capsules-design.md`.
-- Un seul dock pour les trois écrans : il montre toutes les applis
-  ouvertes, pas seulement celles de l'écran gauche.
+- Chaque barre montre toutes les applis ouvertes, pas seulement celles
+  de son écran.
+- Un dock par écran si on le veut, vertical (bord gauche) ou horizontal
+  (bord bas), réglé dans `[dock.screens]` ; le lanceur horizontal est un
+  panneau centré, jamais sur toute la largeur.
 - Se déconnecter, Redémarrer et Éteindre sont réels, après confirmation ;
   seul `--mock` les simule.
 - Les favoris et le thème changés à la souris sont réécrits dans

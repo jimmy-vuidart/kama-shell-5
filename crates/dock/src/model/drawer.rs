@@ -4,7 +4,7 @@
 use coquille_ipc::Habit;
 use coquille_model::OutputRole;
 
-use super::Identity;
+use super::{Identity, Orientation};
 
 /// The grid of applications: six columns of three rows per page.
 pub const COLUMNS: usize = 6;
@@ -34,6 +34,56 @@ pub fn width(wanted: Option<f32>, screen: Option<f32>) -> u32 {
     };
     let width = (wanted.round() as i64).clamp(MIN_WIDTH.into(), widest);
     u32::try_from(width).unwrap_or(DEFAULT_WIDTH)
+}
+
+/// The height of the horizontal launcher unless the user gave it another.
+pub const DEFAULT_HEIGHT: u32 = 500;
+/// Lower, its three columns no longer fit.
+pub const MIN_HEIGHT: u32 = 480;
+/// What stays free of the horizontal launcher on its screen: the dock under
+/// it, and a margin above.
+const FREE_HEIGHT: u32 = 100;
+/// The widest the horizontal launcher gets, and the narrowest it stays
+/// readable at.
+const WIDEST_PANEL: i64 = 1100;
+const NARROWEST_PANEL: i64 = 760;
+
+/// The height the horizontal launcher takes when `wanted` is asked for, on
+/// a screen of a given height.
+pub fn height(wanted: Option<f32>, screen: Option<f32>) -> u32 {
+    let wanted = wanted.filter(|wanted| wanted.is_finite());
+    let Some(wanted) = wanted else {
+        return DEFAULT_HEIGHT;
+    };
+    let highest = match screen.filter(|screen| screen.is_finite()) {
+        Some(screen) => (screen.round() as i64 - i64::from(FREE_HEIGHT)).max(MIN_HEIGHT.into()),
+        None => i64::from(u16::MAX),
+    };
+    let height = (wanted.round() as i64).clamp(MIN_HEIGHT.into(), highest);
+    u32::try_from(height).unwrap_or(DEFAULT_HEIGHT)
+}
+
+/// The width of the horizontal launcher on a screen of a given width: wide
+/// but never the whole screen, with room for the mixer beside it when the
+/// screen allows.
+pub fn panel_width(screen: f32) -> u32 {
+    let screen = screen.round() as i64;
+    let beside_mixer = screen - 2 * i64::from(MIXER_ROOM);
+    let width = beside_mixer
+        .clamp(NARROWEST_PANEL, WIDEST_PANEL)
+        .min(screen - 16)
+        .max(0);
+    u32::try_from(width).unwrap_or(0)
+}
+
+/// How many columns the grid of applications has: the arrow keys walk it
+/// accordingly. Lying down, the launcher lists applications in a narrow
+/// column, and search results across two of its columns.
+pub fn columns(orientation: Orientation, searching: bool) -> usize {
+    match (orientation, searching) {
+        (Orientation::Horizontal, false) => 3,
+        _ => COLUMNS,
+    }
 }
 
 /// A text as it is compared: without case nor accents, so that "editeur"
@@ -249,6 +299,41 @@ mod tests {
     #[test]
     fn a_width_that_is_not_a_number_gives_the_usual_one() {
         assert_eq!(width(Some(f32::NAN), Some(1920.0)), DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn the_horizontal_launcher_is_500_high_unless_told_otherwise() {
+        assert_eq!(height(None, Some(1080.0)), 500);
+        assert_eq!(height(Some(560.0), Some(1080.0)), 560);
+    }
+
+    #[test]
+    fn the_horizontal_launcher_keeps_between_its_content_and_the_screen() {
+        assert_eq!(height(Some(100.0), Some(1080.0)), MIN_HEIGHT);
+        // The dock under it and a margin above stay free.
+        assert_eq!(height(Some(5000.0), Some(1080.0)), 1080 - 100);
+        assert_eq!(height(Some(900.0), Some(480.0)), MIN_HEIGHT);
+        assert_eq!(height(Some(f32::NAN), None), DEFAULT_HEIGHT);
+    }
+
+    #[test]
+    fn the_horizontal_launcher_is_centered_never_as_wide_as_the_screen() {
+        assert_eq!(panel_width(1920.0), 1100);
+        assert_eq!(panel_width(3440.0), 1100);
+        // On a smaller screen it leaves room for the mixer on its sides.
+        assert_eq!(panel_width(1600.0), 960);
+        // On a very small one it keeps a readable width, inside the screen.
+        assert_eq!(panel_width(1000.0), 760);
+        assert_eq!(panel_width(500.0), 484);
+    }
+
+    #[test]
+    fn the_grid_has_six_columns_upright_and_three_lying_down() {
+        assert_eq!(columns(Orientation::Vertical, false), 6);
+        assert_eq!(columns(Orientation::Horizontal, false), 3);
+        // Search results take the width of two columns of the launcher.
+        assert_eq!(columns(Orientation::Horizontal, true), 6);
+        assert_eq!(columns(Orientation::Vertical, true), 6);
     }
 
     #[test]

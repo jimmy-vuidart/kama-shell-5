@@ -162,6 +162,22 @@ pub fn left_click(entry: &Entry) -> Click {
     }
 }
 
+/// The screen the launcher opens on when its shortcut is pressed: the one
+/// the pointer is on if it has a dock, else the first screen that has one.
+/// `docks` gives each screen with a dock, and whether a game holds it: no
+/// panel ever shows there.
+pub fn launcher_screen(
+    docks: &[(OutputRole, bool)],
+    pointer: Option<OutputRole>,
+) -> Option<OutputRole> {
+    let free = |(screen, anchored): &(OutputRole, bool)| (!anchored).then_some(*screen);
+    let under_pointer = docks
+        .iter()
+        .filter(|(screen, _)| Some(*screen) == pointer)
+        .find_map(free);
+    under_pointer.or_else(|| docks.iter().find_map(free))
+}
+
 /// A line of the menu opened by a right click.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
@@ -560,6 +576,39 @@ mod tests {
         assert_eq!(with[0].habit, Some(habit));
         // Closed, the tile of the screen it would reopen on stands out.
         assert_eq!(menu(&with[0]).current, Some(OutputRole::Right));
+    }
+
+    #[test]
+    fn the_launcher_opens_on_the_screen_of_the_pointer_when_it_has_a_dock() {
+        let docks = [(OutputRole::Left, false), (OutputRole::Right, false)];
+
+        assert_eq!(
+            launcher_screen(&docks, Some(OutputRole::Right)),
+            Some(OutputRole::Right)
+        );
+    }
+
+    #[test]
+    fn the_launcher_falls_back_on_the_first_dock() {
+        let docks = [(OutputRole::Left, false), (OutputRole::Right, false)];
+
+        assert_eq!(
+            launcher_screen(&docks, Some(OutputRole::Center)),
+            Some(OutputRole::Left)
+        );
+        assert_eq!(launcher_screen(&docks, None), Some(OutputRole::Left));
+    }
+
+    #[test]
+    fn the_launcher_never_opens_on_a_screen_held_by_a_game() {
+        let docks = [(OutputRole::Left, true), (OutputRole::Right, false)];
+
+        assert_eq!(
+            launcher_screen(&docks, Some(OutputRole::Left)),
+            Some(OutputRole::Right)
+        );
+        assert_eq!(launcher_screen(&[(OutputRole::Left, true)], None), None);
+        assert_eq!(launcher_screen(&[], Some(OutputRole::Left)), None);
     }
 
     #[test]
