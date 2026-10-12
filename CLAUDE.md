@@ -58,7 +58,7 @@ Chaque écran a une disposition parmi une liste courte :
 - `Free` (« écran libre ») : fenêtres flottantes qui se chevauchent, comme un bureau classique.
 - Le centre 21:9 accepte aussi `TwoThirdsOneThird` hors jeu.
 
-Changement de disposition : clic droit sur la barre de l'écran → menu.
+Changement de disposition : `Super+1` à `6` aujourd'hui. Le menu au clic droit sur une barre est abandonné avec les barres ; la façon de faire à la souris sera définie avec le nouveau lanceur.
 
 ### Règles de placement
 
@@ -67,7 +67,7 @@ Changement de disposition : clic droit sur la barre de l'écran → menu.
 3. **Un écran n'est jamais plein** : déposer sur un emplacement occupé empile la fenêtre **en onglet** avec celle qui s'y trouve.
 4. **Mémoire par application** : une appli que j'ai rangée moi-même rouvre au même écran / emplacement (clé : `app_id` Wayland ou `WM_CLASS` X11). **Les fenêtres laissées flottantes ne créent aucune habitude.**
 5. **Bouton ⇄ « échanger avec le centre »** sur les fenêtres des écrans latéraux : la fenêtre passe au centre, celle du centre prend sa place. Désactivé quand un jeu est ancré.
-6. **Instantanés optionnels** : mémoriser la disposition actuelle des trois écrans d'un clic, la restaurer d'un clic. Rien n'oblige à préparer quoi que ce soit.
+6. **Instantanés optionnels** : mémoriser la disposition actuelle des trois écrans, la restaurer. Rien n'oblige à préparer quoi que ce soit. *Concept conservé, pas encore réalisé : sa forme dépendra du nouveau lanceur.*
 7. Si je lance une appli alors qu'un jeu est ancré au centre, elle s'ouvre en flottant sur **l'écran latéral utilisé en dernier**, jamais devant le jeu.
 
 ### Mode jeu (« écran ancré »)
@@ -81,6 +81,8 @@ Quand une fenêtre passe en plein écran (xdg-shell **ou** XWayland) sur un écr
 - **bords collants** : pour sortir de l'écran du jeu, il faut pousser le curseur contre le bord pendant un court délai (configurable, ~300 ms) ;
 - les **notifications** sont redirigées vers un écran latéral ;
 - **ne pas déranger** automatique pendant le jeu.
+
+Les deux derniers points sont des concepts conservés, pas encore réalisés : il n'y a pas de notifications pour l'instant, et leur forme dépendra du nouveau lanceur.
 
 Sortie : `Super` libère le pointeur ; `Super + Échap` remet le jeu en fenêtre.
 
@@ -99,12 +101,11 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 
 - `Super + glisser` : déplacer une fenêtre (même hors barre de titre).
 - `Super + glisser sur la séparation` : ajuster le ratio d'une disposition.
-- **Bouton latéral maintenu + petit mouvement rapide vers un écran** : le curseur saute à cet écran, à la position où je l'avais laissé (hors jeu ancré).
 - **Secouer la souris** : halo autour du curseur pour le retrouver.
 
 ## Apparence (référence : maquettes)
 
-Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de toucher au rendu).
+Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de toucher au rendu). Celles d'origine, dans `docs/maquettes/shell/`, font référence pour les fenêtres, leurs décorations et le rangement ; **plus pour les barres latérales ni pour le lanceur**, abandonnés sous cette forme.
 
 - Style proche de Windows 11 / Fluent : coins arrondis, surfaces translucides, sobre.
 - Thèmes **clair** et **sombre**.
@@ -115,10 +116,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
   - pas de bouton « agrandir » (la disposition s'en charge).
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit pas celle du shell. Elle la retrouve dès qu'elle partage son emplacement, pour montrer les onglets. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range). Sans barre du shell, pas de bouton ⇄ : `Mod+C` le remplace.
 - Fenêtre active : **anneau d'accent de 2 px**. Accent par défaut : `#2f6fed` (clair), `#7aa7ff` (sombre).
-- Aucune barre sur l'écran central : il reste entièrement libre.
-- **Une barre fine (44 px) sur le bord extérieur** de chaque écran latéral, centrée verticalement, rayon 14 px :
-  - gauche : lanceur, fenêtres de l'écran, heure ;
-  - droite : fenêtres de l'écran, réseau, son, notifications.
+- Aucune barre du shell sur les écrans : les barres latérales des maquettes sont abandonnées.
 - Police d'interface : Figtree (repli : police système sans-serif).
 
 ## Architecture visée
@@ -130,18 +128,14 @@ coquille/
 ├─ crates/
 │  ├─ model/        # logique pure : écrans, dispositions, emplacements, règles, mémoire.
 │  │                # AUCUNE dépendance Wayland. Entièrement testé unitairement.
-│  ├─ compositor/   # binaire : Smithay, rendu, entrées, décorations, mode jeu.
-│  ├─ ipc/          # protocole entre le compositeur et les clients du shell (socket Unix, JSON).
-│  ├─ bar/          # client layer-shell : barres latérales.            (plus tard)
-│  ├─ launcher/     # client layer-shell : lanceur.                      (plus tard)
-│  └─ notifyd/      # serveur org.freedesktop.Notifications (zbus).      (plus tard)
+│  └─ compositor/   # binaire : Smithay, rendu, entrées, décorations, mode jeu.
 ├─ docs/maquettes/
 └─ CLAUDE.md
 ```
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
-- Les barres, le lanceur et les notifications sont des **clients layer-shell** séparés (par exemple `smithay-client-toolkit`, ou iced avec un crate layer-shell : à évaluer).
-- Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, ratios, délai des bords collants, boutons de la souris).
+- Le reste du shell (lanceur, notifications, instantanés) n'a pas encore d'architecture : elle sera décidée avec le nouveau design du lanceur. L'idée de départ, des programmes séparés affichés par layer-shell et reliés au compositeur par un socket (`smithay-client-toolkit`, ou iced avec un crate layer-shell), reste une piste, pas une décision.
+- Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, ratios, délai des bords collants).
 - État persistant (mémoire par appli, instantanés) : `~/.local/state/coquille/`.
 
 ### Décisions techniques
@@ -190,7 +184,7 @@ Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour
 
 Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (bande dans la barre de titre), ⇄, mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, boutons « réduire » et « ajouter un onglet ».
 
-Reportés à la phase 4, avec les barres latérales : le menu de disposition (clic droit sur la barre) et la liste des fenêtres de l'écran, qui sera la vraie façon de retrouver une fenêtre réduite.
+Sans solution à la souris depuis l'abandon des barres latérales, en attendant le nouveau lanceur : changer de disposition (`Mod+1` à `6`) et retrouver une fenêtre réduite (son onglet grisé, ou `Mod+R`).
 
 ### État de la phase 3
 
@@ -217,7 +211,7 @@ Limites connues :
 - pas de retour dmabuf « scanout » par surface : l'affichage direct dépend de ce que le jeu alloue de lui-même ;
 - avec le VRR, un pointeur visible qui bouge fait remonter la fréquence (il n'est pas sur un plan matériel) ;
 - bords collants inopérants en imbriqué avec la vraie souris : l'hôte possède le pointeur, rien ne peut le retenir ;
-- notifications redirigées et « ne pas déranger » : phase 4.
+- notifications redirigées et « ne pas déranger » : concepts conservés, à concevoir avec le nouveau lanceur.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 
@@ -240,7 +234,7 @@ On avance **par phases**, en s'arrêtant à la fin de chacune pour que je teste.
 - **Phase 1 — Compositeur imbriqué** : backend **winit** (fenêtre dans ma session actuelle), xdg-shell, une sortie simulée, dispositions `Full` / `Columns`, décorations serveur, focus et anneau d'accent. Test avec `foot` ou `alacritty`.
 - **Phase 2 — Trois écrans réels** : backend **udev** (DRM/KMS, GBM, libinput, libseat), trois sorties dont le 21:9 central, glisser-déposer vers les emplacements, flottant par défaut, onglets, ⇄, mémoire par appli, `Free`.
 - **Phase 3 — Jeu** : XWayland, détection du plein écran, écran ancré, direct scanout, VRR, pointer-constraints, relative-pointer, bords collants.
-- **Phase 4 — Shell** : barres latérales, lanceur, notifications, saut de curseur au bouton latéral, instantanés.
+- **Phase 4 — Shell** : **en attente d'un nouveau design de lanceur**, à définir. Les notifications et les instantanés restent voulus, mais leur forme en dépendra. Abandonnés : les barres latérales et le lanceur des maquettes, le saut de curseur au bouton latéral. Détail dans `docs/tasks/PHASE_4.md`.
 - **Plus tard** : calque par-dessus le jeu (performances, son par appli, capture), vignettes vivantes.
 
 ## Sécurité pendant le développement
