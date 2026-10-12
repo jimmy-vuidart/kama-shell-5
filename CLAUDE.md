@@ -169,6 +169,7 @@ cargo run -p coquille -- --role left --spawn kitty          # imbriqué, un seul
 cargo run -p coquille -- --probe                            # examine GPU et écrans, n'affiche rien
 ```
 
+- Le plus rapide : `scripts/debug.sh` compile (debug) et lance coquille et le dock en imbriqué. `scripts/debug.sh left` pour un seul écran, `-f` en plein écran, `--mock` pour un dock simulé, `-- <options de coquille>` pour le reste. Les boutons de session du dock y sont simulés.
 - Souris : glisser une barre de titre montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
 - Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
 - Boutons de la barre de titre : « réduire » cache la fenêtre (son onglet reste, grisé ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; ⇄ ; fermer. Le bouton « ajouter un onglet » a été retiré avec l'arrivée du dock.
