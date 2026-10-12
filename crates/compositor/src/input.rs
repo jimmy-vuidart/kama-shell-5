@@ -243,10 +243,10 @@ impl State {
         if let Some(Some(action)) = action {
             self.run(action);
         }
-        // The shell modifier alone, pressed and released: the way out of a
-        // game that holds the pointer.
+        // The shell modifier alone, pressed and released: the drawer of the
+        // dock, and with it the way out of a game that holds the pointer.
         if tapped {
-            self.free_pointer();
+            self.toggle_launcher();
         }
     }
 
@@ -492,7 +492,7 @@ impl State {
 
     /// The user tapped the shell modifier: the game under the pointer lets
     /// go of it, until the next click in that window.
-    fn free_pointer(&mut self) {
+    pub fn free_pointer(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -1033,16 +1033,6 @@ impl State {
                 self.apply_arrangement();
             }
             TitlebarButton::Minimize => self.minimize_window(window),
-            // Arms the slot: the next window that opens stacks there. A
-            // second click takes it back.
-            TitlebarButton::AddTab => {
-                let slot = match self.shell.desk.placement(window) {
-                    Some(Placement::Slot(slot)) => Some(slot),
-                    _ => None,
-                };
-                self.armed_slot = slot.filter(|slot| self.armed_slot != Some(*slot));
-                self.queue_redraw();
-            }
         }
     }
 

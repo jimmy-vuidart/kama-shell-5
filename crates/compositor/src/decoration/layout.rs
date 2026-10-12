@@ -16,7 +16,6 @@ const TAB_MAX_WIDTH: i32 = 220;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TitlebarButton {
-    AddTab,
     /// "Swap with the center"; side screens only.
     Swap,
     Minimize,
@@ -28,16 +27,11 @@ pub enum TitlebarButton {
 pub struct Buttons {
     /// On a side screen, when there is a center to swap with.
     pub swap: bool,
-    /// In a slot: a floating window has no stack to add a tab to.
-    pub add_tab: bool,
 }
 
 impl Buttons {
     #[cfg(test)]
-    const ALL: Self = Self {
-        swap: true,
-        add_tab: true,
-    };
+    const ALL: Self = Self { swap: true };
 }
 
 /// Rectangles relative to the title bar's top-left corner.
@@ -58,11 +52,9 @@ impl TitlebarLayout {
             TitlebarButton::Close,
             TitlebarButton::Minimize,
             TitlebarButton::Swap,
-            TitlebarButton::AddTab,
         ];
         let wanted = order.into_iter().filter(|button| match button {
             TitlebarButton::Swap => shown.swap,
-            TitlebarButton::AddTab => shown.add_tab,
             TitlebarButton::Minimize | TitlebarButton::Close => true,
         });
 
@@ -121,10 +113,7 @@ mod tests {
     use super::*;
 
     const BAR: Size = Size::new(400, 38);
-    const NO_SWAP: Buttons = Buttons {
-        swap: false,
-        add_tab: true,
-    };
+    const NO_SWAP: Buttons = Buttons { swap: false };
 
     fn kinds(layout: &TitlebarLayout) -> Vec<TitlebarButton> {
         layout.buttons.iter().map(|(button, _)| *button).collect()
@@ -137,7 +126,6 @@ mod tests {
         assert_eq!(
             layout.buttons,
             vec![
-                (TitlebarButton::AddTab, Rect::new(244, 0, 38, 38)),
                 (TitlebarButton::Swap, Rect::new(282, 0, 38, 38)),
                 (TitlebarButton::Minimize, Rect::new(320, 0, 38, 38)),
                 (TitlebarButton::Close, Rect::new(358, 0, 38, 38)),
@@ -151,32 +139,9 @@ mod tests {
 
         assert_eq!(
             kinds(&layout),
-            [
-                TitlebarButton::AddTab,
-                TitlebarButton::Minimize,
-                TitlebarButton::Close
-            ]
+            [TitlebarButton::Minimize, TitlebarButton::Close]
         );
-        assert_eq!(layout.buttons[0].1, Rect::new(282, 0, 38, 38));
-    }
-
-    #[test]
-    fn a_floating_window_has_no_add_tab_button() {
-        let floating = Buttons {
-            swap: true,
-            add_tab: false,
-        };
-
-        let layout = TitlebarLayout::new(BAR, floating);
-
-        assert_eq!(
-            kinds(&layout),
-            [
-                TitlebarButton::Swap,
-                TitlebarButton::Minimize,
-                TitlebarButton::Close
-            ]
-        );
+        assert_eq!(layout.buttons[0].1, Rect::new(320, 0, 38, 38));
     }
 
     #[test]
@@ -190,7 +155,7 @@ mod tests {
     fn the_text_fills_the_room_between_the_icon_and_the_buttons() {
         let layout = TitlebarLayout::new(BAR, Buttons::ALL);
 
-        assert_eq!(layout.text, Rect::new(40, 0, 196, 38));
+        assert_eq!(layout.text, Rect::new(40, 0, 234, 38));
     }
 
     #[test]
@@ -217,7 +182,7 @@ mod tests {
 
         assert_eq!(
             layout.tabs(2),
-            [Rect::new(8, 4, 112, 30), Rect::new(124, 4, 112, 30)]
+            [Rect::new(8, 4, 131, 30), Rect::new(143, 4, 131, 30)]
         );
     }
 

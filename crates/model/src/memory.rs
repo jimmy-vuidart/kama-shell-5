@@ -35,6 +35,11 @@ impl AppMemory {
         self.places.remove(app);
     }
 
+    /// Every habit, in the order of the application names.
+    pub fn iter(&self) -> impl Iterator<Item = (&AppKey, RememberedPlace)> {
+        self.places.iter().map(|(app, place)| (app, *place))
+    }
+
     pub fn len(&self) -> usize {
         self.places.len()
     }

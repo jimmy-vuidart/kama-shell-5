@@ -15,12 +15,28 @@ pub struct Config {
     pub outputs: RoleConfig,
     pub keyboard: KeyboardConfig,
     pub theme: Option<ThemeKind>,
+    /// The accent color, as `#rrggbb`; by default, the one of the theme.
+    pub accent: Option<String>,
+    /// Sections of the dock, which reads the same file: not for the
+    /// compositor, but no reason to reject the whole file either.
+    pub dock: Ignored,
+    pub drawer: Ignored,
     /// Command of the terminal opened by the shortcut.
     pub terminal: Option<String>,
     /// Whether X11 applications can run, through XWayland; they can unless
     /// this says otherwise.
     pub xwayland: Option<bool>,
     pub game: GameConfig,
+}
+
+/// A section meant for another program of the shell: anything goes in it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Ignored;
+
+impl<'de> Deserialize<'de> for Ignored {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self)
+    }
 }
 
 /// Game mode: what happens on a screen held by a fullscreen window.
@@ -129,6 +145,36 @@ mod tests {
                 right: Some("DP-1".into()),
             }
         );
+    }
+
+    #[test]
+    fn the_accent_is_read() {
+        let config = parse("accent = \"#7aa7ff\"").unwrap();
+
+        assert_eq!(config.accent.as_deref(), Some("#7aa7ff"));
+    }
+
+    #[test]
+    fn the_sections_of_the_dock_are_accepted_whatever_they_hold() {
+        let config = parse(
+            r#"
+            theme = "dark"
+
+            [dock]
+            favorites = ["firefox", "discord"]
+
+            [drawer]
+            pinned = ["firefox"]
+            columns = 6
+
+            [game]
+            vrr = false
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.theme, Some(ThemeKind::Dark));
+        assert!(!config.game.vrr());
     }
 
     #[test]

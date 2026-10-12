@@ -116,6 +116,7 @@ impl State {
             labels: choices.iter().map(|(_, label)| label.clone()).collect(),
             hovered: self.bar_hover,
             theme: self.theme.kind,
+            accent: self.theme.accent,
         };
         if self
             .bar

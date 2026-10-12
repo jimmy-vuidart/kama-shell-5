@@ -141,6 +141,8 @@ pub struct Desk {
     minimized: Vec<WindowId>,
     memory: AppMemory,
     last_side: Option<OutputId>,
+    /// Screens asked for the next window of an application, once each.
+    asked: BTreeMap<AppKey, OutputId>,
 }
 
 impl Desk {
@@ -154,6 +156,7 @@ impl Desk {
             minimized: Vec::new(),
             memory: AppMemory::default(),
             last_side: None,
+            asked: BTreeMap::new(),
         }
     }
 
@@ -225,7 +228,20 @@ impl Desk {
         let cursor = self.screen_index(request.cursor_output)?;
         let game = self.game_in_play().and_then(|_| self.focused());
 
+        // A screen asked for this window comes first, then the center for a
+        // game; both leave the habits alone, and give way to a game being
+        // played there.
+        let asked = app.as_ref().and_then(|app| self.asked.remove(app));
+        let asked = asked.and_then(|output| self.screen_index(output).ok());
+        let is_game = app.as_ref().is_some_and(AppKey::is_game);
+        let center = || {
+            let is_center = |screen: &Screen| screen.role() == OutputRole::Center;
+            self.screens.iter().position(is_center)
+        };
+        let wanted = asked.or_else(|| is_game.then(center).flatten());
+
         let remembered = app.as_ref().and_then(|app| self.memory.get(app));
+        let remembered = remembered.filter(|_| wanted.is_none());
         let placement = match remembered.and_then(|place| self.remembered_target(place)) {
             Some(Target::Slot { screen, slot }) => {
                 if let Some(stack) = self.screens[screen].slot_mut(slot) {
@@ -237,7 +253,8 @@ impl Desk {
                 self.open_floating(id, screen, request.preferred_size)
             }
             None => {
-                let screen = self.floating_screen(cursor);
+                let free = wanted.filter(|screen| self.screens[*screen].anchored().is_none());
+                let screen = free.unwrap_or_else(|| self.floating_screen(cursor));
                 self.open_floating(id, screen, request.preferred_size)
             }
         };
@@ -256,6 +273,24 @@ impl Desk {
             None => self.mark_focused(id),
         }
         Ok(placement)
+    }
+
+    /// The next window of `app` opens floating on `output`, whatever its
+    /// habit says, which is left as it is. Asked from the dock ("open on").
+    pub fn open_next_on(&mut self, app: AppKey, output: OutputId) -> Result<(), ModelError> {
+        self.screen_index(output)?;
+        self.asked.insert(app, output);
+        Ok(())
+    }
+
+    /// Forgets where the user tidied an application: it opens floating again.
+    pub fn forget_app(&mut self, app: &AppKey) {
+        self.memory.forget(app);
+    }
+
+    /// Every window, the one focused last first.
+    pub fn recent_windows(&self) -> impl Iterator<Item = WindowId> + '_ {
+        self.focus_order.iter().rev().copied()
     }
 
     /// A window is gone. If it had the focus, its tab neighbour gets it, else

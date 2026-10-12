@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use coquille_model::{AppMemory, OutputId, Point as ModelPoint, SlotId, WindowId};
+use coquille_model::{AppMemory, OutputId, Point as ModelPoint, WindowId};
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
@@ -40,15 +40,18 @@ use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
 use crate::game::{ModTap, StickyEdges};
 use crate::input::Gesture;
+use crate::ipc::Ipc;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::placement::Bar;
 use crate::render::scene::Cursor;
 use crate::shell::{ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
-use crate::theme::Theme;
+use crate::theme::{Rgba, Theme, ThemeKind};
 
 pub struct Options {
-    pub theme: Theme,
+    pub theme: ThemeKind,
+    /// The accent the user chose, when it is not the one of the theme.
+    pub accent: Option<Rgba>,
     pub keyboard: KeyboardLayout,
     pub mod_key: ModKey,
     /// Command of the terminal opened by the shortcut.
@@ -119,7 +122,11 @@ pub struct State {
     pub backend: Backend,
     pub shell: Shell,
     pub theme: Theme,
+    /// The accent the user chose, kept across changes of theme.
+    pub accent: Option<Rgba>,
     pub painter: Painter,
+    /// The socket of the shell, once it is open.
+    pub ipc: Option<Ipc>,
     /// The title bar button under the pointer.
     pub hover: Option<(WindowId, TitlebarButton)>,
     /// The window, freshly opened floating, the placement bar is offered for.
@@ -127,9 +134,6 @@ pub struct State {
     pub bar: Option<Bar>,
     /// The button of the bar under the pointer.
     pub bar_hover: Option<usize>,
-    /// The slot whose "add a tab" button is armed: the next window that
-    /// opens goes there.
-    pub armed_slot: Option<SlotId>,
     /// The panel the user clicked to type in: it has the keyboard until a
     /// click elsewhere.
     pub panel_focus: Option<LayerSurface>,
@@ -266,13 +270,17 @@ impl State {
             shell: Shell::new(infos, habits.clone()),
             state_dir: options.state_dir,
             saved_habits: habits,
-            theme: options.theme,
+            theme: match options.accent {
+                Some(accent) => Theme::new(options.theme).with_accent(accent),
+                None => Theme::new(options.theme),
+            },
+            accent: options.accent,
             painter: Painter::new(),
+            ipc: None,
             hover: None,
             placement_offer: None,
             bar: None,
             bar_hover: None,
-            armed_slot: None,
             panel_focus: None,
             gesture: None,
             swallowed_press: false,
@@ -359,6 +367,9 @@ impl State {
             .arg("-c")
             .arg(command)
             .env("WAYLAND_DISPLAY", &self.socket_name);
+        if let Some(ipc) = &self.ipc {
+            child.env(coquille_ipc::SOCKET_ENV, &ipc.path);
+        }
         match self.xdisplay {
             Some(number) => child.env("DISPLAY", crate::xwayland::display_name(number)),
             // Never the X server of another session.

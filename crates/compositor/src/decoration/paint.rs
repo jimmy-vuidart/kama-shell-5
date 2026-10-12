@@ -34,9 +34,8 @@ pub struct TitlebarSpec {
     pub focused: bool,
     pub hovered: Option<TitlebarButton>,
     pub buttons: Buttons,
-    /// The add-tab button is armed: the next window opens in this stack.
-    pub armed: bool,
     pub theme: ThemeKind,
+    pub accent: Rgba,
     pub corner_radius: i32,
     /// The windows stacked in the slot, when they are shown as tabs; they
     /// then replace the badge, title and subtitle.
@@ -60,6 +59,7 @@ pub struct BarSpec {
     pub labels: Vec<String>,
     pub hovered: Option<usize>,
     pub theme: ThemeKind,
+    pub accent: Rgba,
 }
 
 /// A bar painted to pixels, with where its buttons ended up.
@@ -96,7 +96,7 @@ impl Painter {
     /// Paints a title bar: rounded top corners, badge, title, subtitle,
     /// buttons. Returns `None` for an empty size.
     pub fn titlebar(&mut self, spec: &TitlebarSpec) -> Option<Pixmap> {
-        let theme = Theme::new(spec.theme);
+        let theme = Theme::new(spec.theme).with_accent(spec.accent);
         let (width, height) = (spec.size.w as f32, spec.size.h as f32);
         let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
         let layout = TitlebarLayout::new(spec.size, spec.buttons);
@@ -129,12 +129,10 @@ impl Painter {
 
         for (button, cell) in &layout.buttons {
             let hovered = spec.hovered == Some(*button);
-            let armed = spec.armed && *button == TitlebarButton::AddTab;
-            let highlight = match (button, hovered, armed) {
-                (TitlebarButton::Close, true, _) => Some(theme.close_hover),
-                (_, _, true) => Some(theme.accent),
-                (_, true, false) => Some(theme.button_hover),
-                (_, false, false) => None,
+            let highlight = match (button, hovered) {
+                (TitlebarButton::Close, true) => Some(theme.close_hover),
+                (_, true) => Some(theme.button_hover),
+                (_, false) => None,
             };
             let pill = rounded_rect(
                 cell.x as f32 + 4.0,
@@ -146,8 +144,8 @@ impl Painter {
             if let (Some(highlight), Some(pill)) = (highlight, pill) {
                 fill(&mut pixmap, &pill, highlight);
             }
-            // White on the two colored highlights, the text color otherwise.
-            let on_color = armed || (hovered && *button == TitlebarButton::Close);
+            // White on the colored highlight, the text color otherwise.
+            let on_color = hovered && *button == TitlebarButton::Close;
             let color = if on_color { Rgba::WHITE } else { theme.text };
             if let Some(icon) = button_icon(*button, *cell) {
                 stroke(&mut pixmap, &icon, color);
@@ -210,7 +208,7 @@ impl Painter {
         if spec.labels.is_empty() {
             return None;
         }
-        let theme = Theme::new(spec.theme);
+        let theme = Theme::new(spec.theme).with_accent(spec.accent);
 
         let widths: Vec<i32> = spec
             .labels
@@ -475,17 +473,6 @@ fn button_icon(button: TitlebarButton, cell: Rect) -> Option<Path> {
             line((-3.0, 0.0), (-6.0, 3.0));
             line((-6.0, 3.0), (-3.0, 6.0));
         }
-        TitlebarButton::AddTab => {
-            // A tab outline with a plus sign inside.
-            line((-6.5, -5.5), (-1.5, -5.5));
-            line((-1.5, -5.5), (0.5, -3.5));
-            line((0.5, -3.5), (6.5, -3.5));
-            line((6.5, -3.5), (6.5, 5.5));
-            line((6.5, 5.5), (-6.5, 5.5));
-            line((-6.5, 5.5), (-6.5, -5.5));
-            line((0.0, -1.0), (0.0, 3.5));
-            line((-2.25, 1.25), (2.25, 1.25));
-        }
     }
     path.finish()
 }
@@ -567,6 +554,7 @@ mod tests {
             ],
             hovered: Some(1),
             theme: ThemeKind::Light,
+            accent: Theme::new(ThemeKind::Light).accent,
         };
 
         let bar = Painter::new().placement_bar(&spec).unwrap();
@@ -594,6 +582,7 @@ mod tests {
             labels: Vec::new(),
             hovered: None,
             theme: ThemeKind::Dark,
+            accent: Theme::new(ThemeKind::Dark).accent,
         };
 
         assert!(Painter::new().placement_bar(&spec).is_none());
@@ -603,7 +592,6 @@ mod tests {
     fn every_button_has_an_icon_inside_its_cell() {
         let cell = Rect::new(100, 0, 38, 38);
         for button in [
-            TitlebarButton::AddTab,
             TitlebarButton::Swap,
             TitlebarButton::Minimize,
             TitlebarButton::Close,

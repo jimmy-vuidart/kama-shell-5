@@ -35,6 +35,20 @@ impl Rgba {
         Self { r, g, b, a: 0xff }
     }
 
+    /// From `#rrggbb`, as the configuration writes colors.
+    pub fn parse(text: &str) -> Option<Self> {
+        let digits = text.strip_prefix('#')?;
+        if digits.len() != 6 || !digits.bytes().all(|digit| digit.is_ascii_hexdigit()) {
+            return None;
+        }
+        u32::from_str_radix(digits, 16).ok().map(Self::rgb)
+    }
+
+    /// As `#rrggbb`, without the opacity.
+    pub fn hex(self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+
     /// Premultiplied components in `0.0..=1.0`, as the renderer wants them.
     pub fn premultiplied(self) -> [f32; 4] {
         let alpha = f32::from(self.a) / 255.0;
@@ -95,9 +109,43 @@ impl Theme {
     }
 }
 
+impl Theme {
+    /// The same theme with the accent the user chose.
+    pub const fn with_accent(mut self, accent: Rgba) -> Self {
+        self.accent = accent;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_color_is_read_from_its_hexadecimal_form() {
+        assert_eq!(Rgba::parse("#7aa7ff"), Some(Rgba::rgb(0x7a_a7_ff)));
+        assert_eq!(Rgba::parse("#7AA7FF"), Some(Rgba::rgb(0x7a_a7_ff)));
+    }
+
+    #[test]
+    fn anything_else_is_not_a_color() {
+        for text in ["7aa7ff", "#7aa7f", "#7aa7ff00", "#gggggg", "", "#+12345"] {
+            assert_eq!(Rgba::parse(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_color_is_written_back_as_it_was_read() {
+        assert_eq!(Rgba::rgb(0x2f_6f_ed).hex(), "#2f6fed");
+    }
+
+    #[test]
+    fn the_accent_of_a_theme_can_be_replaced() {
+        let theme = Theme::new(ThemeKind::Dark).with_accent(Rgba::rgb(0xff_00_00));
+
+        assert_eq!(theme.accent, Rgba::rgb(0xff_00_00));
+        assert_eq!(theme.text, Theme::new(ThemeKind::Dark).text);
+    }
 
     #[test]
     fn hex_colors_are_split_into_channels() {

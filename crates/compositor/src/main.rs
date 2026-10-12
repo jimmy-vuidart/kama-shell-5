@@ -9,6 +9,7 @@ mod focus;
 mod game;
 mod handlers;
 mod input;
+mod ipc;
 mod keyboard_layout;
 mod outputs;
 mod panels;
@@ -43,7 +44,7 @@ use crate::backend::winit::{REFRESH, Simulated};
 use crate::config::Config;
 use crate::shortcuts::ModKey;
 use crate::state::{ClientState, Options, State};
-use crate::theme::{Theme, ThemeKind};
+use crate::theme::{Rgba, ThemeKind};
 
 /// Where the compositor runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -268,6 +269,7 @@ fn main() -> anyhow::Result<()> {
         screens,
         options,
     )?;
+    state.start_ipc();
     if !cli.no_xwayland && config.xwayland.unwrap_or(true) {
         // What the X server says goes next to the compositor's own log.
         let log = cli.log_file.as_deref().and_then(Path::parent);
@@ -339,6 +341,7 @@ fn main() -> anyhow::Result<()> {
         // On real screens, frames start as soon as something changed; the
         // nested window draws on its own timer.
         state.redraw_screens();
+        state.flush_ipc();
         if let Err(error) = state.display_handle.flush_clients() {
             warn!(%error, "cannot flush clients");
         }
@@ -354,6 +357,14 @@ fn export_environment(state: &State) {
         format!("WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy()),
         "XDG_CURRENT_DESKTOP=coquille".to_owned(),
     ];
+    // Where the dock, started by those services, finds the compositor.
+    if let Some(ipc) = &state.ipc {
+        variables.push(format!(
+            "{}={}",
+            coquille_ipc::SOCKET_ENV,
+            ipc.path.display()
+        ));
+    }
     // Where X11 applications started by those services find the X server.
     if let Some(number) = state.xdisplay {
         variables.push(format!("DISPLAY={}", xwayland::display_name(number)));
@@ -412,8 +423,19 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         .keyboard_variant
         .as_deref()
         .or(config.keyboard.variant.as_deref());
+    let accent = config.accent.as_deref().and_then(|text| {
+        let accent = Rgba::parse(text);
+        if accent.is_none() {
+            warn!(
+                accent = text,
+                "not a color (#rrggbb): using the accent of the theme"
+            );
+        }
+        accent
+    });
     Options {
-        theme: Theme::new(cli.theme.or(config.theme).unwrap_or(ThemeKind::Light)),
+        theme: cli.theme.or(config.theme).unwrap_or(ThemeKind::Light),
+        accent,
         keyboard: keyboard_layout::detect(layout, variant),
         mod_key,
         terminal: config.terminal.clone().unwrap_or_else(default_terminal),

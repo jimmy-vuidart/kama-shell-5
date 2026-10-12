@@ -1323,6 +1323,128 @@ fn resizing_an_output_resizes_slots_and_keeps_floating_windows_inside() {
     assert_eq!(geo(&desk, 2).frame, Rect::new(672, 312, 600, 400));
 }
 
+// Asked by the dock: a screen for the next window, a habit to forget.
+
+#[test]
+fn an_application_asked_on_a_screen_opens_there_once() {
+    let mut desk = desk();
+    desk.open_next_on(AppKey::new("firefox"), RIGHT).unwrap();
+
+    let first = open(&mut desk, 1, "firefox", LEFT);
+    let second = open(&mut desk, 2, "firefox", LEFT);
+
+    assert!(matches!(first, Placement::Floating { output: RIGHT, .. }));
+    assert!(matches!(second, Placement::Floating { output: LEFT, .. }));
+}
+
+#[test]
+fn a_screen_asked_once_wins_over_the_habit_and_leaves_it_alone() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    desk.close_window(WindowId(1)).unwrap();
+    desk.open_next_on(AppKey::new("discord"), RIGHT).unwrap();
+
+    let asked = open(&mut desk, 2, "discord", LEFT);
+    let later = open(&mut desk, 3, "discord", RIGHT);
+
+    assert!(matches!(asked, Placement::Floating { output: RIGHT, .. }));
+    assert_eq!(later, Placement::Slot(slot(LEFT, 0)));
+}
+
+#[test]
+fn a_screen_asked_for_an_application_does_not_move_the_others() {
+    let mut desk = desk();
+    desk.open_next_on(AppKey::new("firefox"), RIGHT).unwrap();
+
+    let other = open(&mut desk, 1, "kitty", LEFT);
+
+    assert!(matches!(other, Placement::Floating { output: LEFT, .. }));
+    let asked = open(&mut desk, 2, "firefox", LEFT);
+    assert!(matches!(asked, Placement::Floating { output: RIGHT, .. }));
+}
+
+#[test]
+fn a_screen_held_by_a_game_cannot_be_asked_for() {
+    let mut desk = desk();
+    open(&mut desk, 1, "steam_app_7", CENTER);
+    desk.set_fullscreen(WindowId(1), None).unwrap();
+    desk.note_output_used(RIGHT);
+    desk.open_next_on(AppKey::new("firefox"), CENTER).unwrap();
+
+    let asked = open(&mut desk, 2, "firefox", LEFT);
+
+    assert!(matches!(asked, Placement::Floating { output: RIGHT, .. }));
+}
+
+#[test]
+fn asking_for_an_unknown_screen_is_refused() {
+    let mut desk = desk();
+
+    let result = desk.open_next_on(AppKey::new("firefox"), OutputId(9));
+
+    assert_eq!(result, Err(ModelError::UnknownOutput(OutputId(9))));
+}
+
+#[test]
+fn a_forgotten_application_opens_floating_again() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    desk.close_window(WindowId(1)).unwrap();
+
+    desk.forget_app(&AppKey::new("discord"));
+
+    let reopened = open(&mut desk, 2, "discord", RIGHT);
+    assert!(matches!(
+        reopened,
+        Placement::Floating { output: RIGHT, .. }
+    ));
+}
+
+#[test]
+fn a_game_opens_at_the_center_wherever_the_pointer_is() {
+    let mut desk = desk();
+
+    let game = open(&mut desk, 1, "steam_app_1245620", LEFT);
+
+    assert!(matches!(game, Placement::Floating { output: CENTER, .. }));
+}
+
+#[test]
+fn a_game_ignores_the_habit_of_its_application() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "steam_app_7", LEFT, 0);
+    desk.close_window(WindowId(1)).unwrap();
+
+    let game = open(&mut desk, 2, "steam_app_7", RIGHT);
+
+    assert!(matches!(game, Placement::Floating { output: CENTER, .. }));
+}
+
+#[test]
+fn a_second_game_opens_beside_the_one_being_played() {
+    let mut desk = desk();
+    open(&mut desk, 1, "steam_app_7", CENTER);
+    desk.set_fullscreen(WindowId(1), None).unwrap();
+    desk.note_output_used(LEFT);
+
+    let second = open(&mut desk, 2, "steam_app_8", RIGHT);
+
+    assert!(matches!(second, Placement::Floating { output: LEFT, .. }));
+}
+
+#[test]
+fn windows_are_listed_from_the_one_focused_last() {
+    let mut desk = desk();
+    open(&mut desk, 1, "kitty", LEFT);
+    open(&mut desk, 2, "firefox", LEFT);
+    open(&mut desk, 3, "discord", RIGHT);
+    desk.focus(WindowId(1)).unwrap();
+
+    let recent: Vec<u64> = desk.recent_windows().map(|id| id.0).collect();
+
+    assert_eq!(recent, [1, 3, 2]);
+}
+
 // Drop zones (rule 2).
 
 #[test]

@@ -775,6 +775,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "coquille-ipc",
  "coquille-model",
  "cosmic-text 0.19.0",
  "serde",
@@ -794,6 +795,16 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_layershell",
+]
+
+[[package]]
+name = "coquille-ipc"
+version = "0.1.0"
+dependencies = [
+ "coquille-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

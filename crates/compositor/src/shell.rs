@@ -5,8 +5,7 @@
 
 use coquille_model::{
     AppKey, AppMemory, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo,
-    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowGeometry,
-    WindowId,
+    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -84,7 +83,6 @@ impl ManagedWindow {
     pub fn buttons(&self) -> Buttons {
         Buttons {
             swap: self.show_swap,
-            add_tab: !self.geometry.floating,
         }
     }
 }
@@ -254,14 +252,8 @@ impl Shell {
         painter: &mut Painter,
         theme: &Theme,
         hover: Option<(WindowId, TitlebarButton)>,
-        armed: Option<SlotId>,
     ) {
         let corner_radius = self.desk.metrics().corner_radius;
-        // The window whose add-tab button shows as armed.
-        let armed = armed.and_then(|slot| {
-            let screen = self.desk.screen(slot.output)?;
-            screen.slots().get(slot.index)?.active()
-        });
         // What each window is called, for the tabs of its neighbours.
         let labels: Vec<(WindowId, String, [u8; 3], bool)> = self
             .windows
@@ -309,8 +301,8 @@ impl Shell {
                     .filter(|(id, _)| *id == managed.id)
                     .map(|(_, button)| button),
                 buttons: managed.buttons(),
-                armed: armed == Some(managed.id),
                 theme: theme.kind,
+                accent: theme.accent,
                 corner_radius,
                 tabs,
             };
@@ -471,13 +463,6 @@ impl State {
             covered: Size::default(),
             chrome: Chrome::default(),
         });
-        // An armed "add a tab" button takes the next window, whatever it is.
-        if let Some(slot) = self.armed_slot.take() {
-            match self.shell.desk.move_to_slot(id, slot) {
-                Ok(()) => self.shell.sync(),
-                Err(error) => warn!(%error, "cannot add the window as a tab"),
-            }
-        }
         // It opens fullscreen: its screen is anchored from the start.
         if let Some(output) = fullscreen {
             match self.shell.desk.set_fullscreen(id, output) {
@@ -575,6 +560,7 @@ impl State {
         if let Err(error) = self.shell.desk.set_title(id, title) {
             warn!(%error, "cannot retitle a window");
         }
+        self.shell_changed();
         self.queue_redraw();
     }
 
@@ -638,6 +624,7 @@ impl State {
 
         self.sync_keyboard_focus();
         self.save_habits();
+        self.shell_changed();
         self.full_redraw = true;
         self.queue_redraw();
     }
