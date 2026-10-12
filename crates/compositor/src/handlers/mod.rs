@@ -15,6 +15,7 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
 use smithay::wayland::drm_syncobj::{DrmSyncobjHandler, DrmSyncobjState};
 use smithay::wayland::output::OutputHandler;
@@ -188,7 +189,13 @@ impl DrmSyncobjHandler for State {
 /// shell's own buttons.
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        with_states(toplevel.wl_surface(), |states| {
+            states
+                .data_map
+                .insert_if_missing_threadsafe(|| AskedForDecorations);
+        });
         force_server_side(&toplevel);
+        self.decorate(toplevel.wl_surface());
     }
 
     fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
@@ -198,6 +205,17 @@ impl XdgDecorationHandler for State {
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         force_server_side(&toplevel);
     }
+}
+
+/// Marks a toplevel whose client asked the compositor to decorate it. The
+/// others (GTK applications, mostly) draw their own title bar whatever the
+/// compositor says, and get none from the shell.
+struct AskedForDecorations;
+
+pub fn asked_for_decorations(surface: &WlSurface) -> bool {
+    with_states(surface, |states| {
+        states.data_map.get::<AskedForDecorations>().is_some()
+    })
 }
 
 fn force_server_side(toplevel: &ToplevelSurface) {

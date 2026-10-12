@@ -113,6 +113,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
   - barre de titre **38 px** : icône, titre, sous-titre atténué ;
   - boutons à droite : ajouter un onglet, ⇄ (écrans latéraux uniquement), réduire, fermer ;
   - pas de bouton « agrandir » (la disposition s'en charge).
+- **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit pas celle du shell. Elle la retrouve dès qu'elle partage son emplacement, pour montrer les onglets. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range). Sans barre du shell, pas de bouton ⇄ : `Mod+C` le remplace.
 - Fenêtre active : **anneau d'accent de 2 px**. Accent par défaut : `#2f6fed` (clair), `#7aa7ff` (sombre).
 - Aucune barre sur l'écran central : il reste entièrement libre.
 - **Une barre fine (44 px) sur le bord extérieur** de chaque écran latéral, centrée verticalement, rayon 14 px :
@@ -166,7 +167,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 - Souris : glisser une barre de titre montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
 - Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
 - Boutons de la barre de titre : « réduire » cache la fenêtre (son onglet reste, grisé ; un clic dessus ou `Mod+R` la ramène) ; « ajouter un onglet » arme l'emplacement, et la prochaine fenêtre ouverte s'y empile, quelle que soit sa mémoire (second clic pour désarmer) ; ⇄ ; fermer.
-- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `6` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter.
+- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `6` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+C` échange la fenêtre active avec le centre ; `Mod+Maj+E` quitter.
 - Mode jeu : `Mod+Échap` remet le jeu en fenêtre ; `Mod` seul libère le pointeur. (En imbriqué, GNOME garde `Alt+Échap` pour lui : ce raccourci ne s'essaie qu'avec `--debug-input`.)
 - Applications X11 : `DISPLAY` est transmis aux programmes lancés par le compositeur (et aux services de la session avec `--export-environment`). `--no-xwayland` ou `xwayland = false` s'en passent.
 - Mémoire par appli : enregistrée dans `~/.local/state/coquille/memory.json` sur le matériel ; en imbriqué, seulement avec `--state-dir`.
@@ -209,7 +210,8 @@ Fait mais **jamais exécuté** (backend matériel seulement, relu et compilé) :
 
 Limites connues :
 
-- les fenêtres X11 ne se déplacent et ne se redimensionnent que par la barre de titre et les bords du shell (les demandes `_NET_WM_MOVERESIZE` des applis qui dessinent leur propre barre, comme Steam, sont ignorées ; idem pour xdg-shell) ;
+- une appli qui dessine sa propre barre peut être glissée par elle (demande de déplacement xdg-shell ou `_NET_WM_MOVERESIZE`), mais ses demandes de redimensionnement sont ignorées : une fenêtre flottante se redimensionne par les bords du shell ;
+- ne jamais appeler `pointer.unset_grab` depuis un gestionnaire de requête client (`move_request`…) : le compositeur se bloque ;
 - une fenêtre X11 sans décoration qui couvre l'écran sans demander le plein écran (`_NET_WM_STATE_FULLSCREEN`) n'est pas reconnue comme un jeu ;
 - pas de sélection primaire (clic du milieu) ni de glisser-déposer entre X11 et Wayland ; pas de `xwayland-keyboard-grab` ;
 - pas de retour dmabuf « scanout » par surface : l'affichage direct dépend de ce que le jeu alloue de lui-même ;

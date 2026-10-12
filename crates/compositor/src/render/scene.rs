@@ -198,6 +198,13 @@ pub fn build(
 
         let decorated = !geometry.anchored;
         let radius = if decorated { metrics.corner_radius } else { 0 };
+        // Under the shell's title bar the client's top corners are square;
+        // a client that draws its own bar is rounded all around.
+        let top = if geometry.titlebar.is_some() {
+            0
+        } else {
+            radius
+        };
 
         if geometry.focused && decorated {
             let outline = reach.translated(shift);
@@ -241,7 +248,7 @@ pub fn build(
         );
         if decorated {
             let clip = rectangle(client).to_physical_precise_round(SCALE);
-            let radii = [0.0, 0.0, radius as f32, radius as f32];
+            let radii = [top as f32, top as f32, radius as f32, radius as f32];
             windows.extend(surfaces.into_iter().map(|inner| {
                 SceneElement::Clipped(ClippedSurface::new(
                     inner,
@@ -267,7 +274,7 @@ pub fn build(
             } else {
                 Rgba::rgb(0)
             },
-            radii: [0, 0, radius, radius],
+            radii: [top, top, radius, radius],
             border: 0,
         };
         if drawn_w < client.w && drawn_h > 0 {

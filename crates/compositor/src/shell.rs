@@ -4,7 +4,7 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, AppMemory, Desk, DropTarget, LayoutKind, Metrics, OpenRequest, OutputId, OutputInfo,
+    AppKey, AppMemory, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo,
     OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowGeometry,
     WindowId,
 };
@@ -112,6 +112,8 @@ pub struct NewWindow {
     pub size: Option<ModelSize>,
     /// It opens fullscreen: on this screen, if it names one.
     pub fullscreen: Option<Option<OutputId>>,
+    /// Its client draws its own title bar: the shell adds none.
+    pub own_titlebar: bool,
 }
 
 pub struct Shell {
@@ -224,18 +226,7 @@ impl Shell {
     /// The stack a window belongs to, when it must show as tabs: as soon as
     /// it holds two windows, and always in the `Tabs` layout.
     fn tabs_of(&self, id: WindowId) -> Vec<WindowId> {
-        let Some(Placement::Slot(slot)) = self.desk.placement(id) else {
-            return Vec::new();
-        };
-        let Some(screen) = self.desk.screen(slot.output) else {
-            return Vec::new();
-        };
-        let stack = &screen.slots()[slot.index];
-        if stack.len() >= 2 || screen.layout() == LayoutKind::Tabs {
-            stack.windows().to_vec()
-        } else {
-            Vec::new()
-        }
+        self.desk.tab_strip(id).to_vec()
     }
 
     /// Takes the model's arrangement: geometry of each window, and stacking.
@@ -396,6 +387,9 @@ impl State {
             return;
         };
         let (app_id, title) = toplevel_names(toplevel);
+        // A client that never asked the compositor for decorations draws
+        // them itself.
+        let own_titlebar = !crate::handlers::asked_for_decorations(surface);
         self.manage(NewWindow {
             window,
             app_id,
@@ -404,6 +398,7 @@ impl State {
             screen: None,
             size: None,
             fullscreen,
+            own_titlebar,
         });
     }
 
@@ -418,6 +413,7 @@ impl State {
             screen,
             size,
             fullscreen,
+            own_titlebar,
         } = new;
         let known = screen.filter(|id| self.shell.screen(*id).is_some());
         let pointer = || self.pointer_screen().map(|screen| screen.id);
@@ -430,7 +426,11 @@ impl State {
         let id = WindowId(self.shell.next_id);
         self.shell.next_id += 1;
         let app = (habits && !app_id.is_empty()).then(|| AppKey::new(app_id.clone()));
-        let bar = self.shell.desk.metrics().titlebar_height;
+        let bar = if own_titlebar {
+            0
+        } else {
+            self.shell.desk.metrics().titlebar_height
+        };
         let mut request = OpenRequest::at(output);
         if let Some(size) = size.filter(|size| size.w > 0 && size.h > 0) {
             request = request.with_size(ModelSize::new(size.w, size.h + bar));
@@ -441,6 +441,9 @@ impl State {
         }
         if let Err(error) = self.shell.desk.set_title(id, title.clone()) {
             warn!(%error, "cannot title a new window");
+        }
+        if let Err(error) = self.shell.desk.set_own_titlebar(id, own_titlebar) {
+            warn!(%error, "cannot record who draws the title bar");
         }
         let geometry = self
             .shell
@@ -657,11 +660,44 @@ impl State {
     /// A client drew: if its window floats, the frame takes the size the
     /// client chose. The first time, the window stays centered where it
     /// opened; later it keeps its top-left corner.
+    /// A client turned out to want its decorations from the compositor after
+    /// all (it asked once its window was already open).
+    pub fn decorate(&mut self, surface: &WlSurface) {
+        let Some(id) = self.shell.by_surface(surface).map(|managed| managed.id) else {
+            return;
+        };
+        if self.shell.desk.set_own_titlebar(id, false).is_ok() {
+            self.apply_arrangement();
+        }
+    }
+
+    /// A client asks to be moved, because the user drags its own title bar:
+    /// that is the same gesture as dragging the shell's.
+    pub fn drag_from_client(&mut self, window: WindowId) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let movable = self
+            .shell
+            .by_id(window)
+            .is_some_and(|managed| !managed.geometry.anchored);
+        // Only while a button is held on the client, which is when its
+        // implicit grab is active.
+        if !movable || self.gesture.is_some() || !pointer.is_grabbed() {
+            return;
+        }
+        // The client keeps its implicit grab until the button is released;
+        // what it does with the motion in the meantime does not matter.
+        self.gesture = Some(Gesture::Placing { window });
+        self.queue_redraw();
+    }
+
     pub fn follow_client_size(&mut self, surface: &WlSurface) {
-        let bar = self.shell.desk.metrics().titlebar_height;
         let Some(managed) = self.shell.by_surface_mut(surface) else {
             return;
         };
+        // What the shell adds above the client: its title bar, if any.
+        let bar = managed.geometry.titlebar.map_or(0, |bar| bar.h);
         // An X11 window has the size it is given; it asks for another one
         // with a configure request.
         if managed.window.x11_surface().is_some() {

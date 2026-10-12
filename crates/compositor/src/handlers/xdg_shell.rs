@@ -61,6 +61,13 @@ impl XdgShellHandler for State {
         self.unmap_window(surface.wl_surface());
     }
 
+    /// The user drags the title bar the client draws itself.
+    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
+        if let Some(id) = self.shell.by_surface(surface.wl_surface()).map(|m| m.id) {
+            self.drag_from_client(id);
+        }
+    }
+
     fn minimize_request(&mut self, surface: ToplevelSurface) {
         if let Some(id) = self.shell.by_surface(surface.wl_surface()).map(|m| m.id) {
             self.minimize_window(id);

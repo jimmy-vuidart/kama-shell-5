@@ -99,7 +99,8 @@ impl From<Role> for OutputRole {
 /// Clavier : Mod+Entrée terminal ; Mod+1 à 6 disposition de l'écran du
 /// pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers +
 /// un tiers) ; Mod+Page suiv./préc. onglet suivant/précédent ; Mod+R
-/// restaure la dernière fenêtre réduite ; Mod+Maj+E quitter.
+/// restaure la dernière fenêtre réduite ; Mod+C échange la fenêtre active
+/// avec le centre ; Mod+Maj+E quitter.
 /// Ctrl+Alt+Retour arrière quitte aussi, quoi qu'il arrive.
 ///
 /// Mode jeu : une fenêtre en plein écran ancre son écran (ni décoration ni

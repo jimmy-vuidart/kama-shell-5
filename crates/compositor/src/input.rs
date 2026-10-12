@@ -248,6 +248,10 @@ impl State {
                 }
                 return;
             }
+            Action::SwapWithCenter => match desk.focused() {
+                Some(window) => desk.swap_with_center(window),
+                None => Ok(()),
+            },
             Action::LeaveFullscreen => {
                 let game = screen.and_then(|screen| desk.game_to_release(screen.id));
                 if let Some(game) = game {

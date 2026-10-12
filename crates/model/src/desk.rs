@@ -75,6 +75,9 @@ impl OpenRequest {
 pub struct WindowRecord {
     pub app: Option<AppKey>,
     pub title: String,
+    /// The client draws its own title bar, so the shell adds none, except to
+    /// show the tabs of a shared slot.
+    pub own_titlebar: bool,
 }
 
 /// Where a dragged window can be released.
@@ -244,6 +247,7 @@ impl Desk {
             WindowRecord {
                 app,
                 title: String::new(),
+                own_titlebar: false,
             },
         );
         match game.and_then(|game| self.focus_order.iter().position(|id| *id == game)) {
@@ -674,6 +678,32 @@ impl Desk {
         zones
     }
 
+    /// Says whether a window draws its own title bar.
+    pub fn set_own_titlebar(&mut self, id: WindowId, own: bool) -> Result<(), ModelError> {
+        let record = self
+            .windows
+            .get_mut(&id)
+            .ok_or(ModelError::UnknownWindow(id))?;
+        record.own_titlebar = own;
+        Ok(())
+    }
+
+    /// The windows shown as tabs in the title bar of `id`: its stack, as soon
+    /// as it holds two windows, and always in the `Tabs` layout. Empty for a
+    /// window alone in its slot, or floating.
+    pub fn tab_strip(&self, id: WindowId) -> &[WindowId] {
+        let Some((index, Spot::Slot(slot))) = self.locate(id) else {
+            return &[];
+        };
+        let screen = &self.screens[index];
+        let stack = &screen.slots()[slot];
+        if stack.len() >= 2 || screen.layout() == LayoutKind::Tabs {
+            stack.windows()
+        } else {
+            &[]
+        }
+    }
+
     /// Every window with its geometry, screen by screen, bottom to top.
     pub fn arrangement(&self) -> Vec<WindowGeometry> {
         let mut arrangement = Vec::with_capacity(self.windows.len());
@@ -712,9 +742,16 @@ impl Desk {
     ) -> WindowGeometry {
         let anchored = screen.anchored() == Some(id);
         let minimized = self.minimized.contains(&id);
+        let own_titlebar = self
+            .windows
+            .get(&id)
+            .is_some_and(|record| record.own_titlebar);
         let (frame, titlebar, client) = if anchored {
             let bounds = screen.info().bounds();
             (bounds, None, bounds)
+        } else if own_titlebar && self.tab_strip(id).is_empty() {
+            // The client draws its bar itself: the whole frame is its own.
+            (frame, None, frame)
         } else {
             let (titlebar, client) = frame.split_rows(self.metrics.titlebar_height, 0);
             (frame, Some(titlebar), client)

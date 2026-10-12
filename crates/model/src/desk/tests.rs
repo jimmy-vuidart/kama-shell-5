@@ -1575,6 +1575,88 @@ fn a_screen_in_one_piece_has_no_separation() {
     assert_eq!(desk.separator(OutputId(99)), None);
 }
 
+// Windows that draw their own title bar.
+
+#[test]
+fn a_window_with_its_own_title_bar_gets_none_from_the_shell() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", LEFT, 0);
+
+    desk.set_own_titlebar(WindowId(1), true).unwrap();
+
+    let window = geo(&desk, 1);
+    assert_eq!(window.titlebar, None);
+    assert_eq!(window.client, window.frame);
+    assert_eq!(window.frame, Rect::new(8, 8, 948, 1064));
+}
+
+#[test]
+fn a_floating_window_with_its_own_title_bar_is_all_client() {
+    let mut desk = desk();
+    open(&mut desk, 1, "steam", RIGHT);
+    desk.set_own_titlebar(WindowId(1), true).unwrap();
+
+    desk.float_window(WindowId(1), RIGHT, Rect::new(100, 100, 800, 600))
+        .unwrap();
+
+    let window = geo(&desk, 1);
+    assert_eq!(window.titlebar, None);
+    assert_eq!(window.client, Rect::new(100, 100, 800, 600));
+}
+
+#[test]
+fn sharing_a_slot_brings_the_shell_bar_back_for_its_tabs() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", LEFT, 0);
+    desk.set_own_titlebar(WindowId(1), true).unwrap();
+    open_in(&mut desk, 2, "notes", LEFT, 0);
+    desk.focus(WindowId(1)).unwrap();
+
+    let window = geo(&desk, 1);
+
+    assert_eq!(window.titlebar, Some(Rect::new(8, 8, 948, 38)));
+    assert_eq!(window.client, Rect::new(8, 46, 948, 1026));
+    assert_eq!(desk.tab_strip(WindowId(1)), [WindowId(1), WindowId(2)]);
+}
+
+#[test]
+fn the_tabs_layout_always_shows_the_strip() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", CENTER, 0);
+    desk.set_own_titlebar(WindowId(1), true).unwrap();
+
+    desk.set_layout(CENTER, LayoutKind::Tabs).unwrap();
+
+    assert!(geo(&desk, 1).titlebar.is_some());
+    assert_eq!(desk.tab_strip(WindowId(1)), [WindowId(1)]);
+}
+
+#[test]
+fn a_window_alone_in_its_slot_or_floating_has_no_tab_strip() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open(&mut desk, 2, "gimp", RIGHT);
+
+    assert!(desk.tab_strip(WindowId(1)).is_empty());
+    assert!(desk.tab_strip(WindowId(2)).is_empty());
+    assert!(desk.tab_strip(WindowId(9)).is_empty());
+}
+
+#[test]
+fn giving_the_bar_back_to_the_shell_restores_it() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", LEFT, 0);
+    desk.set_own_titlebar(WindowId(1), true).unwrap();
+
+    desk.set_own_titlebar(WindowId(1), false).unwrap();
+
+    assert!(geo(&desk, 1).titlebar.is_some());
+    assert_eq!(
+        desk.set_own_titlebar(WindowId(9), true),
+        Err(ModelError::UnknownWindow(WindowId(9)))
+    );
+}
+
 // Invariants under arbitrary sequences of operations.
 
 /// Small deterministic generator: enough to explore, and failures reproduce.
@@ -1614,7 +1696,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
             let index = rng.next(3) as usize;
 
             // Refusals are part of the contract; only consistency matters here.
-            let _outcome: Result<(), ModelError> = match rng.next(17) {
+            let _outcome: Result<(), ModelError> = match rng.next(18) {
                 0 | 1 => {
                     next_id += 1;
                     let app = AppKey::new(APPS[rng.next(4) as usize]);
@@ -1653,6 +1735,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                     }
                     Ok(())
                 }
+                16 => desk.set_own_titlebar(window, rng.next(2) == 0),
                 _ => desk.cycle_tab(slot(output, index), rng.next(2) == 0),
             };
 

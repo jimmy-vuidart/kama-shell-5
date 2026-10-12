@@ -174,6 +174,9 @@ impl State {
             screen: parent.map(|parent| parent.geometry.output),
             size: Some(ModelSize::new(wanted.w, wanted.h)),
             fullscreen,
+            // It said it wants no decoration from the window manager (Steam
+            // and others that draw their own title bar).
+            own_titlebar: window.is_decorated(),
             window: Window::new_x11_window(window),
         });
     }
@@ -383,7 +386,7 @@ impl XwmHandler for State {
         }
     }
 
-    // Moving and resizing belong to the shell: its title bar and its edges.
+    // Resizing belongs to the shell: the edges of a floating window.
     fn resize_request(
         &mut self,
         _xwm: XwmId,
@@ -393,7 +396,12 @@ impl XwmHandler for State {
     ) {
     }
 
-    fn move_request(&mut self, _xwm: XwmId, _window: X11Surface, _button: u32) {}
+    /// The user drags the title bar the application draws itself.
+    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
+        if let Some(id) = self.shell.by_x11(&window).map(|managed| managed.id) {
+            self.drag_from_client(id);
+        }
+    }
 
     /// The clipboard is shared with the X11 window that has the focus.
     fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionTarget) -> bool {
