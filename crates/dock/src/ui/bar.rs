@@ -35,10 +35,13 @@ const MARK: f32 = 4.0;
 
 /// The height of the bar for a number of favorites and of other entries.
 fn bar_height(pinned: usize, others: usize) -> f32 {
-    // The launcher, a section, the favorites, maybe a section and the
-    // others, the clock; a gap between each.
-    let mut rows = vec![SLOT, SECTION];
-    rows.extend(std::iter::repeat_n(SLOT, pinned));
+    // The launcher, the favorites and the others, each group under its
+    // section when it has entries, the clock; a gap between each.
+    let mut rows = vec![SLOT];
+    if pinned > 0 {
+        rows.push(SECTION);
+        rows.extend(std::iter::repeat_n(SLOT, pinned));
+    }
     if others > 0 {
         rows.push(SECTION);
         rows.extend(std::iter::repeat_n(SLOT, others));
@@ -56,11 +59,16 @@ pub fn surface_height(pinned: usize, others: usize) -> u32 {
 /// Where the entry `index` is in the surface (x, y, width, height): what
 /// its menu opens next to. `unfolded` says the bar shows at its full width.
 pub fn entry_rect(index: usize, pinned: usize, unfolded: bool) -> (i32, i32, i32, i32) {
-    let mut top = SHADOW + PADDING + SLOT + GAP + SECTION + GAP;
+    let mut top = SHADOW + PADDING + SLOT + GAP;
     top += index as f32 * (SLOT + GAP);
-    if index >= pinned {
-        top += SECTION + GAP;
-    }
+    // The titles of the groups above it: its own, and the one of the
+    // favorites when it comes after them.
+    let sections = if index >= pinned && pinned > 0 {
+        2.0
+    } else {
+        1.0
+    };
+    top += sections * (SECTION + GAP);
     let width = if unfolded { UNFOLDED } else { WIDTH };
     (MARGIN as i32, top as i32, width as i32, SLOT as i32)
 }
@@ -121,10 +129,12 @@ pub fn bar(dock: &Dock, unfold: f32, live: bool, palette: Palette) -> Element<'_
     let others = dock.entries.len() - pinned;
 
     let mut rows: Column<'_, Message> = column![launcher(dock, labels, live, palette)].spacing(GAP);
-    rows = rows.push(section("FAVORIS", labels, palette));
     for (index, entry) in dock.entries.iter().enumerate() {
+        if index == 0 && pinned > 0 {
+            rows = rows.push(section("FAVORIS", labels, palette));
+        }
         if index == pinned {
-            rows = rows.push(section("SUR CET ÉCRAN", labels, palette));
+            rows = rows.push(section("OUVERTES", labels, palette));
         }
         rows = rows.push(entry_row(dock, index, entry, labels, live, palette));
     }
@@ -389,14 +399,15 @@ mod tests {
 
     #[test]
     fn the_bar_grows_with_its_entries() {
-        let empty = surface_height(0, 0);
-
-        assert_eq!(surface_height(1, 0) - empty, (SLOT + GAP) as u32);
-        // The first entry that is not a favorite brings its section along.
         assert_eq!(
-            surface_height(1, 1) - surface_height(1, 0),
-            (SLOT + GAP + SECTION + GAP) as u32
+            surface_height(2, 0) - surface_height(1, 0),
+            (SLOT + GAP) as u32
         );
+        // The first entry of a group brings the title of the group along.
+        let with_title = (SLOT + GAP + SECTION + GAP) as u32;
+        assert_eq!(surface_height(1, 0) - surface_height(0, 0), with_title);
+        assert_eq!(surface_height(1, 1) - surface_height(1, 0), with_title);
+        assert_eq!(surface_height(0, 1) - surface_height(0, 0), with_title);
     }
 
     #[test]
@@ -411,6 +422,8 @@ mod tests {
         assert_eq!(second - first, 40);
         // Past the favorites, the title of the second group is in between.
         assert_eq!(other - first, 3 * 40 + 22);
+        // Without favorites, the first open application takes their place.
+        assert_eq!(entry_rect(0, 0, false).1, first);
     }
 
     #[test]

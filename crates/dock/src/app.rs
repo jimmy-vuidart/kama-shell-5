@@ -148,6 +148,8 @@ pub enum Message {
     StreamMute(String),
     Session(SessionAction),
     Confirm(bool),
+    /// A session action did not go through: why.
+    SessionRefused(String),
     Settings,
     /// The whole Steam library.
     Library,
@@ -999,10 +1001,39 @@ impl Dock {
                     return Task::none();
                 }
                 info!(?action, "session action");
-                match action {
-                    SessionAction::Logout => self.send(Command::Quit),
-                    SessionAction::Restart => spawn("systemctl reboot"),
-                    SessionAction::PowerOff => spawn("systemctl poweroff"),
+                let Some(command) = action.command() else {
+                    // Logging out: the compositor quits, and the session
+                    // with it.
+                    if self.link.is_none() {
+                        let reason = "le compositeur ne répond pas.";
+                        return self.update(Message::SessionRefused(action.failure(reason)));
+                    }
+                    self.send(Command::Quit);
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        let run = tokio::process::Command::new(command[0])
+                            .args(&command[1..])
+                            .output()
+                            .await;
+                        match run {
+                            Ok(output) if output.status.success() => None,
+                            Ok(output) => {
+                                let said = String::from_utf8_lossy(&output.stderr);
+                                Some(action.failure(&said))
+                            }
+                            Err(error) => Some(action.failure(&error.to_string())),
+                        }
+                    },
+                    |refusal| refusal,
+                )
+                .and_then(|refusal| Task::done(Message::SessionRefused(refusal)))
+            }
+            Message::SessionRefused(why) => {
+                warn!(why, "session action refused");
+                if let Some(drawer) = &mut self.drawer {
+                    drawer.note = Some(why);
                 }
                 Task::none()
             }

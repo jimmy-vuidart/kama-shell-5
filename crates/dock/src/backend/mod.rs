@@ -24,19 +24,20 @@ pub enum Backend {
     Bluetooth,
     /// The brightness of the screens, through DDC/CI.
     Brightness,
-    /// Logging out, restarting, powering off. Simulated unless asked for:
-    /// nothing may end the session by accident.
+    /// Logging out, restarting, powering off: always after a confirmation.
     Session,
 }
 
 impl Backend {
-    /// The backends that are real unless the dock is told otherwise.
-    pub const DEFAULT: [Self; 5] = [
+    /// The backends that are real unless the dock is told otherwise: all
+    /// of them.
+    pub const DEFAULT: [Self; 6] = [
         Self::Compositor,
         Self::Audio,
         Self::Network,
         Self::Bluetooth,
         Self::Brightness,
+        Self::Session,
     ];
 }
 
@@ -105,6 +106,45 @@ impl Request {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logging_out_is_asked_of_the_compositor_not_of_a_program() {
+        assert_eq!(SessionAction::Logout.command(), None);
+    }
+
+    #[test]
+    fn restarting_and_powering_off_go_through_the_system_without_a_prompt() {
+        let restart = SessionAction::Restart.command().unwrap();
+        let power_off = SessionAction::PowerOff.command().unwrap();
+
+        assert_eq!(restart, ["systemctl", "reboot", "--no-ask-password"]);
+        assert_eq!(power_off, ["systemctl", "poweroff", "--no-ask-password"]);
+    }
+
+    #[test]
+    fn every_service_is_real_unless_the_dock_is_told_to_pretend() {
+        assert!(Backend::DEFAULT.contains(&Backend::Session));
+        assert_eq!(Backend::DEFAULT.len(), 6);
+    }
+
+    #[test]
+    fn a_refusal_of_the_system_is_told_in_one_line() {
+        let refusal = "Failed to reboot system via logind: Interactive authentication required.\n";
+
+        assert_eq!(
+            SessionAction::Restart.failure(refusal),
+            "Redémarrer : Failed to reboot system via logind: Interactive authentication required."
+        );
+        assert_eq!(
+            SessionAction::PowerOff.failure("  \n"),
+            "Éteindre : refusé par le système."
+        );
+    }
+}
+
 /// What ends or restarts the session, always after a confirmation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionAction {
@@ -130,5 +170,25 @@ impl SessionAction {
             Self::Restart => "Redémarrer",
             Self::PowerOff => "Éteindre",
         }
+    }
+
+    /// The program that does it. Logging out has none: the compositor is
+    /// asked to quit, which ends the session. The others go through
+    /// systemd, which must refuse rather than ask for a password nobody
+    /// could type.
+    pub fn command(self) -> Option<[&'static str; 3]> {
+        match self {
+            Self::Logout => None,
+            Self::Restart => Some(["systemctl", "reboot", "--no-ask-password"]),
+            Self::PowerOff => Some(["systemctl", "poweroff", "--no-ask-password"]),
+        }
+    }
+
+    /// What to tell the user when the system refused: its own words when it
+    /// gave some.
+    pub fn failure(self, reason: &str) -> String {
+        let reason = reason.lines().find(|line| !line.trim().is_empty());
+        let reason = reason.map_or("refusé par le système.", str::trim);
+        format!("{} : {reason}", self.verb())
     }
 }

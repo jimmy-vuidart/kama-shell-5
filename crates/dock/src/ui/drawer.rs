@@ -75,9 +75,13 @@ fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
 
     let mut content: Column<'_, Message> = column![search(drawer, palette)].spacing(12);
     if drawer.query.trim().is_empty() {
+        // Nothing pinned: no empty heading.
+        if !dock.config.pinned.is_empty() {
+            content = content
+                .push(pinned(dock, drawer, palette))
+                .push(rule(palette));
+        }
         content = content
-            .push(pinned(dock, drawer, palette))
-            .push(rule(palette))
             .push(applications(dock, drawer, palette))
             .push(rule(palette))
             .push(games(dock, palette));

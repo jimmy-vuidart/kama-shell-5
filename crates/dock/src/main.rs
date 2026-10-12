@@ -27,7 +27,7 @@ struct Cli {
     mock: bool,
 
     /// Les services réels à utiliser, séparés par des virgules ; les autres
-    /// sont simulés. Sans cette option : tous sauf « session ».
+    /// sont simulés. Sans cette option : tous.
     #[arg(long, value_enum, value_delimiter = ',', value_name = "SERVICES")]
     backends: Option<Vec<Backend>>,
 
@@ -61,7 +61,7 @@ fn state_dir() -> PathBuf {
 fn main() -> iced_layershell::Result {
     let cli = Cli::parse();
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new("warn,wgpu_hal=error,coquille_dock=info")
+        tracing_subscriber::EnvFilter::new("warn,wgpu_hal=error,usvg=error,coquille_dock=info")
     });
     tracing_subscriber::fmt()
         .with_env_filter(filter)

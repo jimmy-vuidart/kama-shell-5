@@ -51,7 +51,7 @@ qui le relance s'il tombe (cinq chutes d'affilée et il renonce).
 | Option | Effet |
 |---|---|
 | `--mock` | Simule tout : fenêtres, son, réseau, Bluetooth, luminosité, session. |
-| `--backends a,b,…` | Les services réels à utiliser, les autres étant simulés : `compositor`, `audio`, `network`, `bluetooth`, `brightness`, `session`. Sans l'option : tous sauf `session`. |
+| `--backends a,b,…` | Les services réels à utiliser, les autres étant simulés : `compositor`, `audio`, `network`, `bluetooth`, `brightness`, `session`. Sans l'option : tous. |
 | `--output NOM` | L'écran où s'afficher. Par défaut, celui que le compositeur désigne comme écran gauche. |
 | `--config FICHIER` | Fichier de configuration (défaut : `~/.config/coquille/config.toml`). |
 | `--state-dir DOSSIER` | Où garder les volumes par application (défaut : `~/.local/state/coquille`, et un dossier temporaire avec `--mock`). |
@@ -60,8 +60,12 @@ qui le relance s'il tombe (cinq chutes d'affilée et il renonce).
 `RUST_LOG=coquille_dock=debug` détaille ce que fait le dock.
 
 **Session.** Se déconnecter, Redémarrer et Éteindre demandent toujours une
-confirmation, et restent **simulés** (journalisés, rien n'est fait) tant que
-`session` ne figure pas dans `--backends`.
+confirmation, puis agissent pour de vrai : la déconnexion demande au
+compositeur de quitter, le redémarrage et l'extinction passent par
+`systemctl reboot` et `systemctl poweroff`. Si le système refuse, sa raison
+s'affiche sous le nom de l'utilisateur. Seul `--mock` (ou une liste
+`--backends` sans `session`) les simule : **en imbriqué sans `--mock`,
+Redémarrer redémarre vraiment la machine.**
 
 ## Configuration
 
@@ -91,7 +95,9 @@ n'est jamais réécrit.
 
 ## Ce que fait la souris
 
-- **Barre** : clic gauche lance ou montre la fenêtre utilisée en dernier (un
+- **Barre** : elle montre les favoris, puis toutes les autres applis
+  ouvertes, quel que soit leur écran (barre d'accent : ouverte sur l'écran
+  du dock ; point gris : ouverte ailleurs). Clic gauche lance ou montre la fenêtre utilisée en dernier (un
   nouveau clic passe à la suivante, une fenêtre réduite revient) ; clic
   milieu ouvre une nouvelle fenêtre ; clic droit ouvre le menu (ouvrir sur un
   écran, épingler, oublier la place, fermer) ; glisser un favori le déplace.

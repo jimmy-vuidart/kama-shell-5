@@ -3,10 +3,10 @@
 # starts the dock again whenever it falls, for as long as that compositor
 # lives. Extra arguments, and those of COQUILLE_DOCK_ARGS, go to the dock:
 #
-#   COQUILLE_DOCK_ARGS="--backends compositor,audio,network,bluetooth,brightness,session"
+#   COQUILLE_DOCK_ARGS="--backends compositor,audio,network,bluetooth,brightness"
 #
-# makes "Se déconnecter", "Redémarrer" and "Éteindre" real; without it they
-# only pretend. COQUILLE_NO_DOCK=1 starts no dock at all.
+# makes "Se déconnecter", "Redémarrer" and "Éteindre" only pretend (they are
+# real otherwise). COQUILLE_NO_DOCK=1 starts no dock at all.
 #
 # What the dock says goes to ~/.local/state/coquille/dock.log; the log of
 # the previous session is kept beside it.

@@ -22,7 +22,7 @@ pub enum Indicator {
 pub struct Entry {
     pub identity: Identity,
     /// It is one of the favorites; otherwise it is only there because it
-    /// has a window on this screen.
+    /// has a window open, on whatever screen.
     pub pinned: bool,
     /// Its windows, the one focused last first.
     pub windows: Vec<Window>,
@@ -44,7 +44,8 @@ pub struct World<'a> {
 }
 
 /// The applications of the bar: the favorites in the order of the
-/// configuration, then the other applications open on this screen, by name.
+/// configuration, then the other applications open on any screen, by name.
+/// There is one dock for the three screens: it shows them all.
 pub fn entries(world: &World<'_>, identify: &dyn Fn(&str) -> Identity) -> Vec<Entry> {
     let mut entries: Vec<Entry> = Vec::new();
     for favorite in world.favorites {
@@ -64,12 +65,11 @@ pub fn entries(world: &World<'_>, identify: &dyn Fn(&str) -> Identity) -> Vec<En
             .find(|entry| entry.identity.key == identity.key);
         match known {
             Some(entry) => entry.windows.push(window.clone()),
-            None if window.screen == world.here => {
+            None => {
                 let mut entry = blank(identity, false);
                 entry.windows.push(window.clone());
                 entries.push(entry);
             }
-            None => {}
         }
     }
     entries[pinned..].sort_by_key(|entry| super::drawer::fold(&entry.identity.name));
@@ -108,30 +108,26 @@ fn blank(identity: Identity, pinned: bool) -> Entry {
     }
 }
 
+/// Where an application is, then what is worth knowing about it: "Ici",
+/// "Écran droit · 2 fenêtres", "Écran central · en jeu".
 fn subtitle(entry: &Entry, world: &World<'_>) -> String {
     let Some(latest) = entry.windows.first() else {
         return "Fermé".to_owned();
     };
-    let here: Vec<&Window> = entry
+    let here = entry
         .windows
         .iter()
-        .filter(|window| window.screen == world.here)
-        .collect();
-    if here.is_empty() {
-        let playing = world
-            .screens
-            .iter()
-            .any(|screen| screen.role == latest.screen && screen.anchored);
-        let screen = latest.screen.label();
-        return if playing && entry.identity.game {
-            format!("{screen} · en jeu")
-        } else {
-            screen.to_owned()
-        };
-    }
-    let detail = if !entry.pinned {
+        .any(|window| window.screen == world.here);
+    let place = if here { "Ici" } else { latest.screen.label() };
+    let playing = world
+        .screens
+        .iter()
+        .any(|screen| screen.role == latest.screen && screen.anchored);
+    let detail = if !here && playing && entry.identity.game {
+        Some("en jeu".to_owned())
+    } else if !entry.pinned {
         Some("non épinglée".to_owned())
-    } else if here.iter().all(|window| window.minimized) {
+    } else if entry.windows.iter().all(|window| window.minimized) {
         Some("réduite".to_owned())
     } else if entry.windows.len() > 1 {
         Some(format!("{} fenêtres", entry.windows.len()))
@@ -139,8 +135,8 @@ fn subtitle(entry: &Entry, world: &World<'_>) -> String {
         None
     };
     match detail {
-        Some(detail) => format!("Ici · {detail}"),
-        None => "Ici".to_owned(),
+        Some(detail) => format!("{place} · {detail}"),
+        None => place.to_owned(),
     }
 }
 
@@ -343,17 +339,47 @@ mod tests {
     }
 
     #[test]
-    fn other_applications_open_on_this_screen_follow_by_name() {
+    fn the_other_applications_open_on_any_screen_follow_by_name() {
         let windows = [
             window(1, "obsidian", HERE),
-            window(2, "gimp", HERE),
+            window(2, "gimp", OutputRole::Center),
             window(3, "mpv", OutputRole::Right),
         ];
 
         let entries = bar(&["firefox"], &windows);
 
-        assert_eq!(keys(&entries), ["firefox", "gimp", "obsidian"]);
-        assert!(!entries[1].pinned && !entries[2].pinned);
+        assert_eq!(keys(&entries), ["firefox", "gimp", "mpv", "obsidian"]);
+        assert!(entries[1..].iter().all(|entry| !entry.pinned));
+    }
+
+    #[test]
+    fn an_application_open_on_another_screen_says_which_one() {
+        let entries = bar(&[], &[window(3, "mpv", OutputRole::Right)]);
+
+        assert_eq!(entries[0].indicator, Indicator::Elsewhere);
+        assert_eq!(entries[0].subtitle, "Écran droit · non épinglée");
+    }
+
+    #[test]
+    fn several_windows_on_another_screen_are_counted() {
+        let windows = [
+            window(1, "firefox", OutputRole::Right),
+            window(2, "firefox", OutputRole::Right),
+        ];
+
+        let entries = bar(&["firefox"], &windows);
+
+        assert_eq!(entries[0].subtitle, "Écran droit · 2 fenêtres");
+    }
+
+    #[test]
+    fn a_window_hidden_on_another_screen_is_said_to_be() {
+        let mut hidden = window(1, "kitty", OutputRole::Center);
+        hidden.minimized = true;
+
+        let entries = bar(&["kitty"], &[hidden]);
+
+        assert_eq!(entries[0].subtitle, "Écran central · réduite");
     }
 
     #[test]

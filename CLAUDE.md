@@ -188,7 +188,7 @@ Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les régl
 
 `scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
 
-Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options (par exemple `--backends …,session` pour rendre réelles les actions de session, simulées sinon).
+Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options. Ses boutons Se déconnecter, Redémarrer et Éteindre sont **réels** (après confirmation) partout sauf avec `--mock` : en imbriqué aussi, Redémarrer redémarre la machine.
 
 `scripts/install.sh --session` ajoute en plus deux sessions à l'écran de connexion (`/usr/share/wayland-sessions/`, seul endroit qui demande `sudo`) : « coquille » et « coquille (essai, 60 secondes) ». La session par défaut n'est jamais modifiée. `scripts/install.sh --uninstall` retire tout.
 
@@ -234,9 +234,9 @@ Fait, **vérifié en imbriqué** (essais scriptés, captures relues) et par test
 - panneaux layer-shell dans le compositeur : zone réservée, menus (popups), clavier à la demande, retrait sur un écran ancré ;
 - canal du shell : état poussé, commandes (activer, fermer, ouvrir sur un écran, oublier une place, basculer le tiroir, changer de thème, quitter) ;
 - règles du modèle : ouvrir une fois sur un écran sans toucher à la mémoire, oublier une place, jeux au centre (classe `steam_app_*`) ;
-- dock : barre (favoris, fenêtres de l'écran, indicateurs, heure), déploiement au survol, clics, menu contextuel, réordonnancement ; tiroir (recherche, épinglées, applications paginées, jeux Steam) ; centre de contrôle et mixeur ; favoris et thème réécrits dans `config.toml`.
+- dock : barre (favoris, puis toutes les applis ouvertes des trois écrans, indicateurs, heure), déploiement au survol, clics, menu contextuel, réordonnancement ; tiroir (recherche, épinglées, applications paginées, jeux Steam) ; centre de contrôle et mixeur ; favoris et thème réécrits dans `config.toml`.
 
-Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth depuis le centre de contrôle (les états sont lus, les bascules n'ont pas été actionnées), la luminosité (`ddcutil` n'est pas installé), les actions de session réelles (`--backends session`), et le dock sur le backend matériel.
+Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth depuis le centre de contrôle (les états sont lus, les bascules n'ont pas été actionnées), la luminosité (`ddcutil` n'est pas installé), Redémarrer et Éteindre (seule la déconnexion a été essayée, en imbriqué).
 
 Intégration à la session : écrite, **essayée en imbriqué et dans un dossier d'essai seulement** (`scripts/install.sh` avec `PREFIX`, `SESSIONS_DIR` et les dossiers XDG redirigés ; `coquille-dock-watch` relance bien un dock tué et s'arrête avec le compositeur). Jamais lancée depuis l'écran de connexion. Si le dock ne s'affiche pas sur le matériel (il dessine avec le GPU, par wgpu), `ICED_BACKEND=tiny-skia` le fait dessiner sans.
 

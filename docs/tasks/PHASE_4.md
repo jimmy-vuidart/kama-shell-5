@@ -18,8 +18,8 @@ phase 2 » et « État de la phase 3 »).
       accent, sections du dock acceptées dans la configuration.
 - [x] 5. Dock interactif : survol, clics, menu contextuel, réordonnancement.
 - [x] 6. Tiroir : recherche, épinglées, applications paginées, jeux Steam.
-- [x] 7. Centre de contrôle et mixeur avec les services réels ; session
-      simulée.
+- [x] 7. Centre de contrôle et mixeur avec les services réels. Les actions
+      de session, d'abord simulées, sont réelles depuis que Jimmy l'a demandé.
 - [x] 8. Intégration à la session : `scripts/install.sh` installe
       `coquille-dock` et `coquille-dock-watch`, `coquille-session` lance le
       dock avec le compositeur et le relance s'il tombe (journal :
@@ -37,6 +37,10 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
 - `Super` seul ouvre le tiroir et libère le pointeur d'un jeu ;
   `Super+Échap` remet le jeu en fenêtre.
 - Le bouton « ajouter un onglet » des barres de titre est supprimé.
+- Un seul dock pour les trois écrans : il montre toutes les applis
+  ouvertes, pas seulement celles de l'écran gauche.
+- Se déconnecter, Redémarrer et Éteindre sont réels, après confirmation ;
+  seul `--mock` les simule.
 - Les favoris et le thème changés à la souris sont réécrits dans
   `config.toml`, commentaires conservés.
 - La police Figtree est embarquée dans le binaire du dock.
@@ -52,7 +56,7 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
 |---|---|
 | Lancer une appli | tiroir, favoris |
 | Retrouver une fenêtre réduite | clic sur son icône dans le dock |
-| Voir les fenêtres d'un écran | écran gauche seulement (« SUR CET ÉCRAN ») |
+| Voir les fenêtres ouvertes | toutes, des trois écrans (favoris puis « OUVERTES »), avec leur écran |
 | Heure, réseau, son | dock et centre de contrôle |
 | Bascule « ne pas déranger » | centre de contrôle, sans effet |
 | Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `6`) |
