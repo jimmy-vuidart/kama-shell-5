@@ -1,5 +1,17 @@
-//! What a window is called and which color stands for its application,
-//! derived from its `app_id` until real desktop entries are read.
+//! What a window is called and what stands for its application: the name
+//! and the icon of its desktop entry when it has one, else a name made from
+//! its `app_id` and a color.
+
+use coquille_apps::Catalog;
+
+/// The name of the application of a window, and the name of its icon when
+/// the application is installed with a desktop entry.
+pub fn identity(catalog: &Catalog, app_id: &str) -> (String, Option<String>) {
+    match catalog.find(app_id) {
+        Some(app) => (app.name.clone(), app.icon.clone()),
+        None => (display_name(app_id), None),
+    }
+}
 
 /// Colors of the application badge, as in the mock-ups.
 pub const BADGE_PALETTE: [[u8; 3]; 8] = [
@@ -36,7 +48,42 @@ pub fn badge_color(app_id: &str) -> [u8; 3] {
 
 #[cfg(test)]
 mod tests {
+    use coquille_apps::App;
+
     use super::*;
+
+    fn catalog() -> Catalog {
+        Catalog::new(vec![App {
+            id: "org.gnome.Nautilus".into(),
+            name: "Fichiers".into(),
+            command: "nautilus --new-window".into(),
+            icon: Some("org.gnome.Nautilus".into()),
+            wm_class: None,
+        }])
+    }
+
+    #[test]
+    fn a_window_bears_the_name_and_the_icon_of_its_application() {
+        let (name, icon) = identity(&catalog(), "org.gnome.Nautilus");
+
+        assert_eq!(name, "Fichiers");
+        assert_eq!(icon.as_deref(), Some("org.gnome.Nautilus"));
+    }
+
+    #[test]
+    fn an_application_is_found_whatever_way_its_window_names_it() {
+        assert_eq!(identity(&catalog(), "nautilus").0, "Fichiers");
+        assert_eq!(identity(&catalog(), "Nautilus").0, "Fichiers");
+    }
+
+    #[test]
+    fn an_unknown_application_keeps_a_name_made_from_its_identifier() {
+        let (name, icon) = identity(&catalog(), "org.example.editor");
+
+        assert_eq!(name, "Editor");
+        assert_eq!(icon, None);
+        assert_eq!(identity(&catalog(), "").0, "Application");
+    }
 
     #[test]
     fn a_reverse_domain_app_id_gives_its_last_segment() {

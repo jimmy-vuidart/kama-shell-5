@@ -1,6 +1,4 @@
-//! The applications installed on the system, read from their `.desktop`
-//! files: what the drawer lists, and how a window is given its real name
-//! and icon.
+//! Desktop entries: reading one, and the catalog of all of them.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

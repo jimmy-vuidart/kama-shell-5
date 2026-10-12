@@ -22,7 +22,6 @@ use tracing::{debug, info, warn};
 use crate::backend::{
     self, Audio, Backend, Request, SessionAction, Switch, compositor, mock, services,
 };
-use crate::catalog::{App, Catalog};
 use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::drawer::{self, Step};
@@ -32,6 +31,7 @@ use crate::steam::{self, Game};
 use crate::ui;
 use crate::ui::icons::Icons;
 use crate::ui::style::{Palette, parse_color};
+use coquille_apps::{App, Catalog};
 
 /// How long the bar takes to unfold under the pointer.
 const UNFOLD: Duration = Duration::from_millis(140);

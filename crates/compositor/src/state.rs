@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
+use coquille_apps::Catalog;
 use coquille_model::{AppMemory, OutputId, Point as ModelPoint, WindowId};
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -121,6 +122,8 @@ pub struct State {
     pub outputs: Vec<ScreenOutput>,
     pub backend: Backend,
     pub shell: Shell,
+    /// The applications installed, for the names and icons of title bars.
+    pub catalog: Catalog,
     pub theme: Theme,
     /// The accent the user chose, kept across changes of theme.
     pub accent: Option<Rgba>,
@@ -275,6 +278,7 @@ impl State {
                 None => Theme::new(options.theme),
             },
             accent: options.accent,
+            catalog: Catalog::load(),
             painter: Painter::new(),
             ipc: None,
             hover: None,

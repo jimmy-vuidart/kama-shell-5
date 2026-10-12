@@ -4,9 +4,12 @@
 #
 #   coquille-session --exit-after 60    quits by itself after a minute
 #
+# The dock starts with the compositor, and again if it falls (see
+# coquille-dock-watch, which also says how to do without it).
+#
 # The log is kept in ~/.local/state/coquille/session.log; the log of the
 # previous start is kept beside it, so that a crash is not erased by the next
-# attempt.
+# attempt. The dock has its own, dock.log, in the same place.
 
 # A display manager starts the session as a Wayland one; a login on a virtual
 # terminal does not. Only the former owns the user's session services, which
@@ -29,4 +32,4 @@ fi
 # the session is named in full by the installer.
 here="$(dirname "$(readlink -f "$0")")"
 exec "$here/coquille" --backend hardware --log-file "$state/session.log" \
-    --spawn "@TERMINAL@" "$@"
+    --spawn "exec \"$here/coquille-dock-watch\"" --spawn "@TERMINAL@" "$@"

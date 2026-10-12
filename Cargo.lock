@@ -786,9 +786,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "coquille-apps",
  "coquille-ipc",
  "coquille-model",
  "cosmic-text 0.19.0",
+ "resvg",
  "serde",
  "serde_json",
  "smithay",
@@ -801,14 +803,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "coquille-apps"
+version = "0.1.0"
+dependencies = [
+ "freedesktop-icons",
+]
+
+[[package]]
 name = "coquille-dock"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "coquille-apps",
  "coquille-ipc",
  "coquille-model",
- "freedesktop-icons",
  "iced",
  "iced_layershell",
  "serde",

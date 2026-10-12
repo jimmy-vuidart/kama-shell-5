@@ -1,0 +1,49 @@
+#!/bin/sh
+# Keeps the dock running inside coquille: started by the compositor, it
+# starts the dock again whenever it falls, for as long as that compositor
+# lives. Extra arguments, and those of COQUILLE_DOCK_ARGS, go to the dock:
+#
+#   COQUILLE_DOCK_ARGS="--backends compositor,audio,network,bluetooth,brightness,session"
+#
+# makes "Se déconnecter", "Redémarrer" and "Éteindre" real; without it they
+# only pretend. COQUILLE_NO_DOCK=1 starts no dock at all.
+#
+# What the dock says goes to ~/.local/state/coquille/dock.log; the log of
+# the previous session is kept beside it.
+
+[ -n "$COQUILLE_NO_DOCK" ] && exit 0
+
+here="$(dirname "$(readlink -f "$0")")"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
+log="$state/dock.log"
+mkdir -p "$state"
+if [ -f "$log" ]; then
+    mv -f "$log" "$state/dock.previous.log"
+fi
+
+# The compositor is the parent: `--spawn "exec …"` leaves no shell between.
+compositor=$PPID
+alive() {
+    kill -0 "$compositor" 2>/dev/null
+}
+
+# A dock that keeps falling at once is broken: it is not started for ever.
+falls=0
+while alive; do
+    started=$(date +%s)
+    # shellcheck disable=SC2086 # several arguments in one variable
+    "$here/coquille-dock" $COQUILLE_DOCK_ARGS "$@" >>"$log" 2>&1
+    status=$?
+    alive || break
+    if [ $(($(date +%s) - started)) -lt 10 ]; then
+        falls=$((falls + 1))
+    else
+        falls=0
+    fi
+    if [ "$falls" -ge 5 ]; then
+        echo "$(date '+%F %T') the dock fell $falls times in a row (status $status): giving up" >>"$log"
+        exit 1
+    fi
+    echo "$(date '+%F %T') the dock stopped (status $status): starting it again" >>"$log"
+    sleep 1
+done

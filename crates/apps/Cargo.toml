@@ -1,0 +1,13 @@
+[package]
+name = "coquille-apps"
+description = "The applications installed on the system, for the coquille shell: names, commands, icons."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+freedesktop-icons = "0.4"
+
+[lints]
+workspace = true

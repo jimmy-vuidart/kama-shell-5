@@ -112,7 +112,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
 - Thèmes **clair** et **sombre**.
 - Fenêtres : rayon **12 px**, espacement **8 px** entre emplacements et avec les bords.
 - **Décorations côté serveur** (dessinées par le compositeur, via `xdg-decoration`) :
-  - barre de titre **38 px** : icône, titre, sous-titre atténué ;
+  - barre de titre **38 px** : icône et nom de l'appli (ceux de son fichier `.desktop` ; à défaut un carré de couleur et un nom tiré de son identifiant), sous-titre atténué ;
   - boutons à droite : ⇄ (écrans latéraux uniquement), réduire, fermer ;
   - pas de bouton « agrandir » (la disposition s'en charge).
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit pas celle du shell. Elle la retrouve dès qu'elle partage son emplacement, pour montrer les onglets. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range). Sans barre du shell, pas de bouton ⇄ : `Mod+C` le remplace.
@@ -130,6 +130,7 @@ coquille/
 │  ├─ model/        # logique pure : écrans, dispositions, emplacements, règles, mémoire.
 │  │                # AUCUNE dépendance Wayland. Entièrement testé unitairement.
 │  ├─ ipc/          # ce que le compositeur et le dock se disent (JSON par lignes).
+│  ├─ apps/         # les applis installées (fichiers .desktop, icônes du thème).
 │  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.
 │  └─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
 ├─ vendor/          # code tiers porté dans le dépôt (voir vendor/README.md).
@@ -185,11 +186,13 @@ Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les régl
 
 ### Installer
 
-`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-session` (lanceur de session), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
+`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
+
+Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options (par exemple `--backends …,session` pour rendre réelles les actions de session, simulées sinon).
 
 `scripts/install.sh --session` ajoute en plus deux sessions à l'écran de connexion (`/usr/share/wayland-sessions/`, seul endroit qui demande `sudo`) : « coquille » et « coquille (essai, 60 secondes) ». La session par défaut n'est jamais modifiée. `scripts/install.sh --uninstall` retire tout.
 
-Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises. Ce que dit le serveur X va à côté, dans `xwayland.log`.
+Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises. Ce que dit le serveur X va à côté, dans `xwayland.log`, et ce que dit le dock dans `dock.log` (et `dock.previous.log`).
 
 ### État de la phase 2
 
@@ -235,7 +238,9 @@ Fait, **vérifié en imbriqué** (essais scriptés, captures relues) et par test
 
 Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth depuis le centre de contrôle (les états sont lus, les bascules n'ont pas été actionnées), la luminosité (`ddcutil` n'est pas installé), les actions de session réelles (`--backends session`), et le dock sur le backend matériel.
 
-Pas fait : l'intégration à la session (`scripts/install.sh` n'installe pas encore `coquille-dock`, `coquille-session` ne le lance pas) ; les messages non lus réels ; glisser une icône du tiroir vers un écran. Limites du dock : `crates/dock/README.md`.
+Intégration à la session : écrite, **essayée en imbriqué et dans un dossier d'essai seulement** (`scripts/install.sh` avec `PREFIX`, `SESSIONS_DIR` et les dossiers XDG redirigés ; `coquille-dock-watch` relance bien un dock tué et s'arrête avec le compositeur). Jamais lancée depuis l'écran de connexion. Si le dock ne s'affiche pas sur le matériel (il dessine avec le GPU, par wgpu), `ICED_BACKEND=tiny-skia` le fait dessiner sans.
+
+Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un écran. Limites du dock : `crates/dock/README.md`.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 

@@ -20,8 +20,11 @@ phase 2 » et « État de la phase 3 »).
 - [x] 6. Tiroir : recherche, épinglées, applications paginées, jeux Steam.
 - [x] 7. Centre de contrôle et mixeur avec les services réels ; session
       simulée.
-- [ ] 8. Intégration à la session (`scripts/install.sh`, `coquille-session`) :
-      **à faire quand Jimmy le demande**.
+- [x] 8. Intégration à la session : `scripts/install.sh` installe
+      `coquille-dock` et `coquille-dock-watch`, `coquille-session` lance le
+      dock avec le compositeur et le relance s'il tombe (journal :
+      `dock.log`). Essayée en imbriqué et dans un dossier d'essai ; **reste à
+      lancer `scripts/install.sh` et à ouvrir la session pour de vrai**.
 - [ ] 9. Optionnel : messages non lus réels (`com.canonical.Unity.LauncherEntry`),
       glisser une icône du tiroir vers un écran.
 
@@ -77,9 +80,8 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
       fermeture à la souris hors du dock (son menu « Fermer la fenêtre » le
       fait pour les applis qu'il montre) : un raccourci « fermer la fenêtre
       active ».
-- [ ] Les barres de titre affichent encore un carré de couleur et un nom
-      déduit de l'identifiant : le catalogue `.desktop` du dock pourrait leur
-      donner les vrais noms et icônes.
+- [x] Les barres de titre et les onglets montrent le vrai nom et la vraie
+      icône de l'appli (crate `apps`, partagée avec le dock).
 - [ ] Le message « écran de connexion : non installée » de
       `scripts/install.sh` est trompeur quand les entrées existent déjà.
 

@@ -33,6 +33,19 @@ En imbriqué `--three-screens`, l'écran gauche simulé est trop étroit pour le
 tiroir (640 px) : `--role left` donne un écran gauche de la taille de la
 fenêtre.
 
+## Dans la session
+
+`scripts/install.sh` installe `coquille-dock` à côté de `coquille`, et
+`coquille-session` le lance avec le compositeur par `coquille-dock-watch`,
+qui le relance s'il tombe (cinq chutes d'affilée et il renonce).
+
+- Journal : `~/.local/state/coquille/dock.log`, celui de la session d'avant
+  dans `dock.previous.log`.
+- `COQUILLE_DOCK_ARGS` passe des options au dock ; `COQUILLE_NO_DOCK=1`
+  démarre la session sans lui.
+- Le dock dessine avec le GPU. S'il ne s'affiche pas, `ICED_BACKEND=tiny-skia`
+  le fait dessiner sans.
+
 ## Options
 
 | Option | Effet |
@@ -94,8 +107,9 @@ n'est jamais réécrit.
 ## Comment c'est fait
 
 - `model/` : toutes les règles (barre, tiroir, mixeur), sans interface,
-  testées. `catalog.rs` lit les fichiers `.desktop`, `steam.rs` la
-  ludothèque, `config.rs` lit et réécrit la configuration.
+  testées. La crate `coquille-apps` lit les fichiers `.desktop` et trouve les
+  icônes (le compositeur s'en sert aussi, pour ses barres de titre),
+  `steam.rs` lit la ludothèque, `config.rs` lit et réécrit la configuration.
 - `ui/` : les vues, avec [iced](https://iced.rs) et `iced_layershell`.
 - `backend/` : le lien avec le compositeur (crate `coquille-ipc`) et les
   services. Le son passe par `pactl` et `parec` (l'interface PulseAudio de

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/model", "crates/ipc", "crates/compositor", "crates/dock"]
+members = ["crates/model", "crates/ipc", "crates/apps", "crates/compositor", "crates/dock"]
 exclude = ["vendor"]
 
 [workspace.package]
@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 coquille-model = { path = "crates/model" }
 coquille-ipc = { path = "crates/ipc" }
+coquille-apps = { path = "crates/apps" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 

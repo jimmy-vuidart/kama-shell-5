@@ -3,7 +3,6 @@
 
 mod app;
 mod backend;
-mod catalog;
 mod config;
 mod model;
 mod steam;
@@ -61,8 +60,9 @@ fn state_dir() -> PathBuf {
 
 fn main() -> iced_layershell::Result {
     let cli = Cli::parse();
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,coquille_dock=info"));
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("warn,wgpu_hal=error,coquille_dock=info")
+    });
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)

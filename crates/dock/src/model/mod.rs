@@ -5,8 +5,8 @@ pub mod bar;
 pub mod drawer;
 pub mod mixer;
 
-use crate::catalog::Catalog;
 use crate::steam::Game;
+use coquille_apps::Catalog;
 
 /// An application as the dock knows it, whatever led to it: a name of the
 /// configuration, or what a window calls itself.
@@ -105,7 +105,7 @@ fn display_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::App;
+    use coquille_apps::App;
 
     fn catalog() -> Catalog {
         Catalog::new(vec![App {

@@ -2,7 +2,7 @@
 //! and the few symbols the dock draws itself.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use iced::widget::{container, image, svg, text};
 use iced::{Color, ContentFit, Element, Length};
@@ -134,10 +134,10 @@ impl Icons {
     /// Looks every name up in the icon theme. This reads many directories:
     /// to do away from the interface.
     pub fn load(names: Vec<String>) -> Self {
-        let theme = icon_theme();
+        let theme = coquille_apps::icon_theme();
         let mut found = HashMap::new();
         for name in names {
-            if let Some(path) = find(&name, &theme) {
+            if let Some(path) = coquille_apps::find_icon(&name, &theme) {
                 found.insert(name, Icon::from_path(&path));
             }
         }
@@ -147,35 +147,6 @@ impl Icons {
     pub fn get(&self, name: &str) -> Option<&Icon> {
         self.found.get(name)
     }
-}
-
-/// The icon theme of the user, as GNOME settings name it.
-fn icon_theme() -> String {
-    let output = std::process::Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.interface", "icon-theme"])
-        .output();
-    let name = output
-        .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|name| name.trim().trim_matches('\'').to_owned())
-        .filter(|name| !name.is_empty());
-    name.unwrap_or_else(|| "Adwaita".to_owned())
-}
-
-/// The file of an icon: a path as it is, a name through the theme.
-fn find(name: &str, theme: &str) -> Option<PathBuf> {
-    let as_path = Path::new(name);
-    if as_path.is_absolute() {
-        return as_path.is_file().then(|| as_path.to_owned());
-    }
-    let lookup = |theme: &str| {
-        freedesktop_icons::lookup(name)
-            .with_theme(theme)
-            .with_size(48)
-            .with_cache()
-            .find()
-    };
-    lookup(theme).or_else(|| lookup("hicolor"))
 }
 
 /// The icon of an application at `size`: the picture of a game, the icon of

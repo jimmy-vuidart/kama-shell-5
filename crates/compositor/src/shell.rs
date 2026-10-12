@@ -21,7 +21,7 @@ use smithay::xwayland::X11Surface;
 use tracing::{debug, info, warn};
 
 use crate::decoration::layout::{Buttons, TitlebarButton};
-use crate::decoration::naming::{badge_color, display_name};
+use crate::decoration::naming::{badge_color, identity};
 use crate::decoration::paint::{Painter, TabSpec, TitlebarSpec};
 use crate::focus::KeyFocus;
 use crate::input::Gesture;
@@ -44,6 +44,10 @@ pub struct ManagedWindow {
     pub window: Window,
     pub app_id: String,
     pub title: String,
+    /// The name of its application, from its desktop entry when it has one.
+    pub name: String,
+    /// The icon of its application, as its desktop entry names it.
+    pub icon: Option<String>,
     /// Last geometry decided by the model, relative to its screen.
     pub geometry: WindowGeometry,
     /// Top-left corner of its screen in the global space.
@@ -255,17 +259,23 @@ impl Shell {
     ) {
         let corner_radius = self.desk.metrics().corner_radius;
         // What each window is called, for the tabs of its neighbours.
-        let labels: Vec<(WindowId, String, [u8; 3], bool)> = self
+        let labels: Vec<(WindowId, TabSpec)> = self
             .windows
             .iter()
             .map(|managed| {
                 let label = if managed.title.is_empty() {
-                    display_name(&managed.app_id)
+                    managed.name.clone()
                 } else {
                     managed.title.clone()
                 };
-                let minimized = managed.geometry.minimized;
-                (managed.id, label, badge_color(&managed.app_id), minimized)
+                let tab = TabSpec {
+                    label,
+                    icon: managed.icon.clone(),
+                    badge: badge_color(&managed.app_id),
+                    active: false,
+                    minimized: managed.geometry.minimized,
+                };
+                (managed.id, tab)
             })
             .collect();
 
@@ -274,7 +284,7 @@ impl Shell {
             let Some(bar) = geometry.titlebar.filter(|_| geometry.visible) else {
                 continue;
             };
-            let name = display_name(&managed.app_id);
+            let name = managed.name.clone();
             let subtitle = if managed.title == name {
                 String::new()
             } else {
@@ -283,18 +293,17 @@ impl Shell {
             let tabs = managed
                 .tabs
                 .iter()
-                .filter_map(|id| labels.iter().find(|(known, ..)| known == id))
-                .map(|(id, label, badge, minimized)| TabSpec {
-                    label: label.clone(),
-                    badge: *badge,
+                .filter_map(|id| labels.iter().find(|(known, _)| known == id))
+                .map(|(id, tab)| TabSpec {
                     active: *id == managed.id,
-                    minimized: *minimized,
+                    ..tab.clone()
                 })
                 .collect();
             let spec = TitlebarSpec {
                 size: bar.size(),
                 title: name,
                 subtitle,
+                icon: managed.icon.clone(),
                 badge: badge_color(&managed.app_id),
                 focused: geometry.focused,
                 hovered: hover
@@ -447,11 +456,14 @@ impl State {
         debug!(?id, app_id, title, x11, "window mapped");
 
         let (origin, show_swap) = self.shell.placement_of(&geometry);
+        let (name, icon) = identity(&self.catalog, &app_id);
         self.shell.windows.push(ManagedWindow {
             id,
             window,
             app_id,
             title,
+            name,
+            icon,
             geometry,
             origin,
             show_swap,
@@ -555,6 +567,10 @@ impl State {
         let Some(managed) = self.shell.windows.iter_mut().find(|m| m.id == id) else {
             return;
         };
+        // An application that names itself late gets its name and icon then.
+        if managed.app_id != app_id {
+            (managed.name, managed.icon) = identity(&self.catalog, &app_id);
+        }
         managed.app_id = app_id;
         managed.title = title.clone();
         if let Err(error) = self.shell.desk.set_title(id, title) {

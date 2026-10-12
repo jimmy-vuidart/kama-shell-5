@@ -7,10 +7,11 @@ use cosmic_text::{
     SwashCache, Weight, Wrap,
 };
 use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8,
-    Stroke, Transform,
+    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
+    PremultipliedColorU8, Stroke, Transform,
 };
 
+use super::icons::IconCache;
 use super::layout::{Buttons, TitlebarButton, TitlebarLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
 
@@ -30,6 +31,9 @@ pub struct TitlebarSpec {
     pub size: Size,
     pub title: String,
     pub subtitle: String,
+    /// The icon of the application, as its desktop entry names it.
+    pub icon: Option<String>,
+    /// The color that stands for the application when it has no icon.
     pub badge: [u8; 3],
     pub focused: bool,
     pub hovered: Option<TitlebarButton>,
@@ -46,6 +50,7 @@ pub struct TitlebarSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabSpec {
     pub label: String,
+    pub icon: Option<String>,
     pub badge: [u8; 3],
     pub active: bool,
     /// Hidden by the user: shown dimmed, a click brings it back.
@@ -73,6 +78,7 @@ pub struct Painter {
     fonts: FontSystem,
     glyphs: SwashCache,
     has_ui_font: bool,
+    icons: IconCache,
 }
 
 impl Painter {
@@ -90,6 +96,7 @@ impl Painter {
             fonts,
             glyphs: SwashCache::new(),
             has_ui_font,
+            icons: IconCache::default(),
         }
     }
 
@@ -109,16 +116,16 @@ impl Painter {
         }
 
         if spec.tabs.is_empty() {
-            let badge = layout.icon;
-            if let Some(path) = rounded_rect(
-                badge.x as f32,
-                badge.y as f32,
-                badge.w as f32,
-                badge.h as f32,
-                [BADGE_RADIUS; 4],
-            ) {
-                fill(&mut pixmap, &path, Rgba::from_array(spec.badge));
-            }
+            let place = layout.icon;
+            let radius = BADGE_RADIUS;
+            self.app_mark(
+                &mut pixmap,
+                spec.icon.as_deref(),
+                spec.badge,
+                place,
+                radius,
+                1.0,
+            );
             self.texts(&mut pixmap, spec, &theme, layout.text);
         } else {
             let cells = layout.tabs(spec.tabs.len());
@@ -154,6 +161,44 @@ impl Painter {
         Some(pixmap)
     }
 
+    /// Draws what stands for an application in `place`: its icon, or a
+    /// rounded square of its color when it has none.
+    fn app_mark(
+        &mut self,
+        pixmap: &mut Pixmap,
+        icon: Option<&str>,
+        badge: [u8; 3],
+        place: Rect,
+        radius: f32,
+        opacity: f32,
+    ) {
+        let size = u32::try_from(place.w.min(place.h)).unwrap_or(0);
+        if let Some(icon) = icon.and_then(|name| self.icons.get(name, size)) {
+            let paint = PixmapPaint {
+                opacity,
+                ..PixmapPaint::default()
+            };
+            pixmap.draw_pixmap(
+                place.x,
+                place.y,
+                icon.as_ref(),
+                &paint,
+                Transform::identity(),
+                None,
+            );
+            return;
+        }
+        let (x, y, w, h) = (
+            place.x as f32,
+            place.y as f32,
+            place.w as f32,
+            place.h as f32,
+        );
+        if let Some(square) = rounded_rect(x, y, w, h, [radius; 4]) {
+            fill(pixmap, &square, Rgba::from_array(badge));
+        }
+    }
+
     /// Draws one tab: a small badge and a label, on a pill when it is the
     /// shown one.
     fn tab(
@@ -177,16 +222,15 @@ impl Painter {
                 fill(pixmap, &pill, theme.button_hover);
             }
         }
-        let badge = rounded_rect(
-            x + PADDING as f32,
-            y + (cell.h - BADGE) as f32 / 2.0,
-            BADGE as f32,
-            BADGE as f32,
-            [4.0; 4],
+        let place = Rect::new(
+            cell.x + PADDING,
+            cell.y + (cell.h - BADGE) / 2,
+            BADGE,
+            BADGE,
         );
-        if let Some(badge) = badge {
-            fill(pixmap, &badge, Rgba::from_array(tab.badge));
-        }
+        // A hidden window shows dimmed, its icon with the rest.
+        let opacity = if tab.minimized { 0.45 } else { 1.0 };
+        self.app_mark(pixmap, tab.icon.as_deref(), tab.badge, place, 4.0, opacity);
 
         let (weight, color) = match (tab.active, focused, tab.minimized) {
             (_, _, true) => (Weight::NORMAL, theme.disabled),
