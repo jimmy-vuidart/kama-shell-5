@@ -82,8 +82,8 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
       active ».
 - [x] Les barres de titre et les onglets montrent le vrai nom et la vraie
       icône de l'appli (crate `apps`, partagée avec le dock).
-- [ ] Le message « écran de connexion : non installée » de
-      `scripts/install.sh` est trompeur quand les entrées existent déjà.
+- [x] `scripts/install.sh` dit « déjà installée » quand les entrées de
+      l'écran de connexion existent.
 
 ## Hors de la phase 4
 

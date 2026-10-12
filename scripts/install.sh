@@ -115,7 +115,13 @@ if command -v update-desktop-database >/dev/null; then
     update-desktop-database -q "$(dirname "$entry")" || true
 fi
 
-session_note="non installée (scripts/install.sh --session)"
+# The entries of the login screen name the session script, which was just
+# replaced: once there, they need no second installation.
+if [[ -e "${session_entries[0]}" ]]; then
+    session_note="déjà installée dans $sessions"
+else
+    session_note="non installée (scripts/install.sh --session)"
+fi
 if [[ "${1:-}" == "--session" ]]; then
     staging="$(mktemp -d)"
     cat >"$staging/coquille.desktop" <<DESKTOP
