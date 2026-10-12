@@ -260,6 +260,7 @@ mod tests {
         let config = parse(&switched_on.join("\n")).unwrap();
 
         assert_eq!(config.theme, Some(ThemeKind::Light));
+        assert_eq!(config.accent.as_deref(), Some("#2f6fed"));
         assert_eq!(config.terminal.as_deref(), Some("kitty"));
         assert_eq!(config.xwayland, Some(true));
         assert_eq!(config.keyboard.layout.as_deref(), Some("fr"));

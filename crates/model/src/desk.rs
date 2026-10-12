@@ -141,8 +141,9 @@ pub struct Desk {
     minimized: Vec<WindowId>,
     memory: AppMemory,
     last_side: Option<OutputId>,
-    /// Screens asked for the next window of an application, once each.
-    asked: BTreeMap<AppKey, OutputId>,
+    /// Screens asked for the next window of an application, once each. An
+    /// application is asked for under every name its windows may bear.
+    asked: Vec<(Vec<AppKey>, OutputId)>,
 }
 
 impl Desk {
@@ -156,7 +157,7 @@ impl Desk {
             minimized: Vec::new(),
             memory: AppMemory::default(),
             last_side: None,
-            asked: BTreeMap::new(),
+            asked: Vec::new(),
         }
     }
 
@@ -231,7 +232,11 @@ impl Desk {
         // A screen asked for this window comes first, then the center for a
         // game; both leave the habits alone, and give way to a game being
         // played there.
-        let asked = app.as_ref().and_then(|app| self.asked.remove(app));
+        let asked = app.as_ref().and_then(|app| {
+            let is_named = |names: &Vec<AppKey>| names.iter().any(|name| name.same_app(app));
+            let index = self.asked.iter().position(|(names, _)| is_named(names))?;
+            Some(self.asked.remove(index).1)
+        });
         let asked = asked.and_then(|output| self.screen_index(output).ok());
         let is_game = app.as_ref().is_some_and(AppKey::is_game);
         let center = || {
@@ -275,11 +280,23 @@ impl Desk {
         Ok(placement)
     }
 
-    /// The next window of `app` opens floating on `output`, whatever its
-    /// habit says, which is left as it is. Asked from the dock ("open on").
-    pub fn open_next_on(&mut self, app: AppKey, output: OutputId) -> Result<(), ModelError> {
+    /// The next window of an application opens floating on `output`,
+    /// whatever its habit says, which is left as it is. Asked from the dock
+    /// ("open on"), which gives every name the windows of the application
+    /// may bear. Asking again replaces what was asked before.
+    pub fn open_next_on(&mut self, names: Vec<AppKey>, output: OutputId) -> Result<(), ModelError> {
+        /// Applications asked for that never showed up are not kept for ever.
+        const KEPT: usize = 8;
         self.screen_index(output)?;
-        self.asked.insert(app, output);
+        let overlaps = |known: &Vec<AppKey>| {
+            known
+                .iter()
+                .any(|name| names.iter().any(|other| other.same_app(name)))
+        };
+        self.asked.retain(|(known, _)| !overlaps(known));
+        self.asked.push((names, output));
+        let excess = self.asked.len().saturating_sub(KEPT);
+        self.asked.drain(..excess);
         Ok(())
     }
 

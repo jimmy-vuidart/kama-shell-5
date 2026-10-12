@@ -1328,7 +1328,8 @@ fn resizing_an_output_resizes_slots_and_keeps_floating_windows_inside() {
 #[test]
 fn an_application_asked_on_a_screen_opens_there_once() {
     let mut desk = desk();
-    desk.open_next_on(AppKey::new("firefox"), RIGHT).unwrap();
+    desk.open_next_on(vec![AppKey::new("firefox")], RIGHT)
+        .unwrap();
 
     let first = open(&mut desk, 1, "firefox", LEFT);
     let second = open(&mut desk, 2, "firefox", LEFT);
@@ -1342,7 +1343,8 @@ fn a_screen_asked_once_wins_over_the_habit_and_leaves_it_alone() {
     let mut desk = desk();
     open_in(&mut desk, 1, "discord", LEFT, 0);
     desk.close_window(WindowId(1)).unwrap();
-    desk.open_next_on(AppKey::new("discord"), RIGHT).unwrap();
+    desk.open_next_on(vec![AppKey::new("discord")], RIGHT)
+        .unwrap();
 
     let asked = open(&mut desk, 2, "discord", LEFT);
     let later = open(&mut desk, 3, "discord", RIGHT);
@@ -1354,7 +1356,8 @@ fn a_screen_asked_once_wins_over_the_habit_and_leaves_it_alone() {
 #[test]
 fn a_screen_asked_for_an_application_does_not_move_the_others() {
     let mut desk = desk();
-    desk.open_next_on(AppKey::new("firefox"), RIGHT).unwrap();
+    desk.open_next_on(vec![AppKey::new("firefox")], RIGHT)
+        .unwrap();
 
     let other = open(&mut desk, 1, "kitty", LEFT);
 
@@ -1369,7 +1372,8 @@ fn a_screen_held_by_a_game_cannot_be_asked_for() {
     open(&mut desk, 1, "steam_app_7", CENTER);
     desk.set_fullscreen(WindowId(1), None).unwrap();
     desk.note_output_used(RIGHT);
-    desk.open_next_on(AppKey::new("firefox"), CENTER).unwrap();
+    desk.open_next_on(vec![AppKey::new("firefox")], CENTER)
+        .unwrap();
 
     let asked = open(&mut desk, 2, "firefox", LEFT);
 
@@ -1377,10 +1381,38 @@ fn a_screen_held_by_a_game_cannot_be_asked_for() {
 }
 
 #[test]
+fn an_application_asked_for_under_several_names_opens_there_once() {
+    let mut desk = desk();
+    let names = vec![AppKey::new("code-oss"), AppKey::new("Code")];
+    desk.open_next_on(names, RIGHT).unwrap();
+
+    let first = open(&mut desk, 1, "code", LEFT);
+    let second = open(&mut desk, 2, "code-oss", LEFT);
+
+    assert!(matches!(first, Placement::Floating { output: RIGHT, .. }));
+    assert!(matches!(second, Placement::Floating { output: LEFT, .. }));
+}
+
+#[test]
+fn asking_again_for_an_application_replaces_the_screen_asked_before() {
+    let mut desk = desk();
+    desk.open_next_on(vec![AppKey::new("firefox")], RIGHT)
+        .unwrap();
+    desk.open_next_on(vec![AppKey::new("Firefox")], CENTER)
+        .unwrap();
+
+    let first = open(&mut desk, 1, "firefox", LEFT);
+    let second = open(&mut desk, 2, "firefox", LEFT);
+
+    assert!(matches!(first, Placement::Floating { output: CENTER, .. }));
+    assert!(matches!(second, Placement::Floating { output: LEFT, .. }));
+}
+
+#[test]
 fn asking_for_an_unknown_screen_is_refused() {
     let mut desk = desk();
 
-    let result = desk.open_next_on(AppKey::new("firefox"), OutputId(9));
+    let result = desk.open_next_on(vec![AppKey::new("firefox")], OutputId(9));
 
     assert_eq!(result, Err(ModelError::UnknownOutput(OutputId(9))));
 }

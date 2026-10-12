@@ -1,27 +1,63 @@
 # Phase 4 — Shell
 
-**En attente.** La phase 4 dépend d'un nouveau design de lanceur, qui reste à
-définir. Tant qu'il n'existe pas, il n'y a pas de plan de réalisation : ce
-fichier garde seulement ce qui est décidé, ce qui est conservé comme idée, et
-les petits reports qui ne dépendent de rien.
+La phase 4 est le **dock** : barre, tiroir d'applications, centre de contrôle
+et mixeur, sur le bord gauche de l'écran gauche. Cahier des charges :
+`docs/maquettes/dock.md` ; maquettes : `docs/maquettes/dock/`.
 
 Les phases 0 à 3 sont terminées (voir `CLAUDE.md`, sections « État de la
 phase 2 » et « État de la phase 3 »).
 
-## Abandonné
+## Étapes du dock
 
-- Les **barres latérales** telles que dessinées dans les maquettes.
-- Le **lanceur** tel que dessiné dans les maquettes.
-- Le **saut de curseur** au bouton latéral de la souris.
+- [x] 1. Layer-shell dans le compositeur (panneaux, zone réservée, retrait
+      sur un écran ancré), outil de test complété (`rclick`, `mclick`,
+      `wheel`).
+- [x] 2. Modèles du dock et messages de la crate `ipc`.
+- [x] 3. Dock en rendu statique avec `--mock`.
+- [x] 4. Canal du shell côté compositeur, règles du modèle, thème modifiable,
+      accent, sections du dock acceptées dans la configuration.
+- [x] 5. Dock interactif : survol, clics, menu contextuel, réordonnancement.
+- [x] 6. Tiroir : recherche, épinglées, applications paginées, jeux Steam.
+- [x] 7. Centre de contrôle et mixeur avec les services réels ; session
+      simulée.
+- [ ] 8. Intégration à la session (`scripts/install.sh`, `coquille-session`) :
+      **à faire quand Jimmy le demande**.
+- [ ] 9. Optionnel : messages non lus réels (`com.canonical.Unity.LauncherEntry`),
+      glisser une icône du tiroir vers un écran.
 
-Les maquettes de `docs/maquettes/` ne font donc plus référence pour ces
-éléments.
+Tout ce qui est coché a été vérifié en imbriqué et par tests ; rien n'a
+encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé :
+`CLAUDE.md`, « État de la phase 4 ».
 
-## Conservé comme concept, design à refaire
+## Décisions prises avec le dock
 
-Ces deux idées restent voulues. Leur forme (où elles s'affichent, comment on
-les déclenche, comment elles sont construites) dépendra du nouveau lanceur ;
-rien n'est à réaliser avant.
+- `Super` seul ouvre le tiroir et libère le pointeur d'un jeu ;
+  `Super+Échap` remet le jeu en fenêtre.
+- Le bouton « ajouter un onglet » des barres de titre est supprimé.
+- Les favoris et le thème changés à la souris sont réécrits dans
+  `config.toml`, commentaires conservés.
+- La police Figtree est embarquée dans le binaire du dock.
+- Vraies icônes du thème système, pas les carrés colorés des maquettes.
+- « Jeux au centre » : reconnus à leur classe `steam_app_*`, plus tout
+  lancement depuis la rangée Jeux. **Jugé insuffisant par Jimmy, accepté pour
+  le moment** : les jeux natifs lancés autrement ne sont pas reconnus.
+- « Éclairage nocturne » et « Ne pas déranger » : bascules sans effet.
+
+## Ce que le dock reprend, et ce qui reste sans support
+
+| Fonction | Avec le dock |
+|---|---|
+| Lancer une appli | tiroir, favoris |
+| Retrouver une fenêtre réduite | clic sur son icône dans le dock |
+| Voir les fenêtres d'un écran | écran gauche seulement (« SUR CET ÉCRAN ») |
+| Heure, réseau, son | dock et centre de contrôle |
+| Bascule « ne pas déranger » | centre de contrôle, sans effet |
+| Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `6`) |
+| « Tout envoyer vers l'écran… » | **toujours rien** |
+| Afficher les notifications | **toujours rien** (concept conservé) |
+| Enregistrer et restaurer un instantané | **toujours rien** (concept conservé) |
+
+## Conservé comme concept, design à faire
 
 ### Notifications
 
@@ -35,35 +71,15 @@ rien n'est à réaliser avant.
 - Mémoriser la disposition actuelle des trois écrans, la restaurer.
 - Optionnels : rien n'oblige à préparer quoi que ce soit.
 
-## À définir avec le nouveau lanceur
-
-Ces fonctions devaient vivre dans les barres ou le lanceur abandonnés. Elles
-gardent leur solution actuelle, ou n'en ont pas, jusqu'à ce que le nouveau
-design dise où elles vont :
-
-| Fonction | Aujourd'hui |
-|---|---|
-| Lancer une appli | `Super+Entrée` ouvre un terminal |
-| Changer la disposition d'un écran | `Super+1` à `6` |
-| Retrouver une fenêtre réduite | son onglet grisé, ou `Super+R` |
-| Voir les fenêtres d'un écran | rien |
-| « Tout envoyer vers l'écran… » | rien |
-| Heure, réseau, son | rien |
-| Notifications, « ne pas déranger » | rien |
-| Enregistrer et restaurer un instantané | rien |
-
-Le socle technique (protocole layer-shell pour des panneaux séparés, canal
-entre le compositeur et les programmes du shell, lecture des fichiers
-`.desktop` pour les vrais noms et icônes des applis) sera dimensionné à ce
-moment-là, selon ce que le design demande.
-
 ## Reports qui ne dépendent pas du design
 
-Faisables dès maintenant, indépendamment du lanceur :
-
 - [ ] Les fenêtres sans aucune barre de titre n'ont pas de moyen de
-      fermeture : un raccourci « fermer la fenêtre active ».
-- [ ] L'icône « ajouter un onglet » se lit comme un dossier : à redessiner.
+      fermeture à la souris hors du dock (son menu « Fermer la fenêtre » le
+      fait pour les applis qu'il montre) : un raccourci « fermer la fenêtre
+      active ».
+- [ ] Les barres de titre affichent encore un carré de couleur et un nom
+      déduit de l'identifiant : le catalogue `.desktop` du dock pourrait leur
+      donner les vrais noms et icônes.
 - [ ] Le message « écran de connexion : non installée » de
       `scripts/install.sh` est trompeur quand les entrées existent déjà.
 

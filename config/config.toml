@@ -4,8 +4,13 @@
 # Les réglages généraux viennent d'abord : en TOML, tout ce qui suit un titre
 # de section comme [outputs] appartient à cette section.
 
-# Thème des décorations : "light" ou "dark".
+# Thème des décorations et du dock : "light" ou "dark". La bascule « Thème
+# sombre » du centre de contrôle réécrit cette ligne.
 # theme = "light"
+
+# Couleur d'accent (anneau de la fenêtre active, dock), en #rrggbb ; par
+# défaut celle du thème : #2f6fed en clair, #7aa7ff en sombre.
+# accent = "#2f6fed"
 
 # Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
 # kitty, alacritty et foot.
@@ -41,3 +46,15 @@ right = "DP-1"
 # Fréquence variable (VRR, G-Sync/FreeSync) : activée sur l'écran d'un jeu si
 # l'écran et le pilote la proposent. En cas de scintillement, mettre `false`.
 # vrr = true
+
+# Le dock, sur l'écran gauche. Les applications de la barre, dans l'ordre :
+# le nom de leur fichier .desktop (sans l'extension) ou ce que leurs fenêtres
+# annoncent. Le menu au clic droit (« Épingler », « Retirer des favoris ») et
+# le glisser dans la barre réécrivent cette liste.
+[dock]
+favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
+
+# Le tiroir d'applications. Les applications épinglées en haut du tiroir ;
+# sans cette ligne, ce sont les favoris de la barre.
+[drawer]
+# pinned = ["firefox", "discord", "kitty", "code", "obsidian", "mpv", "org.gnome.Nautilus"]

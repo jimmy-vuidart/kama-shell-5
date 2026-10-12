@@ -279,11 +279,12 @@ impl State {
                 }
             }
             Command::Close { window } => self.close_window(WindowId(window)),
-            Command::OpenOn { app, screen } => {
+            Command::OpenOn { apps, screen } => {
                 let wanted = self.shell.screens.iter().find(|known| known.role == screen);
+                let names: Vec<AppKey> = apps.into_iter().map(AppKey::new).collect();
                 let asked = wanted
                     .map(|known| known.id)
-                    .map(|output| self.shell.desk.open_next_on(AppKey::new(app), output));
+                    .map(|output| self.shell.desk.open_next_on(names, output));
                 if !matches!(asked, Some(Ok(()))) {
                     warn!(?screen, "the shell asked for a screen that is not there");
                 }

@@ -94,8 +94,9 @@ pub enum Command {
         window: u64,
     },
     /// The next window of an application opens on this screen, once.
+    /// `apps` holds every name its windows may bear (`app_id`, `WM_CLASS`).
     OpenOn {
-        app: String,
+        apps: Vec<String>,
         screen: OutputRole,
     },
     /// Forgets where an application was tidied.
@@ -204,7 +205,7 @@ mod tests {
             Command::Activate { window: 12 },
             Command::Close { window: 12 },
             Command::OpenOn {
-                app: "firefox".into(),
+                apps: vec!["firefox".into(), "Navigator".into()],
                 screen: OutputRole::Center,
             },
             Command::Forget {
@@ -239,13 +240,13 @@ mod tests {
     #[test]
     fn a_message_is_one_line_of_readable_json() {
         let line = encode(&Command::OpenOn {
-            app: "firefox".into(),
+            apps: vec!["firefox".into()],
             screen: OutputRole::Center,
         });
 
         assert_eq!(
             line,
-            "{\"command\":\"open_on\",\"app\":\"firefox\",\"screen\":\"center\"}\n"
+            "{\"command\":\"open_on\",\"apps\":[\"firefox\"],\"screen\":\"center\"}\n"
         );
     }
 

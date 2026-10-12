@@ -58,7 +58,7 @@ Chaque écran a une disposition parmi une liste courte :
 - `Free` (« écran libre ») : fenêtres flottantes qui se chevauchent, comme un bureau classique.
 - Le centre 21:9 accepte aussi `TwoThirdsOneThird` hors jeu.
 
-Changement de disposition : `Super+1` à `6` aujourd'hui. Le menu au clic droit sur une barre est abandonné avec les barres ; la façon de faire à la souris sera définie avec le nouveau lanceur.
+Changement de disposition : `Super+1` à `6`. Le dock ne s'en charge pas : toujours rien à la souris pour cela.
 
 ### Règles de placement
 
@@ -67,7 +67,7 @@ Changement de disposition : `Super+1` à `6` aujourd'hui. Le menu au clic droit 
 3. **Un écran n'est jamais plein** : déposer sur un emplacement occupé empile la fenêtre **en onglet** avec celle qui s'y trouve.
 4. **Mémoire par application** : une appli que j'ai rangée moi-même rouvre au même écran / emplacement (clé : `app_id` Wayland ou `WM_CLASS` X11). **Les fenêtres laissées flottantes ne créent aucune habitude.**
 5. **Bouton ⇄ « échanger avec le centre »** sur les fenêtres des écrans latéraux : la fenêtre passe au centre, celle du centre prend sa place. Désactivé quand un jeu est ancré.
-6. **Instantanés optionnels** : mémoriser la disposition actuelle des trois écrans, la restaurer. Rien n'oblige à préparer quoi que ce soit. *Concept conservé, pas encore réalisé : sa forme dépendra du nouveau lanceur.*
+6. **Instantanés optionnels** : mémoriser la disposition actuelle des trois écrans, la restaurer. Rien n'oblige à préparer quoi que ce soit. *Concept conservé, pas encore réalisé : sa forme reste à définir.*
 7. Si je lance une appli alors qu'un jeu est ancré au centre, elle s'ouvre en flottant sur **l'écran latéral utilisé en dernier**, jamais devant le jeu.
 
 ### Mode jeu (« écran ancré »)
@@ -82,14 +82,15 @@ Quand une fenêtre passe en plein écran (xdg-shell **ou** XWayland) sur un écr
 - les **notifications** sont redirigées vers un écran latéral ;
 - **ne pas déranger** automatique pendant le jeu.
 
-Les deux derniers points sont des concepts conservés, pas encore réalisés : il n'y a pas de notifications pour l'instant, et leur forme dépendra du nouveau lanceur.
+Les deux derniers points sont des concepts conservés, pas encore réalisés : il n'y a pas de notifications pour l'instant. La bascule « Ne pas déranger » du dock existe déjà, sans effet.
 
-Sortie : `Super` libère le pointeur ; `Super + Échap` remet le jeu en fenêtre.
+Sortie : `Super` libère le pointeur (et ouvre le tiroir du dock) ; `Super + Échap` remet le jeu en fenêtre.
 
 Précisions décidées en phase 3 (à revoir si elles gênent) :
 
 - **Quel écran ?** Celui que l'appli nomme (xdg-shell), sinon celui où se trouve sa fenêtre. Une fenêtre X11 qui démarre en plein écran en couvrant exactement un écran va sur celui-là ; le centre est annoncé à X11 comme écran principal (RandR), ce qui y envoie les jeux Wine/Proton. Un jeu lancé avec le pointeur sur un écran latéral et qui ne dit rien s'ouvre donc là : le ranger une fois au centre suffit, la mémoire par appli fait le reste.
-- **`Super` seul** (appuyé puis relâché sans autre touche ni clic) libère le pointeur du jeu qui le retient, jusqu'au prochain clic dans le jeu. Tant qu'il est libéré, les bords ne collent plus.
+- **`Super` seul** (appuyé puis relâché sans autre touche ni clic) ouvre ou ferme le tiroir du dock, et libère au passage le pointeur du jeu qui le retient, jusqu'au prochain clic dans le jeu. Tant qu'il est libéré, les bords ne collent plus.
+- **Aucun panneau sur un écran ancré** : si un jeu prend l'écran gauche, le dock et le tiroir disparaissent, et reviennent quand l'écran est libéré.
 - **Bords collants seulement quand le jeu a le focus** : traverser l'écran d'un jeu laissé de côté (focus sur Discord) ne retient pas le curseur. Entrer sur l'écran du jeu n'est jamais retenu. Un glisser du shell n'est jamais retenu.
 - **Une fenêtre qui s'ouvre pendant que le jeu a le focus ne lui prend pas le clavier** : elle apparaît sur l'écran latéral (règle 7), sans le focus, avec sa barre de rangement ; un clic dessus le lui donne.
 - `Super + Échap` vise le jeu qui a le focus, sinon celui de l'écran du pointeur, sinon le seul jeu ancré.
@@ -112,11 +113,11 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
 - Fenêtres : rayon **12 px**, espacement **8 px** entre emplacements et avec les bords.
 - **Décorations côté serveur** (dessinées par le compositeur, via `xdg-decoration`) :
   - barre de titre **38 px** : icône, titre, sous-titre atténué ;
-  - boutons à droite : ajouter un onglet, ⇄ (écrans latéraux uniquement), réduire, fermer ;
+  - boutons à droite : ⇄ (écrans latéraux uniquement), réduire, fermer ;
   - pas de bouton « agrandir » (la disposition s'en charge).
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit pas celle du shell. Elle la retrouve dès qu'elle partage son emplacement, pour montrer les onglets. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range). Sans barre du shell, pas de bouton ⇄ : `Mod+C` le remplace.
 - Fenêtre active : **anneau d'accent de 2 px**. Accent par défaut : `#2f6fed` (clair), `#7aa7ff` (sombre).
-- Aucune barre du shell sur les écrans : les barres latérales des maquettes sont abandonnées.
+- Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, cahier des charges `docs/maquettes/dock.md`) vit sur le bord gauche de l'écran gauche : barre de 44 px à 8 px du bord, qui se déploie au survol, zone réservée de 60 px.
 - Police d'interface : Figtree (repli : police système sans-serif).
 
 ## Architecture visée
@@ -128,13 +129,16 @@ coquille/
 ├─ crates/
 │  ├─ model/        # logique pure : écrans, dispositions, emplacements, règles, mémoire.
 │  │                # AUCUNE dépendance Wayland. Entièrement testé unitairement.
-│  └─ compositor/   # binaire : Smithay, rendu, entrées, décorations, mode jeu.
+│  ├─ ipc/          # ce que le compositeur et le dock se disent (JSON par lignes).
+│  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.
+│  └─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
+├─ vendor/          # code tiers porté dans le dépôt (voir vendor/README.md).
 ├─ docs/maquettes/
 └─ CLAUDE.md
 ```
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
-- Le reste du shell (lanceur, notifications, instantanés) n'a pas encore d'architecture : elle sera décidée avec le nouveau design du lanceur. L'idée de départ, des programmes séparés affichés par layer-shell et reliés au compositeur par un socket (`smithay-client-toolkit`, ou iced avec un crate layer-shell), reste une piste, pas une décision.
+- Le shell est fait de **programmes séparés**, affichés par layer-shell et reliés au compositeur par un socket Unix (crate `ipc`). Le dock est le premier ; il est écrit avec **iced** et `iced_layershell`. Notifications et instantanés n'ont pas encore de forme.
 - Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, ratios, délai des bords collants).
 - État persistant (mémoire par appli, instantanés) : `~/.local/state/coquille/`.
 
@@ -148,6 +152,12 @@ coquille/
 - **XWayland** (`xwayland.rs`) : démarré avec le compositeur par Smithay, qui fait aussi le gestionnaire de fenêtres X11. Piège de cette version de Smithay : après `set_randr_primary_output`, il faut une autre requête X11 tout de suite, sinon **tous** les événements X11 suivants sont ignorés (voir le commentaire dans `xwayland_ready`).
 - **Décisions pures du mode jeu** dans `game.rs` (testées) : tap de `Mod`, confinement, bords collants, raccourcis matériels d'un écran (`Boost`). Les règles de placement du mode jeu restent dans `model`.
 
+- **Panneaux (layer-shell)**, `panels.rs` : une surface layer-shell n'est pas une fenêtre (ni barre de titre, ni emplacement, ni mémoire). Sa zone exclusive alimente `OutputInfo::reserved`. Ordre de dessin et de clic : calque `Overlay`, barre de rangement, menus, calque `Top`, fenêtres, calques `Bottom` et `Background`. Clavier : un panneau `Exclusive` au-dessus des fenêtres l'a tant qu'il est affiché (le tiroir), un panneau `OnDemand` quand on clique dessus, le dock jamais ; il revient ensuite à la fenêtre qui l'avait.
+- **Canal du shell**, `ipc.rs` : socket `$XDG_RUNTIME_DIR/coquille-<affichage Wayland>.sock`, annoncé par `COQUILLE_SOCKET` aux programmes lancés. L'état entier (écrans, fenêtres, habitudes, thème) est poussé à chaque changement ; les commandes sont dans `crates/ipc`. Un message mal formé est journalisé et ignoré.
+- **winit et iced** : `iced_layershell` est écrit pour winit-core 0.31.0-beta.2, Smithay épingle la beta.3. `vendor/iced_exdevtools` (une ligne modifiée) les réconcilie par `[patch.crates-io]` ; à retirer quand `iced_layershell` suivra.
+- **Le dock passe par les outils des services** (`pactl`, `parec`, `nmcli`, `bluetoothctl`, `ddcutil`) plutôt que par leurs bibliothèques : rien à lier, un outil absent grise sa commande.
+- **Thème et accent** : `theme` et `accent` de la configuration valent pour le compositeur et le dock ; le thème change en cours de session (commande `set_theme`).
+
 ### Lancer le compositeur
 
 Deux backends, choisis tout seuls (`--backend auto`) : **imbriqué** (winit) s'il y a déjà une session graphique, **matériel** (udev) sinon.
@@ -160,17 +170,18 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 
 - Souris : glisser une barre de titre montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
 - Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
-- Boutons de la barre de titre : « réduire » cache la fenêtre (son onglet reste, grisé ; un clic dessus ou `Mod+R` la ramène) ; « ajouter un onglet » arme l'emplacement, et la prochaine fenêtre ouverte s'y empile, quelle que soit sa mémoire (second clic pour désarmer) ; ⇄ ; fermer.
+- Boutons de la barre de titre : « réduire » cache la fenêtre (son onglet reste, grisé ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; ⇄ ; fermer. Le bouton « ajouter un onglet » a été retiré avec l'arrivée du dock.
+- Dock : `target/debug/coquille --role left --spawn "$PWD/target/debug/coquille-dock --mock"` (tout simulé) ; sans `--mock`, vraies fenêtres et vrais services. Détail dans `crates/dock/README.md`.
 - Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `6` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, onglets, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+C` échange la fenêtre active avec le centre ; `Mod+Maj+E` quitter.
-- Mode jeu : `Mod+Échap` remet le jeu en fenêtre ; `Mod` seul libère le pointeur. (En imbriqué, GNOME garde `Alt+Échap` pour lui : ce raccourci ne s'essaie qu'avec `--debug-input`.)
+- Mode jeu : `Mod+Échap` remet le jeu en fenêtre ; `Mod` seul ouvre le tiroir du dock et libère le pointeur. (En imbriqué, GNOME garde `Alt+Échap` pour lui : ce raccourci ne s'essaie qu'avec `--debug-input`.)
 - Applications X11 : `DISPLAY` est transmis aux programmes lancés par le compositeur (et aux services de la session avec `--export-environment`). `--no-xwayland` ou `xwayland = false` s'en passent.
 - Mémoire par appli : enregistrée dans `~/.local/state/coquille/memory.json` sur le matériel ; en imbriqué, seulement avec `--state-dir`.
 - Sorties de secours, sans Mod : `Ctrl+Alt+Retour arrière` quitte, `Ctrl+Alt+F1…F12` change de terminal virtuel, `--exit-after <secondes>` quitte tout seul.
-- Vérifier le rendu sans regarder l'écran (imbriqué) : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`) et ignore alors la vraie souris. Un glisser s'écrit `down`, `move…`, `up` ; une touche tenue, `press alt` … `release alt`. Placer le pointeur dès `0 move x y` : une fenêtre s'ouvre sur l'écran où il se trouve à ce moment-là. `rel dx dy` déplace le pointeur comme une vraie souris (chemin du backend matériel : pointeur verrouillé, bords collants, mouvement relatif), alors que `move` le pose comme le fait la fenêtre hôte.
+- Vérifier le rendu sans regarder l'écran (imbriqué) : `--screenshot fichier.png --screenshot-delay 3000` enregistre la sortie puis quitte ; `--debug-input "2500 move 400 450; 100 click; 300 key alt+1"` rejoue des entrées (syntaxe dans `crates/compositor/src/debug.rs`) et ignore alors la vraie souris. Un glisser s'écrit `down`, `move…`, `up` ; une touche tenue, `press alt` … `release alt` ; `rclick`, `mclick` et `wheel 3` (ou `-1`) rejouent le clic droit, le clic milieu et la molette. Placer le pointeur dès `0 move x y` : une fenêtre s'ouvre sur l'écran où il se trouve à ce moment-là. `rel dx dy` déplace le pointeur comme une vraie souris (chemin du backend matériel : pointeur verrouillé, bords collants, mouvement relatif), alors que `move` le pose comme le fait la fenêtre hôte.
 - Clients de test utiles en imbriqué : `kitty --start-as fullscreen` (plein écran Wayland), `kitty -o linux_display_server=x11` et `glxgears` (X11), `GDK_BACKEND=x11 gnome-calculator` (menus X11). Un client SDL2 (`SDL_VIDEODRIVER=wayland` ou `x11`, `SDL_SetRelativeMouseMode`) verrouille le pointeur ; `libSDL2` est là, quelques lignes de Python `ctypes` suffisent.
 - `--probe` exerce sur la vraie carte tout ce qui ne demande pas de posséder les écrans : EGL sur GBM, moteur de rendu, shaders, détection et rôles des écrans, capacité VRR de chacun. À lancer après tout changement du backend matériel.
 
-Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`).
+Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`) et `[drawer]` (`pinned`) sont lues par le dock, qui réécrit `favorites` et `theme` quand on les change à la souris.
 
 ### Installer
 
@@ -182,9 +193,9 @@ Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour
 
 ### État de la phase 2
 
-Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (bande dans la barre de titre), ⇄, mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, boutons « réduire » et « ajouter un onglet ».
+Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (bande dans la barre de titre), ⇄, mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, bouton « réduire ».
 
-Sans solution à la souris depuis l'abandon des barres latérales, en attendant le nouveau lanceur : changer de disposition (`Mod+1` à `6`) et retrouver une fenêtre réduite (son onglet grisé, ou `Mod+R`).
+Toujours sans solution à la souris : changer de disposition (`Mod+1` à `6`).
 
 ### État de la phase 3
 
@@ -211,7 +222,20 @@ Limites connues :
 - pas de retour dmabuf « scanout » par surface : l'affichage direct dépend de ce que le jeu alloue de lui-même ;
 - avec le VRR, un pointeur visible qui bouge fait remonter la fréquence (il n'est pas sur un plan matériel) ;
 - bords collants inopérants en imbriqué avec la vraie souris : l'hôte possède le pointeur, rien ne peut le retenir ;
-- notifications redirigées et « ne pas déranger » : concepts conservés, à concevoir avec le nouveau lanceur.
+- notifications redirigées et « ne pas déranger » : concepts conservés, à concevoir.
+
+### État de la phase 4 (dock)
+
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues) et par tests unitaires :
+
+- panneaux layer-shell dans le compositeur : zone réservée, menus (popups), clavier à la demande, retrait sur un écran ancré ;
+- canal du shell : état poussé, commandes (activer, fermer, ouvrir sur un écran, oublier une place, basculer le tiroir, changer de thème, quitter) ;
+- règles du modèle : ouvrir une fois sur un écran sans toucher à la mémoire, oublier une place, jeux au centre (classe `steam_app_*`) ;
+- dock : barre (favoris, fenêtres de l'écran, indicateurs, heure), déploiement au survol, clics, menu contextuel, réordonnancement ; tiroir (recherche, épinglées, applications paginées, jeux Steam) ; centre de contrôle et mixeur ; favoris et thème réécrits dans `config.toml`.
+
+Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth depuis le centre de contrôle (les états sont lus, les bascules n'ont pas été actionnées), la luminosité (`ddcutil` n'est pas installé), les actions de session réelles (`--backends session`), et le dock sur le backend matériel.
+
+Pas fait : l'intégration à la session (`scripts/install.sh` n'installe pas encore `coquille-dock`, `coquille-session` ne le lance pas) ; les messages non lus réels ; glisser une icône du tiroir vers un écran. Limites du dock : `crates/dock/README.md`.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 
@@ -234,7 +258,7 @@ On avance **par phases**, en s'arrêtant à la fin de chacune pour que je teste.
 - **Phase 1 — Compositeur imbriqué** : backend **winit** (fenêtre dans ma session actuelle), xdg-shell, une sortie simulée, dispositions `Full` / `Columns`, décorations serveur, focus et anneau d'accent. Test avec `foot` ou `alacritty`.
 - **Phase 2 — Trois écrans réels** : backend **udev** (DRM/KMS, GBM, libinput, libseat), trois sorties dont le 21:9 central, glisser-déposer vers les emplacements, flottant par défaut, onglets, ⇄, mémoire par appli, `Free`.
 - **Phase 3 — Jeu** : XWayland, détection du plein écran, écran ancré, direct scanout, VRR, pointer-constraints, relative-pointer, bords collants.
-- **Phase 4 — Shell** : **en attente d'un nouveau design de lanceur**, à définir. Les notifications et les instantanés restent voulus, mais leur forme en dépendra. Abandonnés : les barres latérales et le lanceur des maquettes, le saut de curseur au bouton latéral. Détail dans `docs/tasks/PHASE_4.md`.
+- **Phase 4 — Shell** : le **dock** (barre, tiroir, centre de contrôle, mixeur), d'après `docs/maquettes/dock.md`. Reste son intégration à la session, puis les notifications et les instantanés, dont la forme n'est pas définie. Abandonnés : les barres latérales et le lanceur des maquettes d'origine, le saut de curseur au bouton latéral. Détail dans `docs/tasks/PHASE_4.md`.
 - **Plus tard** : calque par-dessus le jeu (performances, son par appli, capture), vignettes vivantes.
 
 ## Sécurité pendant le développement

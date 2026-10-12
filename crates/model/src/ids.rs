@@ -27,6 +27,12 @@ impl AppKey {
         &self.0
     }
 
+    /// Both names stand for the same application: only the case may differ
+    /// (`code`, `Code`).
+    pub fn same_app(&self, other: &Self) -> bool {
+        self.0.eq_ignore_ascii_case(&other.0)
+    }
+
     /// The application is a game: a title started by Steam, whose windows
     /// are all named after its number. Games open at the center.
     pub fn is_game(&self) -> bool {
