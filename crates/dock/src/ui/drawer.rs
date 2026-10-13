@@ -15,7 +15,7 @@ use crate::app::{Dock, Drawer, Message, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
 use crate::model::drawer::{self, PAGE};
 use crate::model::mixer;
-use crate::model::{Identity, Orientation};
+use crate::model::{Identity, Orientation, Side};
 
 /// The room of the bar, drawn again inside the drawer.
 const BAR: f32 = 60.0;
@@ -29,9 +29,10 @@ const PINNED: usize = 7;
 
 pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
     let palette = dock.palette();
-    if drawer.orientation == Orientation::Horizontal {
-        return lying(dock, drawer, palette);
-    }
+    let side = match drawer.orientation {
+        Orientation::Vertical(side) => side,
+        Orientation::Horizontal => return lying(dock, drawer, palette),
+    };
     // What is left of the screen is dimmed, and a click there closes.
     let scrim = container(space())
         .width(Length::Fill)
@@ -39,8 +40,11 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
         .style(move |_| style::fill(palette.scrim, 0.0));
     let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
 
-    let mut front: Row<'_, Message> =
-        row![opaque(panel(dock, drawer, palette)), edge(drawer, palette)];
+    // From the edge of the screen inwards.
+    let mut front: Vec<Element<'_, Message>> = vec![
+        opaque(panel(dock, drawer, side, palette)),
+        edge(drawer, palette),
+    ];
     if drawer.mixer {
         // Next to the button that opens it, at the foot of the drawer.
         let aligned = column![
@@ -48,13 +52,23 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
             opaque(mixer_panel(dock, palette)),
             space().height(28)
         ];
-        front = front.push(aligned);
+        front.push(aligned.into());
     }
+    let front: Element<'_, Message> = match side {
+        Side::Left => Row::with_children(front).into(),
+        Side::Right => {
+            front.reverse();
+            container(Row::with_children(front))
+                .width(Length::Fill)
+                .align_x(Alignment::End)
+                .into()
+        }
+    };
     stack![scrim, front].into()
 }
 
-/// The right edge of the drawer, which is dragged to make it wider or
-/// narrower. It shows as a small grip, brighter while it is held.
+/// The edge of the drawer away from its bar, which is dragged to make it
+/// wider or narrower. It shows as a small grip, brighter while it is held.
 fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
     let color = if drawer.resizing {
         palette.accent
@@ -72,7 +86,12 @@ fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
         .into()
 }
 
-fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
+fn panel<'a>(
+    dock: &'a Dock,
+    drawer: &'a Drawer,
+    side: Side,
+    palette: Palette,
+) -> Element<'a, Message> {
     let bar: Element<'_, Message> = match dock.bar_on(drawer.screen) {
         Some(state) => super::bar::still(dock, state, palette),
         None => space().into(),
@@ -97,19 +116,35 @@ fn panel<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     content = content
         .push(space().height(Length::Fill))
         .push(control_center(dock, drawer, palette));
+    // The bar keeps to its edge of the screen; the corners away from it
+    // are the round ones.
+    let (left, right) = match side {
+        Side::Left => (4.0, 16.0),
+        Side::Right => (16.0, 4.0),
+    };
     let content = container(content).padding(Padding {
         top: 16.0,
-        right: 16.0,
+        right,
         bottom: 16.0,
-        left: 4.0,
+        left,
     });
+    let (inside, radius) = match side {
+        Side::Left => (
+            row![bar, content],
+            border::Radius::default().top_right(18).bottom_right(18),
+        ),
+        Side::Right => (
+            row![content, bar],
+            border::Radius::default().top_left(18).bottom_left(18),
+        ),
+    };
 
-    container(row![bar, content])
+    container(inside)
         .width(drawer.width)
         .height(Length::Fill)
         .style(move |_| container::Style {
             border: Border {
-                radius: border::Radius::default().top_right(18).bottom_right(18),
+                radius,
                 ..Border::default()
             },
             shadow: palette.shadow(),

@@ -7,11 +7,19 @@ pub mod mixer;
 
 use crate::steam::Game;
 
+/// The edge of its screen an upright dock stands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Side {
+    Left,
+    Right,
+}
+
 /// Which way a dock lies on its screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Orientation {
-    /// A column on the left edge; its launcher is a drawer beside it.
-    Vertical,
+    /// A column on the left or the right edge; its launcher is a drawer
+    /// beside it.
+    Vertical(Side),
     /// A row on the bottom edge; its launcher is a panel above it.
     Horizontal,
 }

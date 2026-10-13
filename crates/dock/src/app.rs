@@ -26,7 +26,7 @@ use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
-use crate::model::{Identity, Orientation, identify};
+use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
 use crate::ui::icons::Icons;
@@ -68,7 +68,7 @@ pub struct Drag {
 }
 
 /// A bar of the dock, on its screen. Each screen may have one, upright on
-/// its left edge or lying on its bottom edge.
+/// its left or its right edge, or lying on its bottom edge.
 pub struct BarState {
     pub id: window::Id,
     pub screen: OutputRole,
@@ -407,7 +407,8 @@ impl Dock {
             let pinned = entries.iter().filter(|entry| entry.pinned).count();
             let size = ui::bar::surface_size(orientation, pinned, entries.len() - pinned);
             let anchor = match orientation {
-                Orientation::Vertical => Anchor::Left,
+                Orientation::Vertical(Side::Left) => Anchor::Left,
+                Orientation::Vertical(Side::Right) => Anchor::Right,
                 Orientation::Horizontal => Anchor::Bottom,
             };
             let (id, task) = Message::layershell_open(NewLayerShellSettings {
@@ -804,9 +805,15 @@ impl Dock {
                     return Task::none();
                 };
                 match drawer.orientation {
-                    // The right edge of the drawer follows the pointer.
-                    Orientation::Vertical => {
-                        let width = self.drawer_width(Some(pointer.x)) as f32;
+                    // The edge of the drawer away from its bar follows the
+                    // pointer.
+                    Orientation::Vertical(side) => {
+                        let wanted = match (side, self.drawer_screen()) {
+                            (Side::Left, _) => pointer.x,
+                            (Side::Right, Some(screen)) => screen.width - pointer.x,
+                            (Side::Right, None) => drawer.width,
+                        };
+                        let width = self.drawer_width(Some(wanted)) as f32;
                         if let Some(drawer) = &mut self.drawer {
                             drawer.width = width;
                         }
@@ -834,7 +841,7 @@ impl Dock {
                 // Kept for the next time, here and in the configuration.
                 let (width, height) = (drawer.width.round() as u32, drawer.height.round() as u32);
                 match drawer.orientation {
-                    Orientation::Vertical if self.config.drawer_width != Some(width) => {
+                    Orientation::Vertical(_) if self.config.drawer_width != Some(width) => {
                         self.config.drawer_width = Some(width);
                         self.save_config(move |text| config::with_drawer_width(text, width));
                     }
@@ -945,7 +952,12 @@ impl Dock {
                 let anchor = ui::bar::entry_rect(bar.orientation, index, bar.pinned(), unfolded);
                 // Beside an upright bar, above a lying one.
                 let (corner, grows) = match bar.orientation {
-                    Orientation::Vertical => (PopupAnchor::TopRight, PopupGravity::BottomRight),
+                    Orientation::Vertical(Side::Left) => {
+                        (PopupAnchor::TopRight, PopupGravity::BottomRight)
+                    }
+                    Orientation::Vertical(Side::Right) => {
+                        (PopupAnchor::TopLeft, PopupGravity::BottomLeft)
+                    }
                     Orientation::Horizontal => (PopupAnchor::Top, PopupGravity::Top),
                 };
                 let settings = IcedNewPopupSettings::new(id, size, anchor)
@@ -1396,7 +1408,7 @@ impl Dock {
 /// How far a bar should be unfolded: an upright bar unfolds under the
 /// pointer, a lying one shows a label above the icon instead.
 fn unfold_target(bar: &BarState) -> f32 {
-    if bar.hovered && bar.orientation == Orientation::Vertical {
+    if bar.hovered && matches!(bar.orientation, Orientation::Vertical(_)) {
         1.0
     } else {
         0.0

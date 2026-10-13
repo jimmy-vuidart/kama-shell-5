@@ -40,7 +40,7 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 |---|---|---|
 | Apparence | thème clair ou sombre, couleur d'accent (celle du thème, huit pastilles, ou `#rrggbb` saisi) | aussitôt |
 | Écrans et dock | connecteur de chaque écran | **au prochain démarrage** |
-| | dock de chaque écran : vertical, horizontal, aucun | aussitôt |
+| | dock de chaque écran : à gauche, à droite, en bas, aucun | aussitôt |
 | Mode jeu | bords collants et leur délai, affichage direct, fréquence variable | aussitôt |
 | Système | disposition et variante du clavier, terminal | aussitôt |
 | | applications X11 (XWayland) | **au prochain démarrage** |

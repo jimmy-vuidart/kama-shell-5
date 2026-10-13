@@ -255,6 +255,7 @@ pub fn step(selected: Option<usize>, count: usize, columns: usize, step: Step) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Side;
 
     fn names(count: usize) -> Vec<String> {
         (0..count).map(|index| format!("app {index:02}")).collect()
@@ -329,11 +330,12 @@ mod tests {
 
     #[test]
     fn the_grid_has_six_columns_upright_and_three_lying_down() {
-        assert_eq!(columns(Orientation::Vertical, false), 6);
+        assert_eq!(columns(Orientation::Vertical(Side::Left), false), 6);
+        assert_eq!(columns(Orientation::Vertical(Side::Right), false), 6);
         assert_eq!(columns(Orientation::Horizontal, false), 3);
         // Search results take the width of two columns of the launcher.
         assert_eq!(columns(Orientation::Horizontal, true), 6);
-        assert_eq!(columns(Orientation::Vertical, true), 6);
+        assert_eq!(columns(Orientation::Vertical(Side::Left), true), 6);
     }
 
     #[test]

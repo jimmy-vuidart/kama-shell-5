@@ -1,5 +1,5 @@
-//! The bar: a thin column on the left edge that unfolds under the pointer,
-//! or a row on the bottom edge that names the icon under it.
+//! The bar: a thin column on the left or the right edge that unfolds under
+//! the pointer, or a row on the bottom edge that names the icon under it.
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use iced::widget::{Column, Row, column, container, mouse_area, row, space, stack, text};
@@ -8,8 +8,8 @@ use iced::{Alignment, Element, Length, Padding};
 use super::icons::{self, Glyph};
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
-use crate::model::Orientation;
 use crate::model::bar::{Entry, Indicator};
+use crate::model::{Orientation, Side};
 
 /// The surface is as wide as the unfolded bar, with room for its shadow.
 pub const SURFACE_WIDTH: u32 = 236;
@@ -32,7 +32,7 @@ const PADDING: f32 = 6.0;
 /// A separation between two groups, or its title when unfolded.
 const SECTION: f32 = 18.0;
 const CLOCK: f32 = 54.0;
-/// The room left of an icon for its mark.
+/// The room between an icon and the edge of the screen for its mark.
 const MARK: f32 = 4.0;
 
 /// Lying down: the room above the bar for the label of the icon under the
@@ -99,7 +99,7 @@ fn lying_left(index: usize, pinned: usize) -> f32 {
 /// other entries.
 pub fn surface_size(orientation: Orientation, pinned: usize, others: usize) -> (u32, u32) {
     match orientation {
-        Orientation::Vertical => (SURFACE_WIDTH, surface_height(pinned, others)),
+        Orientation::Vertical(_) => (SURFACE_WIDTH, surface_height(pinned, others)),
         Orientation::Horizontal => {
             let width = lying_width(pinned, others) + 2.0 * SIDE;
             (width.ceil() as u32, (LABEL_ROOM + WIDTH + MARGIN) as u32)
@@ -116,8 +116,18 @@ pub fn input_region(
 ) -> (i32, i32, i32, i32) {
     let (width, height) = (size.0 as i32, size.1 as i32);
     match orientation {
-        Orientation::Vertical if unfolded => (0, 0, UNFOLDED_REACH as i32, height),
-        Orientation::Vertical => (0, 0, EXCLUSIVE_ZONE, height),
+        Orientation::Vertical(side) => {
+            let reach = if unfolded {
+                UNFOLDED_REACH as i32
+            } else {
+                EXCLUSIVE_ZONE
+            };
+            let x = match side {
+                Side::Left => 0,
+                Side::Right => width - reach,
+            };
+            (x, 0, reach, height)
+        }
         Orientation::Horizontal => {
             let side = SIDE as i32;
             (
@@ -140,7 +150,7 @@ pub fn entry_rect(
     unfolded: bool,
 ) -> (i32, i32, i32, i32) {
     match orientation {
-        Orientation::Vertical => upright_rect(index, pinned, unfolded),
+        Orientation::Vertical(side) => upright_rect(side, index, pinned, unfolded),
         // The whole height of the bar, and a little more: the menu opens
         // just above it.
         Orientation::Horizontal => (
@@ -152,7 +162,7 @@ pub fn entry_rect(
     }
 }
 
-fn upright_rect(index: usize, pinned: usize, unfolded: bool) -> (i32, i32, i32, i32) {
+fn upright_rect(side: Side, index: usize, pinned: usize, unfolded: bool) -> (i32, i32, i32, i32) {
     let mut top = SHADOW + PADDING + SLOT + GAP;
     top += index as f32 * (SLOT + GAP);
     // The titles of the groups above it: its own, and the one of the
@@ -164,7 +174,37 @@ fn upright_rect(index: usize, pinned: usize, unfolded: bool) -> (i32, i32, i32, 
     };
     top += sections * (SECTION + GAP);
     let width = if unfolded { UNFOLDED } else { WIDTH };
-    (MARGIN as i32, top as i32, width as i32, SLOT as i32)
+    let x = match side {
+        Side::Left => MARGIN,
+        Side::Right => SURFACE_WIDTH as f32 - MARGIN - width,
+    };
+    (x as i32, top as i32, width as i32, SLOT as i32)
+}
+
+/// How an upright bar shows: the edge it stands on, whether its texts have
+/// room, whether it reacts to the pointer.
+#[derive(Clone, Copy)]
+struct Look {
+    side: Side,
+    labels: bool,
+    live: bool,
+}
+
+/// Where what follows the edge of the screen lines up in an upright bar.
+fn outward(side: Side) -> Alignment {
+    match side {
+        Side::Left => Alignment::Start,
+        Side::Right => Alignment::End,
+    }
+}
+
+/// A line of an upright bar, its items given from the edge of the screen
+/// inwards: the icons of a bar on the right keep to the right.
+fn from_edge<'a>(side: Side, mut items: Vec<Element<'a, Message>>) -> Row<'a, Message> {
+    if side == Side::Right {
+        items.reverse();
+    }
+    Row::with_children(items).align_y(Alignment::Center)
 }
 
 /// Starts slowly, ends slowly.
@@ -210,7 +250,7 @@ pub fn clock<T: Datelike + Timelike>(now: &T) -> (String, String, String, String
 pub fn view<'a>(dock: &'a Dock, state: &'a BarState) -> Element<'a, Message> {
     let palette = dock.palette();
     match state.orientation {
-        Orientation::Vertical => bar(dock, state, ease(state.unfold), true, palette),
+        Orientation::Vertical(side) => bar(dock, state, side, ease(state.unfold), true, palette),
         Orientation::Horizontal => {
             let label: Element<'_, Message> = match hovered_entry(dock, state) {
                 Some((index, entry)) => label(dock, state, index, entry, palette),
@@ -230,7 +270,7 @@ pub fn view<'a>(dock: &'a Dock, state: &'a BarState) -> Element<'a, Message> {
 /// A bar as the launcher shows it under itself: folded and still.
 pub fn still<'a>(dock: &'a Dock, state: &'a BarState, palette: Palette) -> Element<'a, Message> {
     match state.orientation {
-        Orientation::Vertical => bar(dock, state, 0.0, false, palette),
+        Orientation::Vertical(side) => bar(dock, state, side, 0.0, false, palette),
         Orientation::Horizontal => {
             let lying = container(lying(dock, state, false, palette)).center_x(Length::Fill);
             column![space().height(MARGIN), lying, space().height(MARGIN)].into()
@@ -433,11 +473,12 @@ fn lying_time<'a>(now: &DateTime<Local>, palette: Palette) -> Element<'a, Messag
         .into()
 }
 
-/// The bar standing on the left edge. The drawer shows it too, folded and
-/// still: `live` says whether it reacts to the pointer.
+/// The bar standing on the left or the right edge. The drawer shows it too,
+/// folded and still: `live` says whether it reacts to the pointer.
 fn bar<'a>(
     dock: &'a Dock,
     state: &'a BarState,
+    side: Side,
     unfold: f32,
     live: bool,
     palette: Palette,
@@ -447,20 +488,20 @@ fn bar<'a>(
     let labels = unfold > 0.4;
     let pinned = state.pinned();
     let others = state.entries.len() - pinned;
+    let look = Look { side, labels, live };
 
-    let mut rows: Column<'_, Message> =
-        column![launcher(dock, state, labels, live, palette)].spacing(GAP);
+    let mut rows: Column<'_, Message> = column![launcher(dock, state, look, palette)].spacing(GAP);
     for (index, entry) in state.entries.iter().enumerate() {
         if index == 0 && pinned > 0 {
-            rows = rows.push(section("FAVORIS", labels, palette));
+            rows = rows.push(section("FAVORIS", side, labels, palette));
         }
         if index == pinned {
-            rows = rows.push(section("OUVERTES", labels, palette));
+            rows = rows.push(section("OUVERTES", side, labels, palette));
         }
-        rows = rows.push(entry_row(dock, state, index, entry, labels, live, palette));
+        rows = rows.push(entry_row(dock, state, index, entry, look, palette));
     }
     rows = rows.push(space().height(Length::Fill));
-    rows = rows.push(time(&dock.now, labels, palette));
+    rows = rows.push(time(&dock.now, side, labels, palette));
 
     let body = container(rows)
         .width(width)
@@ -479,12 +520,19 @@ fn bar<'a>(
     } else {
         body.into()
     };
+    // It unfolds away from its edge.
+    let (left, right) = match side {
+        Side::Left => (MARGIN, 0.0),
+        Side::Right => (0.0, MARGIN),
+    };
     container(body)
+        .width(Length::Fill)
+        .align_x(outward(side))
         .padding(Padding {
-            left: MARGIN,
+            left,
             top: SHADOW,
             bottom: SHADOW,
-            right: 0.0,
+            right,
         })
         .into()
 }
@@ -493,10 +541,10 @@ fn bar<'a>(
 fn launcher<'a>(
     dock: &Dock,
     state: &BarState,
-    labels: bool,
-    live: bool,
+    look: Look,
     palette: Palette,
 ) -> Element<'a, Message> {
+    let Look { side, labels, live } = look;
     let open = dock.drawer.is_some();
     let color = if open {
         palette.on_accent()
@@ -512,15 +560,19 @@ fn launcher<'a>(
         .center_x(SLOT)
         .center_y(SLOT)
         .style(move |_| style::fill(background, 10.0));
-    let mut content: Row<'_, Message> = row![space().width(MARK), icon].align_y(Alignment::Center);
+    let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon.into()];
     if labels {
         let label = text("Lanceur")
             .size(14)
             .font(style::SEMIBOLD)
             .color(palette.text);
-        content = content.push(space().width(8)).push(label);
+        content.extend([space().width(8).into(), label.into()]);
     }
-    let area = mouse_area(container(content).height(SLOT).width(Length::Fill));
+    let content = container(from_edge(side, content))
+        .height(SLOT)
+        .width(Length::Fill)
+        .align_x(outward(side));
+    let area = mouse_area(content);
     if live || open {
         area.on_press(Message::Launcher(Some(state.screen))).into()
     } else {
@@ -529,7 +581,12 @@ fn launcher<'a>(
 }
 
 /// A hairline between two groups; unfolded, the name of the group.
-fn section(title: &'static str, labels: bool, palette: Palette) -> Element<'static, Message> {
+fn section(
+    title: &'static str,
+    side: Side,
+    labels: bool,
+    palette: Palette,
+) -> Element<'static, Message> {
     if labels {
         let title = text(title)
             .size(10)
@@ -537,7 +594,9 @@ fn section(title: &'static str, labels: bool, palette: Palette) -> Element<'stat
             .color(palette.muted);
         return container(title)
             .height(SECTION)
+            .width(Length::Fill)
             .padding(Padding::from([0.0, 14.0]))
+            .align_x(outward(side))
             .align_y(Alignment::End)
             .into();
     }
@@ -555,10 +614,10 @@ fn entry_row<'a>(
     state: &BarState,
     index: usize,
     entry: &'a Entry,
-    labels: bool,
-    live: bool,
+    look: Look,
     palette: Palette,
 ) -> Element<'a, Message> {
+    let Look { side, labels, live } = look;
     let hovered = live && state.hover_entry == Some(index);
     let dragged = dock.drag.is_some_and(|drag| drag.at == index && drag.moved);
     let unread = dock.unread_of(entry);
@@ -572,10 +631,14 @@ fn entry_row<'a>(
             .into(),
         Indicator::None => space().width(3).into(),
     };
+    // Against its icon.
     let mark = container(mark)
         .width(MARK)
         .center_y(SLOT)
-        .align_x(Alignment::End);
+        .align_x(match side {
+            Side::Left => Alignment::End,
+            Side::Right => Alignment::Start,
+        });
 
     let tile = if hovered && !labels || dragged {
         palette.hover
@@ -598,7 +661,7 @@ fn entry_row<'a>(
         icon.into()
     };
 
-    let mut content: Row<'_, Message> = row![mark, icon].align_y(Alignment::Center);
+    let mut content: Vec<Element<'_, Message>> = vec![mark.into(), icon];
     if labels {
         let name = text(&entry.identity.name)
             .size(14)
@@ -616,10 +679,11 @@ fn entry_row<'a>(
         let texts = column![name, detail]
             .spacing(1)
             .width(Length::Fill)
+            .align_x(outward(side))
             .clip(true);
-        content = content.push(space().width(8)).push(texts);
+        content.extend([space().width(8).into(), texts.into()]);
         if unread > 0 {
-            content = content.push(badge(unread, 18.0)).push(space().width(10));
+            content.extend([badge(unread, 18.0), space().width(10).into()]);
         }
     }
     let background = if hovered && labels {
@@ -627,15 +691,16 @@ fn entry_row<'a>(
     } else {
         iced::Color::TRANSPARENT
     };
-    let line = container(content)
+    let row = container(from_edge(side, content))
         .height(SLOT)
         .width(Length::Fill)
+        .align_x(outward(side))
         .style(move |_| style::fill(background, 10.0));
-    let line = container(line).padding(Padding::from([0.0, if labels { 4.0 } else { 0.0 }]));
+    let row = container(row).padding(Padding::from([0.0, if labels { 4.0 } else { 0.0 }]));
     if !live {
-        return line.into();
+        return row.into();
     }
-    mouse_area(line)
+    mouse_area(row)
         .on_enter(Message::EntryHover(state.id, Some(index)))
         .on_exit(Message::EntryHover(state.id, None))
         .on_press(Message::EntryPress(state.id, index))
@@ -664,7 +729,12 @@ fn badge<'a>(count: u32, size: f32) -> Element<'a, Message> {
         .into()
 }
 
-fn time<'a>(now: &DateTime<Local>, labels: bool, palette: Palette) -> Element<'a, Message> {
+fn time<'a>(
+    now: &DateTime<Local>,
+    side: Side,
+    labels: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
     let (hours, minutes, short, long) = clock(now);
     if labels {
         let time = text(format!("{hours}:{minutes}"))
@@ -672,10 +742,12 @@ fn time<'a>(now: &DateTime<Local>, labels: bool, palette: Palette) -> Element<'a
             .font(style::BOLD)
             .color(palette.text);
         let date = text(long).size(12).color(palette.muted);
-        let line = row![time, date].spacing(10).align_y(Alignment::Center);
+        let line = from_edge(side, vec![time.into(), date.into()]).spacing(10);
         return container(line)
             .height(CLOCK)
+            .width(Length::Fill)
             .padding(Padding::from([0.0, 14.0]))
+            .align_x(outward(side))
             .center_y(CLOCK)
             .into();
     }
@@ -740,8 +812,8 @@ mod tests {
 
     #[test]
     fn the_menu_opens_next_to_its_entry() {
-        let upright =
-            |index, pinned, unfolded| entry_rect(Orientation::Vertical, index, pinned, unfolded);
+        let left = Orientation::Vertical(Side::Left);
+        let upright = |index, pinned, unfolded| entry_rect(left, index, pinned, unfolded);
         let (x, first, width, height) = upright(0, 3, false);
         let (_, second, ..) = upright(1, 3, false);
         let (_, other, ..) = upright(3, 3, false);
@@ -754,6 +826,26 @@ mod tests {
         assert_eq!(other - first, 3 * 40 + 22);
         // Without favorites, the first open application takes their place.
         assert_eq!(upright(0, 0, false).1, first);
+    }
+
+    #[test]
+    fn on_the_right_edge_the_entries_keep_to_the_right_of_the_surface() {
+        let (left, right) = (
+            Orientation::Vertical(Side::Left),
+            Orientation::Vertical(Side::Right),
+        );
+        let (x, y, width, height) = entry_rect(right, 1, 3, false);
+        let (unfolded, ..) = entry_rect(right, 1, 3, true);
+
+        // As far from its edge as on the left, and at the same height.
+        assert_eq!(x + width, SURFACE_WIDTH as i32 - 8);
+        assert_eq!((y, width, height), {
+            let (_, y, width, height) = entry_rect(left, 1, 3, false);
+            (y, width, height)
+        });
+        // Unfolded, the bar grew to the left.
+        assert_eq!(unfolded, SURFACE_WIDTH as i32 - 8 - 200);
+        assert_eq!(surface_size(right, 3, 2), surface_size(left, 3, 2));
     }
 
     #[test]
@@ -772,7 +864,10 @@ mod tests {
         let (_, height) = surface_size(Orientation::Horizontal, 3, 2);
 
         assert_eq!(height, (LABEL_ROOM + WIDTH + MARGIN) as u32);
-        assert_eq!(surface_size(Orientation::Vertical, 3, 2).0, SURFACE_WIDTH);
+        assert_eq!(
+            surface_size(Orientation::Vertical(Side::Left), 3, 2).0,
+            SURFACE_WIDTH
+        );
     }
 
     #[test]
@@ -794,16 +889,28 @@ mod tests {
 
     #[test]
     fn a_bar_takes_the_pointer_only_where_it_shows() {
-        let upright = surface_size(Orientation::Vertical, 2, 0);
+        let (left, right) = (
+            Orientation::Vertical(Side::Left),
+            Orientation::Vertical(Side::Right),
+        );
+        let upright = surface_size(left, 2, 0);
         let lying = surface_size(Orientation::Horizontal, 2, 0);
 
         assert_eq!(
-            input_region(Orientation::Vertical, upright, false),
+            input_region(left, upright, false),
             (0, 0, 60, upright.1 as i32)
         );
+        assert_eq!(input_region(left, upright, true).2, UNFOLDED_REACH as i32);
+        // On the right edge, what shows is at the right end of the surface.
+        let width = SURFACE_WIDTH as i32;
         assert_eq!(
-            input_region(Orientation::Vertical, upright, true).2,
-            UNFOLDED_REACH as i32
+            input_region(right, upright, false),
+            (width - 60, 0, 60, upright.1 as i32)
+        );
+        let reach = UNFOLDED_REACH as i32;
+        assert_eq!(
+            input_region(right, upright, true),
+            (width - reach, 0, reach, upright.1 as i32)
         );
         // Lying down: the bar itself, not the room kept for labels.
         let (x, y, width, height) = input_region(Orientation::Horizontal, lying, false);

@@ -58,17 +58,25 @@ fn role_name(role: OutputRole) -> &'static str {
 pub enum DockPlace {
     /// A column on the left edge.
     Vertical,
+    /// A column on the right edge.
+    VerticalRight,
     /// A row on the bottom edge.
     Horizontal,
     Off,
 }
 
 impl DockPlace {
-    pub const ALL: [Self; 3] = [Self::Vertical, Self::Horizontal, Self::Off];
+    pub const ALL: [Self; 4] = [
+        Self::Vertical,
+        Self::VerticalRight,
+        Self::Horizontal,
+        Self::Off,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Self::Vertical => "vertical",
+            Self::VerticalRight => "vertical-right",
             Self::Horizontal => "horizontal",
             Self::Off => "off",
         }
@@ -79,7 +87,7 @@ impl DockPlace {
     }
 
     /// What a screen has when the file says nothing of it: a dock on the
-    /// left screen, upright, none elsewhere.
+    /// left screen, upright on its left edge, none elsewhere.
     pub fn usual(role: OutputRole) -> Self {
         match role {
             OutputRole::Left => Self::Vertical,
@@ -327,6 +335,7 @@ mod tests {
 
             [dock.screens]
             left = "off"
+            center = "vertical-right"
             right = "horizontal"
             "##,
         );
@@ -341,7 +350,7 @@ mod tests {
         assert_eq!(settings.sticky_edges_ms(), 0);
         assert!(!settings.direct_scanout() && !settings.vrr());
         assert_eq!(settings.dock(OutputRole::Left), DockPlace::Off);
-        assert_eq!(settings.dock(OutputRole::Center), DockPlace::Off);
+        assert_eq!(settings.dock(OutputRole::Center), DockPlace::VerticalRight);
         assert_eq!(settings.dock(OutputRole::Right), DockPlace::Horizontal);
     }
 
@@ -383,6 +392,7 @@ mod tests {
             Change::DirectScanout(false),
             Change::Vrr(false),
             Change::Dock(OutputRole::Left, DockPlace::Off),
+            Change::Dock(OutputRole::Center, DockPlace::VerticalRight),
             Change::Dock(OutputRole::Right, DockPlace::Horizontal),
         ];
 
@@ -404,7 +414,7 @@ mod tests {
             vrr: Some(false),
             docks: PerScreen {
                 left: Some(DockPlace::Off),
-                center: None,
+                center: Some(DockPlace::VerticalRight),
                 right: Some(DockPlace::Horizontal),
             },
         };

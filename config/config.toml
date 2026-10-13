@@ -57,9 +57,10 @@ right = "DP-1"
 favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
 # Quel écran a un dock, et dans quel sens : "vertical" (colonne sur le bord
-# gauche, lanceur en tiroir), "horizontal" (rangée sur le bord bas, lanceur
-# en panneau au-dessus) ou "off". Sans cette section : un dock vertical sur
-# l'écran gauche, aucun ailleurs.
+# gauche, lanceur en tiroir), "vertical-right" (la même sur le bord droit),
+# "horizontal" (rangée sur le bord bas, lanceur en panneau au-dessus) ou
+# "off". Sans cette section : un dock vertical sur l'écran gauche, aucun
+# ailleurs.
 [dock.screens]
 # left = "vertical"
 # center = "off"
@@ -70,8 +71,8 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 [drawer]
 # pinned = ["firefox", "discord", "kitty", "code", "obsidian", "mpv", "org.gnome.Nautilus"]
 
-# Largeur du tiroir, en pixels. Tirer son bord droit à la souris la change
-# et réécrit cette ligne.
+# Largeur du tiroir, en pixels. Tirer à la souris son bord opposé au dock la
+# change et réécrit cette ligne.
 # width = 640
 
 # Hauteur du lanceur d'un dock horizontal, en pixels. Tirer son bord haut la

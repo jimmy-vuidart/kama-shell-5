@@ -11,7 +11,7 @@ use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
 use toml_edit::{DocumentMut, Item};
 
-use crate::model::Orientation;
+use crate::model::{Orientation, Side};
 
 /// What the dock reads from the configuration. Anything else in the file
 /// belongs to the compositor and is ignored here.
@@ -47,17 +47,23 @@ impl Default for Config {
 }
 
 /// The docks, given what the configuration says of each screen
-/// (`"vertical"`, `"horizontal"`, `"off"`). A screen it says nothing of
-/// keeps its usual dock: one on the left screen, upright, none elsewhere.
+/// (`"vertical"`, `"vertical-right"`, `"horizontal"`, `"off"`). A screen it
+/// says nothing of keeps its usual dock: one on the left screen, upright on
+/// its left edge, none elsewhere.
 fn docks(said: impl Fn(&str) -> Option<String>) -> Vec<(OutputRole, Orientation)> {
     let screens = [
-        ("left", OutputRole::Left, Some(Orientation::Vertical)),
+        (
+            "left",
+            OutputRole::Left,
+            Some(Orientation::Vertical(Side::Left)),
+        ),
         ("center", OutputRole::Center, None),
         ("right", OutputRole::Right, None),
     ];
     let dock = |(name, screen, usual): (&str, OutputRole, Option<Orientation>)| {
         let orientation = match said(name).as_deref() {
-            Some("vertical") => Some(Orientation::Vertical),
+            Some("vertical") => Some(Orientation::Vertical(Side::Left)),
+            Some("vertical-right") => Some(Orientation::Vertical(Side::Right)),
             Some("horizontal") => Some(Orientation::Horizontal),
             Some("off") => None,
             _ => usual,
@@ -173,7 +179,10 @@ pinned = ["firefox", "mpv"]
         // No pinned application of its own: the drawer shows the favorites.
         assert_eq!(config.pinned, config.favorites);
         assert_eq!(config.drawer_width, None);
-        assert_eq!(config.docks, [(OutputRole::Left, Orientation::Vertical)]);
+        assert_eq!(
+            config.docks,
+            [(OutputRole::Left, Orientation::Vertical(Side::Left))]
+        );
     }
 
     #[test]
@@ -206,10 +215,13 @@ pinned = ["firefox", "mpv"]
 
     #[test]
     fn without_a_word_the_dock_stands_on_the_left_screen() {
-        assert_eq!(parse("").docks, [(OutputRole::Left, Orientation::Vertical)]);
+        assert_eq!(
+            parse("").docks,
+            [(OutputRole::Left, Orientation::Vertical(Side::Left))]
+        );
         assert_eq!(
             parse(FILE).docks,
-            [(OutputRole::Left, Orientation::Vertical)]
+            [(OutputRole::Left, Orientation::Vertical(Side::Left))]
         );
     }
 
@@ -223,7 +235,21 @@ pinned = ["firefox", "mpv"]
             config.docks,
             [
                 (OutputRole::Center, Orientation::Horizontal),
-                (OutputRole::Right, Orientation::Vertical)
+                (OutputRole::Right, Orientation::Vertical(Side::Left))
+            ]
+        );
+    }
+
+    #[test]
+    fn an_upright_dock_stands_on_either_edge() {
+        let config =
+            parse("[dock.screens]\nleft = \"vertical-right\"\nright = \"vertical-right\"\n");
+
+        assert_eq!(
+            config.docks,
+            [
+                (OutputRole::Left, Orientation::Vertical(Side::Right)),
+                (OutputRole::Right, Orientation::Vertical(Side::Right))
             ]
         );
     }
@@ -235,7 +261,7 @@ pinned = ["firefox", "mpv"]
         assert_eq!(
             config.docks,
             [
-                (OutputRole::Left, Orientation::Vertical),
+                (OutputRole::Left, Orientation::Vertical(Side::Left)),
                 (OutputRole::Right, Orientation::Horizontal)
             ]
         );
@@ -245,7 +271,10 @@ pinned = ["firefox", "mpv"]
     fn a_direction_that_means_nothing_is_ignored() {
         let config = parse("[dock.screens]\nleft = \"diagonal\"\ncenter = 3\n");
 
-        assert_eq!(config.docks, [(OutputRole::Left, Orientation::Vertical)]);
+        assert_eq!(
+            config.docks,
+            [(OutputRole::Left, Orientation::Vertical(Side::Left))]
+        );
     }
 
     #[test]

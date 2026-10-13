@@ -378,8 +378,9 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             picker(choices.clone(), chosen, pick, 180.0, palette)
         };
         let places = [
-            (DockPlace::Vertical, "Vertical"),
-            (DockPlace::Horizontal, "Horizontal"),
+            (DockPlace::Vertical, "À gauche"),
+            (DockPlace::VerticalRight, "À droite"),
+            (DockPlace::Horizontal, "En bas"),
             (DockPlace::Off, "Aucun"),
         ];
         let dock = segmented(
@@ -398,7 +399,7 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             ),
             setting(
                 "Dock",
-                "Une colonne sur le bord gauche, ou une rangée sur le bord bas.",
+                "Une colonne sur le bord gauche ou droit, ou une rangée sur le bord bas.",
                 None,
                 dock,
                 palette,
@@ -441,6 +442,7 @@ fn drawing<'a>(
         };
         let inside: Element<'a, Message> = match app.file.dock(role) {
             DockPlace::Vertical => row![dock(4.0.into(), Length::Fill), label].into(),
+            DockPlace::VerticalRight => row![label, dock(4.0.into(), Length::Fill)].into(),
             DockPlace::Horizontal => {
                 let lying =
                     container(dock((width * 0.45).into(), 4.0.into())).center_x(Length::Fill);

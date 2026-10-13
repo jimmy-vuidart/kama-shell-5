@@ -46,9 +46,9 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
   `docs/superpowers/specs/2026-10-12-capsules-design.md`.
 - Chaque barre montre toutes les applis ouvertes, pas seulement celles
   de son écran.
-- Un dock par écran si on le veut, vertical (bord gauche) ou horizontal
-  (bord bas), réglé dans `[dock.screens]` ; le lanceur horizontal est un
-  panneau centré, jamais sur toute la largeur.
+- Un dock par écran si on le veut, vertical (bord gauche ou droit) ou
+  horizontal (bord bas), réglé dans `[dock.screens]` ; le lanceur horizontal
+  est un panneau centré, jamais sur toute la largeur.
 - Se déconnecter, Redémarrer et Éteindre sont réels, après confirmation ;
   seul `--mock` les simule.
 - Les favoris et le thème changés à la souris sont réécrits dans

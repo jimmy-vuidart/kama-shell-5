@@ -6,8 +6,10 @@ application. Un seul programme, plusieurs surfaces layer-shell, un seul état.
 
 Chaque écran peut avoir sa barre, dans un sens ou dans l'autre :
 
-- **verticale** : colonne sur le bord gauche, qui se déploie au survol ; le
-  lanceur est un tiroir sur toute la hauteur ;
+- **verticale** : colonne sur le bord gauche ou sur le bord droit, qui se
+  déploie au survol ; le lanceur est un tiroir sur toute la hauteur, du même
+  côté. À droite tout est en miroir : les icônes restent contre le bord, les
+  noms se déploient vers la gauche, le menu et le mixeur s'ouvrent à gauche ;
 - **horizontale** : rangée centrée sur le bord bas, qui nomme l'icône
   survolée dans une étiquette ; le lanceur est un panneau large et centré
   au-dessus d'elle, en trois colonnes.
@@ -87,7 +89,7 @@ accent = "#7aa7ff"
 favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
 [dock.screens]
-left = "vertical"      # "vertical", "horizontal" ou "off"
+left = "vertical"      # "vertical", "vertical-right", "horizontal" ou "off"
 center = "off"
 right = "horizontal"
 
@@ -125,8 +127,8 @@ n'est jamais réécrit.
 - **Tiroir** : clic sur le lanceur ou touche `Super` seule (`Alt` en
   imbriqué). La saisie filtre aussitôt, les flèches choisissent, `Entrée`
   ouvre, `Échap` ou un clic en dehors ferme ; la molette sur la grille change
-  de page. Tirer sa poignée le redimensionne : le bord droit du tiroir
-  vertical (`[drawer] width`, jamais moins de 520 px ni au point de ne plus
+  de page. Tirer sa poignée le redimensionne : le bord du tiroir vertical
+  opposé au dock (`[drawer] width`, jamais moins de 520 px ni au point de ne plus
   laisser de place au mixeur), le bord haut du lanceur horizontal
   (`[drawer] height`, jamais moins de 480 px).
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un

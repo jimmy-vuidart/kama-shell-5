@@ -328,6 +328,7 @@ mod tests {
             Change::DirectScanout(false),
             Change::Vrr(false),
             Change::Dock(OutputRole::Center, DockPlace::Horizontal),
+            Change::Dock(OutputRole::Right, DockPlace::VerticalRight),
         ];
         let mut text = SAMPLE.to_owned();
         for change in &changes {
