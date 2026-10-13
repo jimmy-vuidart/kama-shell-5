@@ -118,6 +118,33 @@ impl MouseAccelProfile {
     }
 }
 
+/// How a wallpaper image is scaled or fitted to the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WallpaperMode {
+    #[default]
+    Fill,
+    Fit,
+    Center,
+    Tile,
+}
+
+impl WallpaperMode {
+    pub const ALL: [Self; 4] = [Self::Fill, Self::Fit, Self::Center, Self::Tile];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Fill => "fill",
+            Self::Fit => "fit",
+            Self::Center => "center",
+            Self::Tile => "tile",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.name() == name)
+    }
+}
+
 /// What the file says. `None` is a setting left to its default.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
@@ -136,6 +163,9 @@ pub struct Settings {
     pub mouse_accel_profile: Option<MouseAccelProfile>,
     pub mouse_natural_scroll: Option<bool>,
     pub mouse_left_handed: Option<bool>,
+    pub wallpaper_path: Option<String>,
+    pub wallpapers: PerScreen<Option<String>>,
+    pub wallpaper_mode: Option<WallpaperMode>,
 }
 
 impl Settings {
@@ -189,6 +219,11 @@ impl Settings {
                 .and_then(MouseAccelProfile::named),
             mouse_natural_scroll: switch(&["mouse", "natural_scroll"]),
             mouse_left_handed: switch(&["mouse", "left_handed"]),
+            wallpaper_path: name_of(&["wallpaper", "path"]),
+            wallpapers: PerScreen::from_roles(|role| name_of(&["wallpaper", role_name(role)])),
+            wallpaper_mode: text_of(&["wallpaper", "mode"])
+                .as_deref()
+                .and_then(WallpaperMode::named),
         }
     }
 
@@ -215,6 +250,17 @@ impl Settings {
 
     pub fn dock(&self, role: OutputRole) -> DockPlace {
         self.docks.get(role).unwrap_or(DockPlace::usual(role))
+    }
+
+    pub fn wallpaper(&self, role: OutputRole) -> Option<&str> {
+        self.wallpapers
+            .get(role)
+            .as_deref()
+            .or(self.wallpaper_path.as_deref())
+    }
+
+    pub fn wallpaper_mode(&self) -> WallpaperMode {
+        self.wallpaper_mode.unwrap_or_default()
     }
 
     pub fn mouse_accel_speed(&self) -> f64 {
@@ -258,6 +304,9 @@ pub enum Change {
     MouseAccelProfile(MouseAccelProfile),
     MouseNaturalScroll(bool),
     MouseLeftHanded(bool),
+    WallpaperPath(Option<String>),
+    Wallpaper(OutputRole, Option<String>),
+    WallpaperMode(WallpaperMode),
 }
 
 /// The file with a change made. `None` when the file is not valid TOML: it
@@ -312,6 +361,12 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
             with_value(text, &["mouse", "natural_scroll"], (*on).into())
         }
         Change::MouseLeftHanded(on) => with_value(text, &["mouse", "left_handed"], (*on).into()),
+        Change::WallpaperPath(path) => text_or_nothing(text, &["wallpaper", "path"], path),
+        Change::Wallpaper(role, path) => {
+            let path_key = ["wallpaper", role_name(*role)];
+            text_or_nothing(text, &path_key, path)
+        }
+        Change::WallpaperMode(mode) => with_value(text, &["wallpaper", "mode"], mode.name().into()),
     }
 }
 
@@ -459,6 +514,8 @@ mod tests {
             Change::MouseAccelProfile(MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
             Change::MouseLeftHanded(true),
+            Change::WallpaperPath(Some("/home/user/wallpaper.png".into())),
+            Change::WallpaperMode(WallpaperMode::Fit),
         ];
 
         let mut text = SAMPLE.to_owned();
@@ -485,6 +542,9 @@ mod tests {
             mouse_accel_profile: Some(MouseAccelProfile::Flat),
             mouse_natural_scroll: Some(true),
             mouse_left_handed: Some(true),
+            wallpaper_path: Some("/home/user/wallpaper.png".into()),
+            wallpapers: PerScreen::default(),
+            wallpaper_mode: Some(WallpaperMode::Fit),
         };
         assert_eq!(Settings::parse(&text), expected);
         // The favorites of the dock, which no change is about, are still there.
@@ -555,5 +615,41 @@ mod tests {
             assign(&outputs, OutputRole::Right, "DP-2"),
             screens("", "", "DP-2")
         );
+    }
+
+    #[test]
+    fn wallpaper_settings_can_be_parsed_and_changed() {
+        let text = "[wallpaper]\npath = \"/usr/share/bg.png\"\nleft = \"/usr/share/left.png\"\nmode = \"fit\"\n";
+        let settings = Settings::parse(text);
+        assert_eq!(
+            settings.wallpaper_path.as_deref(),
+            Some("/usr/share/bg.png")
+        );
+        assert_eq!(
+            settings.wallpaper(OutputRole::Left),
+            Some("/usr/share/left.png")
+        );
+        assert_eq!(
+            settings.wallpaper(OutputRole::Center),
+            Some("/usr/share/bg.png")
+        );
+        assert_eq!(settings.wallpaper_mode(), WallpaperMode::Fit);
+
+        let text = apply(text, &Change::WallpaperMode(WallpaperMode::Fill)).unwrap();
+        let text = apply(
+            &text,
+            &Change::Wallpaper(OutputRole::Right, Some("/usr/share/right.png".into())),
+        )
+        .unwrap();
+        let settings = Settings::parse(&text);
+        assert_eq!(settings.wallpaper_mode(), WallpaperMode::Fill);
+        assert_eq!(
+            settings.wallpaper(OutputRole::Right),
+            Some("/usr/share/right.png")
+        );
+
+        let text = apply(&text, &Change::Wallpaper(OutputRole::Right, None)).unwrap();
+        let settings = Settings::parse(&text);
+        assert_eq!(settings.wallpapers.right, None);
     }
 }

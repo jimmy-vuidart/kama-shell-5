@@ -1,7 +1,7 @@
 //! What the settings screen draws: the pages on the left, the settings of
 //! the chosen one on the right, each in a card.
 
-use coquille_config::{Change, DockPlace, MouseAccelProfile, PerScreen};
+use coquille_config::{Change, DockPlace, MouseAccelProfile, PerScreen, WallpaperMode};
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
 use coquille_ui::glyph::{Glyph, glyph};
@@ -170,7 +170,84 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     ]
     .spacing(12);
 
-    card(vec![theme.into()], palette)
+    let wallpaper_modes = [
+        (WallpaperMode::Fill, "Remplir"),
+        (WallpaperMode::Fit, "Ajuster"),
+        (WallpaperMode::Center, "Centrer"),
+        (WallpaperMode::Tile, "Mosaïque"),
+    ];
+    let mode_choice = segmented(
+        &wallpaper_modes,
+        app.file.wallpaper_mode(),
+        |mode| Message::Change(Change::WallpaperMode(mode)),
+        palette,
+    );
+
+    let custom = app.file.wallpaper_path.as_deref().or_else(|| {
+        app.file
+            .wallpapers
+            .center
+            .as_deref()
+            .or(app.file.wallpapers.left.as_deref())
+            .or(app.file.wallpapers.right.as_deref())
+    });
+
+    let image_control: Element<'a, Message> = match custom {
+        Some(path) => {
+            let display_path = model::short_path(
+                std::path::Path::new(path),
+                std::env::var_os("HOME").as_deref(),
+            );
+            let reset_btn = button(
+                text("Rétablir")
+                    .size(12)
+                    .font(style::MEDIUM)
+                    .color(palette.text),
+            )
+            .padding(Padding::from([6.0, 12.0]))
+            .on_press(Message::Change(Change::WallpaperPath(None)))
+            .style(style::tinted(palette.block, palette.hover, 6.0));
+
+            row![
+                text(display_path)
+                    .size(13)
+                    .color(palette.muted)
+                    .width(Length::Fill),
+                reset_btn
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .into()
+        }
+        None => text("Panoramique « verre » par défaut")
+            .size(13)
+            .color(palette.muted)
+            .into(),
+    };
+
+    let wallpaper = vec![
+        setting(
+            "Mode d'affichage",
+            "Comment l'image s'ajuste à la taille de l'écran.",
+            None,
+            mode_choice,
+            palette,
+        ),
+        setting(
+            "Image",
+            "Image personnalisée (définie dans config.toml) ou fond par défaut.",
+            None,
+            image_control,
+            palette,
+        ),
+    ];
+
+    column![
+        section("Thème", card(vec![theme.into()], palette), palette),
+        section("Fond d'écran", card(wallpaper, palette), palette),
+    ]
+    .spacing(18)
+    .into()
 }
 
 /// A theme to choose, shown as a small screen in its colors.

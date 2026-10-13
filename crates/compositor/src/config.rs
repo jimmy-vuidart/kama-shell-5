@@ -30,6 +30,7 @@ pub struct Config {
     /// this says otherwise.
     pub xwayland: Option<bool>,
     pub game: GameConfig,
+    pub wallpaper: WallpaperConfig,
 }
 
 impl Config {
@@ -110,6 +111,32 @@ pub struct MouseConfig {
     pub accel_profile: Option<MouseAccelProfile>,
     pub natural_scroll: Option<bool>,
     pub left_handed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WallpaperMode {
+    #[default]
+    Fill,
+    Fit,
+    Center,
+    Tile,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WallpaperConfig {
+    pub path: Option<String>,
+    pub left: Option<String>,
+    pub center: Option<String>,
+    pub right: Option<String>,
+    pub mode: Option<WallpaperMode>,
+}
+
+impl WallpaperConfig {
+    pub fn mode(&self) -> WallpaperMode {
+        self.mode.unwrap_or_default()
+    }
 }
 
 pub fn parse(text: &str) -> Result<Config, toml::de::Error> {
@@ -351,6 +378,15 @@ mod tests {
         );
         assert_eq!(config.mouse.natural_scroll, Some(false));
         assert_eq!(config.mouse.left_handed, Some(false));
+        assert_eq!(
+            config.wallpaper.path.as_deref(),
+            Some("/chemin/vers/image.png")
+        );
+        assert_eq!(
+            config.wallpaper.left.as_deref(),
+            Some("/chemin/vers/gauche.png")
+        );
+        assert_eq!(config.wallpaper.mode, Some(WallpaperMode::Fill));
     }
 
     #[test]
@@ -381,6 +417,9 @@ mod tests {
             Change::MouseAccelProfile(coquille_config::MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
             Change::MouseLeftHanded(true),
+            Change::WallpaperPath(Some("/path/to/wall.png".into())),
+            Change::Wallpaper(OutputRole::Left, Some("/path/to/left.png".into())),
+            Change::WallpaperMode(coquille_config::WallpaperMode::Fit),
         ];
         let mut text = SAMPLE.to_owned();
         for change in &changes {
@@ -401,6 +440,9 @@ mod tests {
         assert_eq!(config.mouse.accel_profile, Some(MouseAccelProfile::Flat));
         assert_eq!(config.mouse.natural_scroll, Some(true));
         assert_eq!(config.mouse.left_handed, Some(true));
+        assert_eq!(config.wallpaper.path.as_deref(), Some("/path/to/wall.png"));
+        assert_eq!(config.wallpaper.left.as_deref(), Some("/path/to/left.png"));
+        assert_eq!(config.wallpaper.mode(), WallpaperMode::Fit);
     }
 
     #[test]

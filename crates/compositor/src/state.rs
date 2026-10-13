@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use coquille_apps::Catalog;
-use coquille_model::{AppMemory, OutputId, Point as ModelPoint, WindowId};
+use coquille_model::{AppMemory, OutputId, OutputRole, Point as ModelPoint, Rect, WindowId};
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
@@ -36,6 +36,7 @@ use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
 
 use crate::backend::Backend;
+use crate::config::WallpaperConfig;
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
@@ -48,6 +49,7 @@ use crate::render::scene::Cursor;
 use crate::shell::{CapsuleHit, ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
 use crate::theme::{Theme, ThemeKind};
+use crate::wallpaper::{ScreenWallpaper, WallpaperManager};
 
 pub struct Options {
     pub theme: ThemeKind,
@@ -64,6 +66,7 @@ pub struct Options {
     pub state_dir: Option<PathBuf>,
     /// How long the pointer is held at the edge of a game's screen.
     pub sticky_edges_ms: u64,
+    pub wallpaper: WallpaperConfig,
 }
 
 /// A screen as clients see it.
@@ -163,6 +166,9 @@ pub struct State {
     pub redraw_needed: bool,
     /// The next frame must be drawn whole, whatever the damage.
     pub full_redraw: bool,
+    pub wallpaper_config: WallpaperConfig,
+    pub wallpaper_manager: WallpaperManager,
+    pub wallpapers: Vec<ScreenWallpaper>,
 }
 
 impl State {
@@ -242,7 +248,7 @@ impl State {
             .unwrap_or_default();
         info!(habits = habits.len(), "habits loaded");
 
-        Ok(Self {
+        let mut state = Self {
             start_time: Instant::now(),
             display_handle,
             loop_signal,
@@ -299,7 +305,41 @@ impl State {
             swallowed_press: false,
             redraw_needed: true,
             full_redraw: true,
-        })
+            wallpaper_config: options.wallpaper,
+            wallpaper_manager: WallpaperManager::new(),
+            wallpapers: Vec::new(),
+        };
+        state.refresh_wallpapers();
+        Ok(state)
+    }
+
+    /// Re-evaluates wallpapers for all current screens.
+    pub fn refresh_wallpapers(&mut self) {
+        let screens: Vec<(OutputId, OutputRole, Rect)> = self
+            .outputs
+            .iter()
+            .filter_map(|screen| {
+                let info = self.shell.screen(screen.id)?;
+                Some((screen.id, info.role, info.rect))
+            })
+            .collect();
+        self.wallpapers =
+            self.wallpaper_manager
+                .update(&screens, &self.wallpaper_config, self.theme.backdrop);
+    }
+
+    /// Active screen wallpapers (omitted on screens anchored by a game).
+    pub fn active_wallpapers(
+        &self,
+    ) -> Vec<(
+        smithay::backend::renderer::element::memory::MemoryRenderBuffer,
+        Rect,
+    )> {
+        self.wallpapers
+            .iter()
+            .filter(|wp| !self.is_anchored(wp.output_id))
+            .map(|wp| (wp.buffer.clone(), wp.rect))
+            .collect()
     }
 
     pub fn output(&self, id: OutputId) -> Option<&Output> {

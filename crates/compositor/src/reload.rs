@@ -34,6 +34,9 @@ impl State {
             udev.set_game(&config.game);
             udev.set_mouse(&config.mouse);
         }
+        self.wallpaper_config = config.wallpaper.clone();
+        self.refresh_wallpapers();
+        self.full_redraw = true;
         // A screen that just lost its variable refresh rate needs a frame
         // to learn it.
         self.queue_redraw();

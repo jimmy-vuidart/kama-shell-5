@@ -791,6 +791,7 @@ dependencies = [
  "coquille-ipc",
  "coquille-model",
  "cosmic-text 0.19.0",
+ "image",
  "resvg",
  "serde",
  "serde_json",

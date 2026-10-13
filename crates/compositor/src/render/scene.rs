@@ -153,6 +153,8 @@ pub struct Layers<'a> {
     /// Panels of other programs (the dock, its drawer), topmost first.
     pub panels: &'a [Panel],
     pub cursor: Option<Cursor>,
+    /// Screen wallpapers in the global space, shown under every window and panel.
+    pub wallpapers: &'a [(MemoryRenderBuffer, Rect)],
 }
 
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
@@ -226,6 +228,7 @@ pub fn build(
         panel,
         panels,
         cursor,
+        wallpapers,
     } = layers;
     let metrics = *shell.desk.metrics();
     // From the global space to the view.
@@ -482,5 +485,23 @@ pub fn build(
     }
     let under = [Layer::Bottom, Layer::Background];
     elements.extend(panel_elements(renderer, panels, &under, view));
+    for (buffer, rect) in wallpapers {
+        if overlaps(*rect, view) {
+            let corner = ModelPoint::new(rect.x + shift.x, rect.y + shift.y);
+            let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
+            match MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                location,
+                buffer,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            ) {
+                Ok(element) => elements.push(SceneElement::Texture(element)),
+                Err(error) => warn!(?error, "cannot upload a wallpaper"),
+            }
+        }
+    }
     elements
 }

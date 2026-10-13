@@ -81,3 +81,13 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # Hauteur du lanceur d'un dock horizontal, en pixels. Tirer son bord haut la
 # change et réécrit cette ligne.
 # height = 500
+
+# Fond d'écran : image affichée en arrière-plan de chaque écran.
+# Sans cette section, le fond « glass » adapté à la définition de chaque écran
+# est utilisé.
+# [wallpaper]
+# path = "/chemin/vers/image.png"
+# left = "/chemin/vers/gauche.png"
+# center = "/chemin/vers/centre.png"
+# right = "/chemin/vers/droite.png"
+# mode = "fill"

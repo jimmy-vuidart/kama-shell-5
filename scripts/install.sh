@@ -21,6 +21,7 @@ entry="$prefix/share/applications/coquille.desktop"
 # Named after the windows of the settings screen: their title bar and their
 # icon in the dock take its name and its icon.
 settings_entry="$prefix/share/applications/coquille-settings.desktop"
+wallpapers_dir="$prefix/share/coquille/wallpapers"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/coquille/config.toml"
 # Logs of sessions started from the menu or the login screen.
 log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
@@ -41,6 +42,7 @@ as_root() {
 if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f -- "${bin:?}" "${dock_bin:?}" "${dock_watch:?}" "${settings_bin:?}" "${session_bin:?}" \
         "${entry:?}" "${settings_entry:?}"
+    rm -rf -- "${wallpapers_dir:?}"
     for session_entry in "${session_entries[@]}"; do
         if [[ -e "$session_entry" ]]; then
             as_root rm -f -- "${session_entry:?}"
@@ -72,6 +74,10 @@ install -Dm755 target/release/coquille-settings "$settings_bin"
 install -Dm755 scripts/coquille-dock-watch "$dock_watch"
 sed "s|@TERMINAL@|$terminal|" scripts/coquille-session >"$session_bin"
 chmod 755 "$session_bin"
+mkdir -p "$wallpapers_dir"
+if compgen -G "assets/wallpapers/*.png" > /dev/null; then
+    install -Dm644 -t "$wallpapers_dir" assets/wallpapers/*.png
+fi
 
 if [[ ! -e "$config" ]]; then
     install -Dm644 config/config.toml "$config"
@@ -175,6 +181,7 @@ coquille est installé :
   session          $session_bin  (lance aussi le dock)
   menu             $entry
   configuration    $config  ($config_note)
+  fonds d'écran    $wallpapers_dir/
   écran de connexion  $session_note
   journaux         $log_dir/
   terminal         $terminal

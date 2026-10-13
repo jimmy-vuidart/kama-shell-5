@@ -195,6 +195,7 @@ impl State {
         self.refresh_bar();
         let overlay = self.overlay();
         let panels = self.panels();
+        let wallpapers = self.active_wallpapers();
         let full_redraw = std::mem::take(&mut self.full_redraw);
         let Backend::Winit(winit) = &mut self.backend else {
             return;
@@ -238,6 +239,7 @@ impl State {
                         panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
                         panels: &panels,
                         cursor,
+                        wallpapers: &wallpapers,
                     },
                 );
                 let clear = self.theme.backdrop.premultiplied();
