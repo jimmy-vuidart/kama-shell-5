@@ -360,11 +360,16 @@ fn lying<'a>(
     }
     items = items.push(divider()).push(lying_time(&dock.now, palette));
 
+    // As wide as what it holds: the bar sits 1 px inside its frame, and
+    // its items, centered, stay where they were.
     let inside = container(items)
         .height(Length::Fill)
         .padding(Padding::from([0.0, PADDING - 1.0]))
         .style(move |_| style::fill(palette.bar, RADIUS - 1.0));
-    let body = framed(inside, WIDTH, palette).height(WIDTH);
+    let body = container(inside)
+        .height(WIDTH)
+        .padding(1)
+        .style(move |_| metal::frame(&hairline(WIDTH, palette), RADIUS, palette.shadow()));
     if !live {
         return body.into();
     }
@@ -499,10 +504,12 @@ fn bar<'a>(
     let inside = container(rows)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(Padding::from([PADDING - 1.0, 0.0]))
-        .clip(true)
-        .style(move |_| style::fill(palette.bar, RADIUS - 1.0));
-    let body = framed(inside, height, palette).width(width).height(height);
+        .padding(Padding::from([PADDING, 0.0]))
+        .clip(true);
+    let frame = hairline(height, palette);
+    let body = metal::framed(inside, palette.bar, frame, RADIUS, palette.shadow())
+        .width(width)
+        .height(height);
     let body: Element<'_, Message> = if live {
         mouse_area(body)
             .on_enter(Message::BarHover(state.id, true))
@@ -528,17 +535,10 @@ fn bar<'a>(
         .into()
 }
 
-/// A bar, `height` pixels high, in its frame: the hairline of gold all
-/// around it, brighter along its top edge.
-fn framed<'a>(
-    inside: impl Into<Element<'a, Message>>,
-    height: f32,
-    palette: Palette,
-) -> iced::widget::Container<'a, Message> {
-    container(inside).padding(1).style(move |_| {
-        let hairline = palette.accent.hairline(0.5, 0.7, height);
-        metal::frame(&hairline, RADIUS, palette.shadow())
-    })
+/// The hairline of gold around a bar `height` pixels high, brighter along
+/// its top edge.
+fn hairline(height: f32, palette: Palette) -> [metal::Stop; 4] {
+    palette.accent.hairline(0.5, 0.7, height)
 }
 
 /// The symbol of the launcher: four squares of gold, the lower two a

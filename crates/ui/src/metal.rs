@@ -10,7 +10,7 @@
 use std::f32::consts::PI;
 
 use iced::gradient::{ColorStop, Linear};
-use iced::widget::{Row, container, row, slider, space};
+use iced::widget::{Row, Stack, container, row, slider, space, stack};
 use iced::{
     Background, Border, Color, Element, Gradient, Length, Padding, Radians, Shadow, border,
 };
@@ -237,6 +237,36 @@ pub fn frame(
         shadow,
         ..container::Style::default()
     }
+}
+
+/// What floats above the windows, in its frame and on its `fill`. The
+/// frame takes no room: what is inside is laid out as if it were not there.
+/// The whole is as large as it is told to be, not as its content.
+pub fn framed<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    fill: Color,
+    hairline: [Stop; 4],
+    radius: impl Into<border::Radius>,
+    shadow: Shadow,
+) -> Stack<'a, Message> {
+    let radius = radius.into();
+    let ground = container(space())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(fill.into()),
+            border: Border {
+                radius: within(radius),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        });
+    let frame = container(ground)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(1)
+        .style(move |_| self::frame(&hairline, radius, shadow));
+    stack![frame, content.into()]
 }
 
 /// The corners of what sits 1 px inside a frame.

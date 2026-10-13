@@ -144,31 +144,25 @@ fn panel<'a>(
         ),
     };
 
-    let inside = container(inside)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| container::Style {
-            border: Border {
-                radius: metal::within(radius),
-                ..Border::default()
-            },
-            ..style::fill(palette.panel, 0.0)
-        });
+    let inside = container(inside).width(Length::Fill).height(Length::Fill);
     // As high as its screen.
     let height = drawer.surface.map_or(1080.0, |surface| surface.height);
-    container(inside)
+    framed(inside, height, radius, palette)
         .width(drawer.width)
         .height(Length::Fill)
-        .padding(1)
-        .style(move |_| frame(height, radius, palette))
         .into()
 }
 
-/// The frame of a panel `height` pixels high: the hairline of gold all
+/// A panel `height` pixels high in its frame: the hairline of gold all
 /// around it, brighter along its top edge.
-fn frame(height: f32, radius: impl Into<border::Radius>, palette: Palette) -> container::Style {
+fn framed<'a>(
+    inside: impl Into<Element<'a, Message>>,
+    height: f32,
+    radius: impl Into<border::Radius>,
+    palette: Palette,
+) -> iced::widget::Stack<'a, Message> {
     let hairline = palette.accent.hairline(0.45, 0.65, height);
-    metal::frame(&hairline, radius, palette.shadow())
+    metal::framed(inside, palette.panel, hairline, radius, palette.shadow())
 }
 
 fn rule<'a>(palette: Palette) -> Element<'a, Message> {
@@ -179,14 +173,19 @@ fn rule<'a>(palette: Palette) -> Element<'a, Message> {
 
 fn heading<'a>(title: &'a str, detail: String, palette: Palette) -> Row<'a, Message> {
     row![
-        text(title)
-            .size(15)
-            .font(style::SEMIBOLD)
-            .color(palette.accent.text),
+        title_text(title, palette),
         text(detail).size(13).color(palette.muted)
     ]
     .spacing(10)
     .align_y(Alignment::Center)
+}
+
+/// The title of a part of the launcher: small capitals of gold.
+fn title_text<'a>(title: &str, palette: Palette) -> iced::widget::Text<'a> {
+    text(title.to_uppercase())
+        .size(11)
+        .font(style::BOLD)
+        .color(palette.accent.text)
 }
 
 fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
@@ -266,10 +265,7 @@ fn pinned<'a>(dock: &'a Dock, width: f32, palette: Palette) -> Element<'a, Messa
             .style(style::flat(palette.hover, 12.0));
         tiles = tiles.push(tile);
     }
-    let title = text("Épinglées")
-        .size(15)
-        .font(style::SEMIBOLD)
-        .color(palette.accent.text);
+    let title = title_text("Épinglées", palette);
     column![title, tiles].spacing(8).into()
 }
 
@@ -504,10 +500,7 @@ fn game_card<'a>(game: &crate::steam::Game, height: f32, palette: Palette) -> El
 /// The games of the lying launcher: a column of the ones played last.
 fn games_column<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     let count = dock.games.len();
-    let title = text("Jeux")
-        .size(15)
-        .font(style::SEMIBOLD)
-        .color(palette.accent.text);
+    let title = title_text("Jeux", palette);
     let mut cards: Column<'_, Message> = column![title].spacing(6);
     if count == 0 {
         let nothing = text("Aucun jeu Steam installé.")
@@ -949,15 +942,11 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     let inside = container(column![search(drawer, palette), body].spacing(12))
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(13)
-        .clip(true)
-        .style(move |_| style::fill(palette.panel, 15.0));
-    let height = drawer.height;
-    let panel = container(inside)
+        .padding(14)
+        .clip(true);
+    let panel = framed(inside, drawer.height, 16.0, palette)
         .width(width)
-        .height(height)
-        .padding(1)
-        .style(move |_| frame(height, 16.0, palette));
+        .height(drawer.height);
 
     // Its top edge is dragged to make it higher or lower: lying down, the
     // grip is a bar of gold while it is held.

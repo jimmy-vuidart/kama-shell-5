@@ -297,11 +297,12 @@ impl Painter {
             fill(pixmap, &path, background);
         }
         if capsule.shown && capsule.focused {
-            // Inside the capsule, so that the box keeps its margin: a thin
-            // piece of gold, lit from above.
-            let (top, bottom) = (cell.rect.y as f32, cell.rect.bottom() as f32);
+            // Around the capsule, in the margin of the box, of which 1 px
+            // is left: a thin piece of gold, lit from above.
+            let top = cell.rect.y as f32 - RING_WIDTH;
+            let bottom = cell.rect.bottom() as f32 + RING_WIDTH;
             let gold = ramp(&theme.accent.thin_piece(), top, bottom);
-            let (outer, inner) = (pill(cell.rect, 0.0), pill(cell.rect, RING_WIDTH));
+            let (outer, inner) = (pill(cell.rect, -RING_WIDTH), pill(cell.rect, 0.0));
             if let (Some(outer), Some(inner), Some(gold)) = (outer, inner, gold) {
                 rim(pixmap, &outer, &inner, &gold);
             }
@@ -893,13 +894,17 @@ mod tests {
         let gold = Theme::new(ThemeKind::Light).accent;
         let cell = painted.layout.capsules[0].rect;
         let middle = (cell.x + cell.w / 2) as u32;
-        let top = pixel(&painted.pixmap, middle, cell.y as u32);
-        let foot = pixel(&painted.pixmap, middle, (cell.bottom() - 1) as u32);
+        // The ring is around the capsule, 2 px wide.
+        let top = pixel(&painted.pixmap, middle, (cell.y - 2) as u32);
+        let foot = pixel(&painted.pixmap, middle, (cell.bottom() + 1) as u32);
         assert!(close(top, gold.light), "{top:?}");
         assert!(close(foot, gold.brown), "{foot:?}");
-        // Inside the ring, the capsule itself.
-        let inside = pixel(&painted.pixmap, middle, (cell.y + 4) as u32);
+        // Inside the ring, the capsule itself, whole.
+        let inside = pixel(&painted.pixmap, middle, cell.y as u32);
         assert!(close(inside, Theme::new(ThemeKind::Light).button_hover));
+        // Between the ring and the edge of the box, 1 px of the box.
+        let margin = pixel(&painted.pixmap, middle, (cell.y - 3) as u32);
+        assert!(!close(margin, gold.light), "{margin:?}");
     }
 
     /// Whether a pixel is nearly a color: a ramp is never exactly its ends.
