@@ -11,7 +11,6 @@ use coquille_model::{
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::desktop::{Window, space::SpaceElement};
-use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as ToplevelState;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, SERIAL_COUNTER, Size, Transform};
@@ -471,9 +470,9 @@ impl State {
             return;
         };
         let (app_id, title) = toplevel_names(toplevel);
-        // A client that never asked the compositor for decorations draws
-        // them itself.
-        let own_titlebar = !crate::handlers::asked_for_decorations(surface);
+        // A client that never asked the compositor for decorations, or that
+        // asked to draw them itself, gets no title bar from the shell.
+        let own_titlebar = crate::handlers::draws_own_titlebar(surface);
         self.manage(NewWindow {
             window,
             app_id,
@@ -688,9 +687,10 @@ impl State {
             // is more than the screen offers.
             let imposed = managed.oversized || managed.user_sized;
             let free_size = geometry.floating && !geometry.anchored && !imposed;
+            let own_titlebar = crate::handlers::draws_own_titlebar(toplevel.wl_surface());
             toplevel.with_pending_state(|state| {
                 state.size = (!free_size).then(|| (geometry.client.w, geometry.client.h).into());
-                state.decoration_mode = Some(DecorationMode::ServerSide);
+                state.decoration_mode = Some(crate::handlers::decoration_mode(own_titlebar));
 
                 let mut set = |flag: ToplevelState, on: bool| {
                     if on {
@@ -741,16 +741,13 @@ impl State {
         }
     }
 
-    /// A client drew: if its window floats, the frame takes the size the
-    /// client chose. The first time, the window stays centered where it
-    /// opened; later it keeps its top-left corner.
-    /// A client turned out to want its decorations from the compositor after
-    /// all (it asked once its window was already open).
-    pub fn decorate(&mut self, surface: &WlSurface) {
+    /// A client said who draws its title bar once its window was already
+    /// open: the shell adds its own, or takes it away.
+    pub fn set_own_titlebar(&mut self, surface: &WlSurface, own: bool) {
         let Some(id) = self.shell.by_surface(surface).map(|managed| managed.id) else {
             return;
         };
-        if self.shell.desk.set_own_titlebar(id, false).is_ok() {
+        if self.shell.desk.set_own_titlebar(id, own).is_ok() {
             self.apply_arrangement();
         }
     }
@@ -777,6 +774,9 @@ impl State {
         self.queue_redraw();
     }
 
+    /// A client drew: if its window floats, the frame takes the size the
+    /// client chose. The first time, the window stays centered where it
+    /// opened; later it keeps its top-left corner.
     pub fn follow_client_size(&mut self, surface: &WlSurface) {
         let Some(managed) = self.shell.by_surface_mut(surface) else {
             return;

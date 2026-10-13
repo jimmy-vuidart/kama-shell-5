@@ -5,6 +5,7 @@ mod layer_shell;
 mod xdg_shell;
 
 use std::os::fd::OwnedFd;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::ImportDma;
@@ -191,45 +192,73 @@ impl DrmSyncobjHandler for State {
     }
 }
 
-/// Decorations are always drawn by the compositor: the title bar carries the
-/// shell's own buttons.
+/// The compositor decorates a toplevel that asks for it or leaves it the
+/// choice: the title bar carries the shell's own buttons. One that says it
+/// decorates itself (Electron applications with their own title bar) is taken
+/// at its word.
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        with_states(toplevel.wl_surface(), |states| {
-            states
-                .data_map
-                .insert_if_missing_threadsafe(|| AskedForDecorations);
-        });
-        force_server_side(&toplevel);
-        self.decorate(toplevel.wl_surface());
+        self.decorations_wished(&toplevel, DecorationMode::ServerSide);
     }
 
-    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
-        force_server_side(&toplevel);
+    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+        self.decorations_wished(&toplevel, mode);
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        force_server_side(&toplevel);
+        self.decorations_wished(&toplevel, DecorationMode::ServerSide);
     }
 }
 
-/// Marks a toplevel whose client asked the compositor to decorate it. The
-/// others (GTK applications, mostly) draw their own title bar whatever the
-/// compositor says, and get none from the shell.
-struct AskedForDecorations;
+impl State {
+    /// A toplevel said who is to draw its decorations: its client gets what
+    /// it wished, and its window, if it is already open, follows.
+    fn decorations_wished(&mut self, toplevel: &ToplevelSurface, wished: DecorationMode) {
+        let own = wished == DecorationMode::ClientSide;
+        let surface = toplevel.wl_surface();
+        with_states(surface, |states| {
+            states
+                .data_map
+                .insert_if_missing_threadsafe(DecorationWish::default);
+            if let Some(wish) = states.data_map.get::<DecorationWish>() {
+                wish.own.store(own, Ordering::Relaxed);
+            }
+        });
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(decoration_mode(own));
+        });
+        if toplevel.is_initial_configure_sent() {
+            toplevel.send_pending_configure();
+        }
+        self.set_own_titlebar(surface, own);
+    }
+}
 
-pub fn asked_for_decorations(surface: &WlSurface) -> bool {
+/// What a toplevel said through `xdg-decoration`. Those that never spoke
+/// (GTK applications, mostly) have none: they draw their own title bar
+/// whatever the compositor says.
+#[derive(Default)]
+struct DecorationWish {
+    /// It asked to decorate itself.
+    own: AtomicBool,
+}
+
+/// Whether a toplevel draws its own title bar, so that the shell adds none.
+pub fn draws_own_titlebar(surface: &WlSurface) -> bool {
     with_states(surface, |states| {
-        states.data_map.get::<AskedForDecorations>().is_some()
+        states
+            .data_map
+            .get::<DecorationWish>()
+            .is_none_or(|wish| wish.own.load(Ordering::Relaxed))
     })
 }
 
-fn force_server_side(toplevel: &ToplevelSurface) {
-    toplevel.with_pending_state(|state| {
-        state.decoration_mode = Some(DecorationMode::ServerSide);
-    });
-    if toplevel.is_initial_configure_sent() {
-        toplevel.send_pending_configure();
+/// The mode announced to a toplevel that speaks `xdg-decoration`.
+pub const fn decoration_mode(own_titlebar: bool) -> DecorationMode {
+    if own_titlebar {
+        DecorationMode::ClientSide
+    } else {
+        DecorationMode::ServerSide
     }
 }
 
