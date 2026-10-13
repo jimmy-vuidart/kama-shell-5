@@ -40,7 +40,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use tracing::{debug, error, info, warn};
 
 use super::Backend;
-use crate::config::GameConfig;
+use crate::config::{GameConfig, MouseConfig};
 use crate::game::{Boost, FrameNote};
 use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
 use crate::render::scene::{self, Layers, SceneElement};
@@ -104,6 +104,8 @@ pub struct Udev {
     pub syncobj: Option<DrmSyncobjState>,
     /// What the configuration allows in game mode, as it was read last.
     game: GameConfig,
+    mouse: MouseConfig,
+    pointer_devices: Vec<smithay::reexports::input::Device>,
 }
 
 /// A plugged screen found while scanning, before it is lit.
@@ -237,6 +239,7 @@ pub fn init(
     handle: &LoopHandle<'static, State>,
     roles: &RoleConfig,
     game: &GameConfig,
+    mouse: &MouseConfig,
 ) -> anyhow::Result<(Udev, Vec<(ScreenInfo, Output)>)> {
     let (mut session, session_events) =
         LibSeatSession::new().map_err(|error| anyhow!("cannot take the seat: {error}"))?;
@@ -285,6 +288,17 @@ pub fn init(
         .insert_source(
             LibinputInputBackend::new(libinput.clone()),
             |event, _, state| {
+                if let smithay::backend::input::InputEvent::DeviceAdded { ref device } = event {
+                    if let Backend::Udev(udev) = &mut state.backend {
+                        udev.device_added(device);
+                    }
+                } else if let smithay::backend::input::InputEvent::DeviceRemoved { ref device } =
+                    event
+                {
+                    if let Backend::Udev(udev) = &mut state.backend {
+                        udev.device_removed(device);
+                    }
+                }
                 state.process_input_event(event);
             },
         )
@@ -309,6 +323,8 @@ pub fn init(
         active: true,
         syncobj: None,
         game: game.clone(),
+        mouse: mouse.clone(),
+        pointer_devices: Vec::new(),
     };
     Ok((udev, outputs))
 }
@@ -504,6 +520,32 @@ impl Udev {
             screen.boost.allow(game.direct_scanout(), vrr);
         }
         self.game = game.clone();
+    }
+
+    pub fn device_added(&mut self, device: &smithay::reexports::input::Device) {
+        if device.has_capability(smithay::reexports::input::DeviceCapability::Pointer) {
+            info!(name = %device.name(), "pointer device added");
+            let mut dev = device.clone();
+            apply_mouse_to_device(&mut dev, &self.mouse);
+            if !self.pointer_devices.contains(&dev) {
+                self.pointer_devices.push(dev);
+            }
+        }
+    }
+
+    pub fn device_removed(&mut self, device: &smithay::reexports::input::Device) {
+        self.pointer_devices.retain(|d| d != device);
+    }
+
+    pub fn set_mouse(&mut self, mouse: &MouseConfig) {
+        if *mouse == self.mouse {
+            return;
+        }
+        info!(?mouse, "mouse settings changed");
+        for device in &mut self.pointer_devices {
+            apply_mouse_to_device(device, mouse);
+        }
+        self.mouse = mouse.clone();
     }
 
     pub fn switch_vt(&mut self, vt: i32) {
@@ -793,6 +835,59 @@ impl State {
                 self.full_redraw = true;
                 self.queue_redraw();
             }
+        }
+    }
+}
+
+fn apply_mouse_to_device(device: &mut smithay::reexports::input::Device, mouse: &MouseConfig) {
+    use crate::config::MouseAccelProfile;
+    use smithay::reexports::input::AccelProfile;
+
+    if device.config_accel_is_available() {
+        let speed = mouse
+            .accel_speed
+            .unwrap_or_else(|| device.config_accel_default_speed());
+        let clamped = speed.clamp(-1.0, 1.0);
+        if let Err(err) = device.config_accel_set_speed(clamped) {
+            warn!(name = %device.name(), ?err, speed = clamped, "cannot set pointer speed");
+        }
+
+        let profile = mouse
+            .accel_profile
+            .map(|p| match p {
+                MouseAccelProfile::Flat => AccelProfile::Flat,
+                MouseAccelProfile::Adaptive => AccelProfile::Adaptive,
+            })
+            .or_else(|| device.config_accel_default_profile());
+        if let Some(profile) = profile {
+            if device.config_accel_profiles().contains(&profile) {
+                if let Err(err) = device.config_accel_set_profile(profile) {
+                    warn!(
+                        name = %device.name(),
+                        ?err,
+                        ?profile,
+                        "cannot set pointer acceleration profile"
+                    );
+                }
+            }
+        }
+    }
+
+    if device.config_scroll_has_natural_scroll() {
+        let natural = mouse
+            .natural_scroll
+            .unwrap_or_else(|| device.config_scroll_default_natural_scroll_enabled());
+        if let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural) {
+            warn!(name = %device.name(), ?err, natural, "cannot set natural scroll");
+        }
+    }
+
+    if device.config_left_handed_is_available() {
+        let left_handed = mouse
+            .left_handed
+            .unwrap_or_else(|| device.config_left_handed_default());
+        if let Err(err) = device.config_left_handed_set(left_handed) {
+            warn!(name = %device.name(), ?err, left_handed, "cannot set left handed mode");
         }
     }
 }

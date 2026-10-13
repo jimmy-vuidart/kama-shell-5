@@ -35,12 +35,21 @@ valeurs non accélérées) ne sont pas touchés ; le pointeur du bureau, si.
    capacité pointeur.
 3. Les réappliquer à `reload_config`, sur les périphériques gardés en liste.
 
+## État
+ 
+- Implémenté :
+  - Section `[mouse]` dans `config.toml` (`accel_speed`, `accel_profile`, `natural_scroll`, `left_handed`).
+  - Prise en charge dans `coquille-config` (`Settings`, `Change`, `apply`).
+  - Application libinput dans `crates/compositor/src/backend/udev.rs` à l'ajout de périphérique (`DeviceAdded`) et au rechargement de configuration (`reload_config`).
+  - Page « Souris » ajoutée à l'application `coquille-settings` avec curseur de vitesse (-100..=100), choix de profil (Adaptatif / Plat), défilement naturel et inversion des boutons pour gauchers.
+- Reste à vérifier sur le matériel physique avec Jimmy.
+
 ## Terminé quand
 
-- Essai avec Jimmy sur le matériel : le profil choisi dans le fichier
-  s'applique à la souris au démarrage, et après un rechargement à chaud.
-- Le modèle `config/config.toml` documente la section.
+- Essai avec Jimmy sur le matériel : le profil choisi dans le fichier ou l'app s'applique à la souris au démarrage, et après un rechargement à chaud.
+- Le modèle `config/config.toml` documente la section (fait).
 
 ## Liens
 
 - Partage la liste des périphériques avec : 11.
+

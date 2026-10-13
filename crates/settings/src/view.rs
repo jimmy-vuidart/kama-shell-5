@@ -1,7 +1,7 @@
 //! What the settings screen draws: the pages on the left, the settings of
 //! the chosen one on the right, each in a card.
 
-use coquille_config::{Change, DockPlace, PerScreen};
+use coquille_config::{Change, DockPlace, MouseAccelProfile, PerScreen};
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
 use coquille_ui::glyph::{Glyph, glyph};
@@ -70,6 +70,7 @@ fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, M
         Page::Appearance => Glyph::Brush,
         Page::Screens => Glyph::Screens,
         Page::Game => Glyph::Gamepad,
+        Page::Mouse => Glyph::Mouse,
         Page::System => Glyph::Keyboard,
     };
     let (color, font) = if current {
@@ -121,6 +122,7 @@ fn page<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         Page::Appearance => appearance(app, palette),
         Page::Screens => screens(app, palette),
         Page::Game => game(app, palette),
+        Page::Mouse => mouse(app, palette),
         Page::System => system(app, palette),
     };
     let content = content.push(settings);
@@ -423,6 +425,100 @@ fn game<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     column![
         section("Curseur", card(edges, palette), palette),
         section("Affichage", card(display, palette), palette)
+    ]
+    .spacing(18)
+    .into()
+}
+
+fn mouse<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
+    let speed_label = match app.mouse_speed {
+        0 => "Par défaut".to_string(),
+        val if val > 0 => format!("+{val}"),
+        val => format!("{val}"),
+    };
+    let speed = row![
+        text("Lente").size(12).color(palette.muted),
+        slider(
+            model::MOUSE_SPEED_RANGE,
+            app.mouse_speed,
+            Message::MouseSpeed,
+        )
+        .step(model::MOUSE_SPEED_STEP)
+        .on_release(Message::MouseSpeedReleased)
+        .width(180)
+        .style(move |_, _| metal::slider_style(&palette)),
+        text("Rapide").size(12).color(palette.muted),
+        text(speed_label)
+            .size(13)
+            .font(style::MEDIUM)
+            .color(palette.text)
+            .width(78)
+            .align_x(Alignment::End),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+
+    let profiles = [
+        (MouseAccelProfile::Adaptive, "Adaptatif"),
+        (MouseAccelProfile::Flat, "Plat"),
+    ];
+    let profile = segmented(
+        &profiles,
+        app.file.mouse_accel_profile(),
+        |profile| Message::Change(Change::MouseAccelProfile(profile)),
+        palette,
+    );
+
+    let pointer = vec![
+        setting(
+            "Vitesse du pointeur",
+            "La vitesse de déplacement du curseur à l'écran.",
+            None,
+            speed,
+            palette,
+        ),
+        setting(
+            "Profil d'accélération",
+            "L'accélération adaptative ajuste la vitesse au geste ; le profil plat garde une \
+             vitesse constante.",
+            None,
+            profile,
+            palette,
+        ),
+    ];
+
+    let buttons_and_scroll = vec![
+        setting(
+            "Défilement naturel",
+            "Le contenu suit la direction des doigts sur la molette.",
+            None,
+            switch(
+                app.file.mouse_natural_scroll(),
+                |on| Message::Change(Change::MouseNaturalScroll(on)),
+                palette,
+            ),
+            palette,
+        ),
+        setting(
+            "Inverser les boutons",
+            "Permute le clic gauche et le clic droit pour les gauchers.",
+            None,
+            switch(
+                app.file.mouse_left_handed(),
+                |on| Message::Change(Change::MouseLeftHanded(on)),
+                palette,
+            ),
+            palette,
+        ),
+    ];
+
+    column![
+        section("Pointeur", card(pointer, palette), palette),
+        section(
+            "Boutons et défilement",
+            card(buttons_and_scroll, palette),
+            palette
+        ),
     ]
     .spacing(18)
     .into()

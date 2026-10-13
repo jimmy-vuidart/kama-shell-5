@@ -247,7 +247,8 @@ fn main() -> anyhow::Result<()> {
         let scripted = cli.debug_input.is_some();
         init_nested(&handle, simulated, cli.fullscreen, scripted)?
     } else {
-        let (udev, screens) = backend::udev::init(&handle, &config.outputs, &config.game)?;
+        let (udev, screens) =
+            backend::udev::init(&handle, &config.outputs, &config.game, &config.mouse)?;
         (Backend::Udev(Box::new(udev)), screens)
     };
 

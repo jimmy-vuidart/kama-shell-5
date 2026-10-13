@@ -8,12 +8,13 @@ use tracing::{info, warn};
 use crate::outputs::RoleConfig;
 use crate::theme::ThemeKind;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Which connector is the left, center and right screen.
     pub outputs: RoleConfig,
     pub keyboard: KeyboardConfig,
+    pub mouse: MouseConfig,
     pub theme: Option<ThemeKind>,
     /// No longer a setting: the accent is the gold of the shell. A file
     /// written before that may still have the line, which is no reason to
@@ -93,6 +94,22 @@ impl GameConfig {
 pub struct KeyboardConfig {
     pub layout: Option<String>,
     pub variant: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MouseAccelProfile {
+    Flat,
+    Adaptive,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MouseConfig {
+    pub accel_speed: Option<f64>,
+    pub accel_profile: Option<MouseAccelProfile>,
+    pub natural_scroll: Option<bool>,
+    pub left_handed: Option<bool>,
 }
 
 pub fn parse(text: &str) -> Result<Config, toml::de::Error> {
@@ -327,6 +344,13 @@ mod tests {
         assert_eq!(config.game.sticky_edges_ms, Some(300));
         assert_eq!(config.game.direct_scanout, Some(true));
         assert_eq!(config.game.vrr, Some(true));
+        assert_eq!(config.mouse.accel_speed, Some(0.0));
+        assert_eq!(
+            config.mouse.accel_profile,
+            Some(MouseAccelProfile::Adaptive)
+        );
+        assert_eq!(config.mouse.natural_scroll, Some(false));
+        assert_eq!(config.mouse.left_handed, Some(false));
     }
 
     #[test]
@@ -353,6 +377,10 @@ mod tests {
             Change::Vrr(false),
             Change::Dock(OutputRole::Center, DockPlace::Horizontal),
             Change::Dock(OutputRole::Right, DockPlace::VerticalRight),
+            Change::MouseAccelSpeed(0.2),
+            Change::MouseAccelProfile(coquille_config::MouseAccelProfile::Flat),
+            Change::MouseNaturalScroll(true),
+            Change::MouseLeftHanded(true),
         ];
         let mut text = SAMPLE.to_owned();
         for change in &changes {
@@ -369,6 +397,10 @@ mod tests {
         assert_eq!(config.keyboard.variant.as_deref(), Some("bepo"));
         assert_eq!(config.game.sticky_edges_ms(), 450);
         assert!(!config.game.direct_scanout() && !config.game.vrr());
+        assert_eq!(config.mouse.accel_speed, Some(0.2));
+        assert_eq!(config.mouse.accel_profile, Some(MouseAccelProfile::Flat));
+        assert_eq!(config.mouse.natural_scroll, Some(true));
+        assert_eq!(config.mouse.left_handed, Some(true));
     }
 
     #[test]

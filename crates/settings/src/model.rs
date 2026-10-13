@@ -16,17 +16,25 @@ pub enum Page {
     Appearance,
     Screens,
     Game,
+    Mouse,
     System,
 }
 
 impl Page {
-    pub const ALL: [Self; 4] = [Self::Appearance, Self::Screens, Self::Game, Self::System];
+    pub const ALL: [Self; 5] = [
+        Self::Appearance,
+        Self::Screens,
+        Self::Game,
+        Self::Mouse,
+        Self::System,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Appearance => "Apparence",
             Self::Screens => "Écrans et dock",
             Self::Game => "Mode jeu",
+            Self::Mouse => "Souris",
             Self::System => "Système",
         }
     }
@@ -37,6 +45,7 @@ impl Page {
             Self::Appearance => "Le thème des fenêtres, du dock et de cet écran.",
             Self::Screens => "Quel écran est lequel, et où se tient le dock.",
             Self::Game => "Ce qui se passe sur l'écran d'un jeu en plein écran.",
+            Self::Mouse => "La vitesse du pointeur, le profil d'accélération et le défilement.",
             Self::System => "Le clavier, le terminal et les applications X11.",
         }
     }
@@ -319,6 +328,22 @@ pub fn sticky_on_slider(delay: u64) -> u32 {
     delay.clamp(*STICKY_RANGE.start(), *STICKY_RANGE.end())
 }
 
+/// The pointer speed range on the slider, as a percentage (-100 to 100).
+pub const MOUSE_SPEED_RANGE: std::ops::RangeInclusive<i32> = -100..=100;
+pub const MOUSE_SPEED_STEP: i32 = 5;
+
+/// Converts a speed from config [-1.0, 1.0] to a slider value [-100, 100].
+pub fn speed_to_slider(speed: f64) -> i32 {
+    let percent = (speed.clamp(-1.0, 1.0) * 100.0).round() as i32;
+    percent.clamp(*MOUSE_SPEED_RANGE.start(), *MOUSE_SPEED_RANGE.end())
+}
+
+/// Converts a slider value [-100, 100] to a config speed [-1.0, 1.0].
+pub fn slider_to_speed(slider: i32) -> f64 {
+    let clamped = slider.clamp(*MOUSE_SPEED_RANGE.start(), *MOUSE_SPEED_RANGE.end());
+    (clamped as f64) / 100.0
+}
+
 #[cfg(test)]
 mod tests {
     use coquille_ipc::Screen;
@@ -495,5 +520,28 @@ mod tests {
         assert_eq!(sticky_on_slider(300), 300);
         assert_eq!(sticky_on_slider(20), 100);
         assert_eq!(sticky_on_slider(5000), 1000);
+    }
+
+    #[test]
+    fn mouse_speed_slider_conversions() {
+        assert_eq!(speed_to_slider(0.0), 0);
+        assert_eq!(speed_to_slider(0.5), 50);
+        assert_eq!(speed_to_slider(-0.75), -75);
+        assert_eq!(speed_to_slider(1.5), 100);
+        assert_eq!(speed_to_slider(-2.0), -100);
+
+        assert_eq!(slider_to_speed(0), 0.0);
+        assert_eq!(slider_to_speed(50), 0.5);
+        assert_eq!(slider_to_speed(-75), -0.75);
+        assert_eq!(slider_to_speed(120), 1.0);
+        assert_eq!(slider_to_speed(-150), -1.0);
+    }
+
+    #[test]
+    fn every_page_has_a_name_and_summary() {
+        for page in Page::ALL {
+            assert!(!page.name().is_empty());
+            assert!(!page.summary().is_empty());
+        }
     }
 }

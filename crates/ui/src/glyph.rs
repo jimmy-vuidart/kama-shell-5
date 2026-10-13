@@ -33,6 +33,7 @@ pub enum Glyph {
     Brush,
     Screens,
     Gamepad,
+    Mouse,
     Keyboard,
     Check,
 }
@@ -93,6 +94,9 @@ impl Glyph {
             Self::Gamepad => {
                 r#"<path d="M7.5 7h9a5 5 0 0 1 4.9 4l.9 4.6a2.4 2.4 0 0 1-4.2 2L16 15.5H8l-2.1 2.1a2.4 2.4 0 0 1-4.2-2L2.6 11A5 5 0 0 1 7.5 7z"/><path d="M8 9.5v3M6.5 11h3"/><circle cx="16" cy="11" r="1" fill="black"/>"#
             }
+            Self::Mouse => {
+                r#"<rect x="5.5" y="3" width="13" height="18" rx="6.5"/><path d="M12 7v4.5"/>"#
+            }
             Self::Keyboard => {
                 r#"<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.2 10h.01M13.8 10h.01M17.5 10h.01M8 14h8"/>"#
             }
@@ -151,6 +155,7 @@ mod tests {
             Glyph::Brush,
             Glyph::Screens,
             Glyph::Gamepad,
+            Glyph::Mouse,
             Glyph::Keyboard,
             Glyph::Check,
         ];

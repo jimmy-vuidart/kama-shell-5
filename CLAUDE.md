@@ -256,9 +256,9 @@ Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un é
 
 ### État de l'écran « Paramètres »
 
-Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : quatre pages (Apparence, Écrans et dock, Mode jeu, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, sens du dock par écran, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : cinq pages (Apparence, Écrans et dock, Mode jeu, Souris, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, sens du dock par écran, vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
 
-Fait mais **jamais exécuté** (backend matériel) : le choix du connecteur de chaque écran (en imbriqué les écrans sont simulés, la liste est remplacée par « Écrans simulés » ; l'échange de deux connecteurs a été essayé sans compositeur et par tests) ; l'affichage direct et le VRR coupés ou remis en cours de session (`Udev::set_game`).
+Fait mais **jamais exécuté** (backend matériel) : le choix du connecteur de chaque écran (en imbriqué les écrans sont simulés, la liste est remplacée par « Écrans simulés » ; l'échange de deux connecteurs a été essayé sans compositeur et par tests) ; l'affichage direct et le VRR coupés ou remis en cours de session (`Udev::set_game`) ; les réglages libinput appliqués aux périphériques pointeur (`Udev::set_mouse`).
 
 Limites connues :
 

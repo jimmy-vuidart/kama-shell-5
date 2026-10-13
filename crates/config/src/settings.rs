@@ -96,8 +96,30 @@ impl DockPlace {
     }
 }
 
+/// A mouse pointer acceleration profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseAccelProfile {
+    Adaptive,
+    Flat,
+}
+
+impl MouseAccelProfile {
+    pub const ALL: [Self; 2] = [Self::Adaptive, Self::Flat];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Adaptive => "adaptive",
+            Self::Flat => "flat",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|profile| profile.name() == name)
+    }
+}
+
 /// What the file says. `None` is a setting left to its default.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     pub theme: Option<ThemeName>,
     pub terminal: Option<String>,
@@ -110,6 +132,10 @@ pub struct Settings {
     pub direct_scanout: Option<bool>,
     pub vrr: Option<bool>,
     pub docks: PerScreen<Option<DockPlace>>,
+    pub mouse_accel_speed: Option<f64>,
+    pub mouse_accel_profile: Option<MouseAccelProfile>,
+    pub mouse_natural_scroll: Option<bool>,
+    pub mouse_left_handed: Option<bool>,
 }
 
 impl Settings {
@@ -131,6 +157,12 @@ impl Settings {
         // An empty name is no name: `variant = ""` asks for the plain layout.
         let name_of = |path: &[&str]| text_of(path).filter(|name| !name.is_empty());
         let switch = |path: &[&str]| item(path).and_then(Item::as_bool);
+        let float_of = |path: &[&str]| {
+            item(path).and_then(|item| {
+                item.as_float()
+                    .or_else(|| item.as_integer().map(|i| i as f64))
+            })
+        };
         Self {
             theme: match text_of(&["theme"]).as_deref() {
                 Some("dark") => Some(ThemeName::Dark),
@@ -151,6 +183,12 @@ impl Settings {
                 let said = text_of(&["dock", "screens", role_name(role)])?;
                 DockPlace::named(&said)
             }),
+            mouse_accel_speed: float_of(&["mouse", "accel_speed"]),
+            mouse_accel_profile: text_of(&["mouse", "accel_profile"])
+                .as_deref()
+                .and_then(MouseAccelProfile::named),
+            mouse_natural_scroll: switch(&["mouse", "natural_scroll"]),
+            mouse_left_handed: switch(&["mouse", "left_handed"]),
         }
     }
 
@@ -178,10 +216,27 @@ impl Settings {
     pub fn dock(&self, role: OutputRole) -> DockPlace {
         self.docks.get(role).unwrap_or(DockPlace::usual(role))
     }
+
+    pub fn mouse_accel_speed(&self) -> f64 {
+        self.mouse_accel_speed.unwrap_or(0.0)
+    }
+
+    pub fn mouse_accel_profile(&self) -> MouseAccelProfile {
+        self.mouse_accel_profile
+            .unwrap_or(MouseAccelProfile::Adaptive)
+    }
+
+    pub fn mouse_natural_scroll(&self) -> bool {
+        self.mouse_natural_scroll.unwrap_or(false)
+    }
+
+    pub fn mouse_left_handed(&self) -> bool {
+        self.mouse_left_handed.unwrap_or(false)
+    }
 }
 
 /// Something the user changed on the settings screen.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Change {
     Theme(ThemeName),
     /// `None` goes back to the first terminal found.
@@ -199,6 +254,10 @@ pub enum Change {
     DirectScanout(bool),
     Vrr(bool),
     Dock(OutputRole, DockPlace),
+    MouseAccelSpeed(f64),
+    MouseAccelProfile(MouseAccelProfile),
+    MouseNaturalScroll(bool),
+    MouseLeftHanded(bool),
 }
 
 /// The file with a change made. `None` when the file is not valid TOML: it
@@ -242,6 +301,17 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
             let path = ["dock", "screens", role_name(*role)];
             with_value(text, &path, place.name().into())
         }
+        Change::MouseAccelSpeed(speed) => {
+            let speed = (speed * 100.0).round() / 100.0;
+            with_value(text, &["mouse", "accel_speed"], speed.into())
+        }
+        Change::MouseAccelProfile(profile) => {
+            with_value(text, &["mouse", "accel_profile"], profile.name().into())
+        }
+        Change::MouseNaturalScroll(on) => {
+            with_value(text, &["mouse", "natural_scroll"], (*on).into())
+        }
+        Change::MouseLeftHanded(on) => with_value(text, &["mouse", "left_handed"], (*on).into()),
     }
 }
 
@@ -290,6 +360,9 @@ mod tests {
         assert_eq!(settings.dock(OutputRole::Left), DockPlace::Vertical);
         assert_eq!(settings.dock(OutputRole::Center), DockPlace::Off);
         assert_eq!(settings.dock(OutputRole::Right), DockPlace::Off);
+        assert_eq!(settings.mouse_accel_speed(), 0.0);
+        assert_eq!(settings.mouse_accel_profile(), MouseAccelProfile::Adaptive);
+        assert!(!settings.mouse_natural_scroll() && !settings.mouse_left_handed());
     }
 
     #[test]
@@ -317,6 +390,12 @@ mod tests {
             left = "off"
             center = "vertical-right"
             right = "horizontal"
+
+            [mouse]
+            accel_speed = 0.2
+            accel_profile = "flat"
+            natural_scroll = true
+            left_handed = true
             "#,
         );
 
@@ -331,13 +410,17 @@ mod tests {
         assert_eq!(settings.dock(OutputRole::Left), DockPlace::Off);
         assert_eq!(settings.dock(OutputRole::Center), DockPlace::VerticalRight);
         assert_eq!(settings.dock(OutputRole::Right), DockPlace::Horizontal);
+        assert_eq!(settings.mouse_accel_speed, Some(0.2));
+        assert_eq!(settings.mouse_accel_profile, Some(MouseAccelProfile::Flat));
+        assert!(settings.mouse_natural_scroll() && settings.mouse_left_handed());
     }
 
     #[test]
     fn what_means_nothing_is_not_set() {
         let settings = Settings::parse(
             "theme = 3\nxwayland = \"no\"\n[game]\nsticky_edges_ms = -5\n\
-             [keyboard]\nvariant = \"\"\n[dock.screens]\nleft = \"diagonal\"\n",
+             [keyboard]\nvariant = \"\"\n[dock.screens]\nleft = \"diagonal\"\n\
+             [mouse]\naccel_profile = \"diagonal\"\n",
         );
 
         assert_eq!(settings, Settings::default());
@@ -372,6 +455,10 @@ mod tests {
             Change::Dock(OutputRole::Left, DockPlace::Off),
             Change::Dock(OutputRole::Center, DockPlace::VerticalRight),
             Change::Dock(OutputRole::Right, DockPlace::Horizontal),
+            Change::MouseAccelSpeed(0.5),
+            Change::MouseAccelProfile(MouseAccelProfile::Flat),
+            Change::MouseNaturalScroll(true),
+            Change::MouseLeftHanded(true),
         ];
 
         let mut text = SAMPLE.to_owned();
@@ -394,6 +481,10 @@ mod tests {
                 center: Some(DockPlace::VerticalRight),
                 right: Some(DockPlace::Horizontal),
             },
+            mouse_accel_speed: Some(0.5),
+            mouse_accel_profile: Some(MouseAccelProfile::Flat),
+            mouse_natural_scroll: Some(true),
+            mouse_left_handed: Some(true),
         };
         assert_eq!(Settings::parse(&text), expected);
         // The favorites of the dock, which no change is about, are still there.

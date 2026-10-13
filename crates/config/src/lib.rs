@@ -9,5 +9,5 @@ mod edit;
 mod settings;
 
 pub use edit::{default_path, update, with_value, without};
-pub use settings::{Change, DockPlace, PerScreen, Settings, apply, assign};
+pub use settings::{Change, DockPlace, MouseAccelProfile, PerScreen, Settings, apply, assign};
 pub use toml_edit::{Array, Value};

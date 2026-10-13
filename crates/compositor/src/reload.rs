@@ -32,6 +32,7 @@ impl State {
         }
         if let Backend::Udev(udev) = &mut self.backend {
             udev.set_game(&config.game);
+            udev.set_mouse(&config.mouse);
         }
         // A screen that just lost its variable refresh rate needs a frame
         // to learn it.

@@ -33,6 +33,9 @@ pub enum Message {
     /// The slider of the sticky edges moves, then is let go.
     Sticky(u32),
     StickyReleased,
+    /// The mouse speed slider moves, then is let go.
+    MouseSpeed(i32),
+    MouseSpeedReleased,
     Connector(OutputRole, Choice),
     Layout(Choice),
     Variant(Choice),
@@ -55,6 +58,8 @@ pub struct App {
     /// Where the slider of the sticky edges stands: the delay they have, or
     /// will have when switched on again.
     pub sticky: u32,
+    /// Where the mouse speed slider stands (-100..=100).
+    pub mouse_speed: i32,
 }
 
 impl App {
@@ -66,6 +71,7 @@ impl App {
                 0 => model::sticky_on_slider(Settings::DEFAULT_STICKY_EDGES_MS),
                 delay => model::sticky_on_slider(delay),
             },
+            mouse_speed: model::speed_to_slider(file.mouse_accel_speed()),
             file,
             error: None,
             snapshot: None,
@@ -100,6 +106,9 @@ impl App {
         if file.sticky_edges_ms != self.file.sticky_edges_ms && file.sticky_edges_ms() > 0 {
             self.sticky = model::sticky_on_slider(file.sticky_edges_ms());
         }
+        if file.mouse_accel_speed != self.file.mouse_accel_speed {
+            self.mouse_speed = model::speed_to_slider(file.mouse_accel_speed());
+        }
         self.file = file;
     }
 
@@ -133,6 +142,12 @@ impl App {
             Message::Change(change) => self.change(change),
             Message::Sticky(delay) => self.sticky = delay,
             Message::StickyReleased => self.change(Change::StickyEdges(self.sticky.into())),
+            Message::MouseSpeed(speed) => self.mouse_speed = speed,
+            Message::MouseSpeedReleased => {
+                self.change(Change::MouseAccelSpeed(model::slider_to_speed(
+                    self.mouse_speed,
+                )));
+            }
             Message::Connector(role, choice) => {
                 let Some(connector) = choice.value else {
                     return Task::none();
