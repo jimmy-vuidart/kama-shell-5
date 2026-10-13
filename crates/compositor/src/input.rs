@@ -9,7 +9,7 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::desktop::{LayerSurface, WindowSurfaceType};
-use smithay::input::keyboard::{FilterResult, Keycode};
+use smithay::input::keyboard::{FilterResult, Keycode, Keysym};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, MotionEvent, RelativeMotionEvent,
 };
@@ -127,6 +127,18 @@ pub enum Gesture {
     },
 }
 
+/// What the pointer is doing during an interactive screenshot selection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScreenshotMode {
+    /// Waiting for the left button to go down.
+    SelectingRegion,
+    /// Dragging a selection rectangle from `start` to `current`.
+    DraggingRegion {
+        start: Point<f64, Logical>,
+        current: Point<f64, Logical>,
+    },
+}
+
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
@@ -222,6 +234,16 @@ impl State {
             serial,
             time,
             |state, modifiers, handle| {
+                if state.screenshot_mode.is_some() {
+                    let is_escape = handle.raw_syms().contains(&Keysym::Escape);
+                    if is_escape {
+                        if key_state == KeyState::Pressed {
+                            state.screenshot_mode = None;
+                            state.queue_redraw();
+                        }
+                        return FilterResult::Intercept(None);
+                    }
+                }
                 let keycode = handle.raw_code().raw();
                 let is_mod = mod_key.is_key(&handle.raw_syms());
                 if key_state == KeyState::Released {
@@ -578,6 +600,19 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        if let Some(ScreenshotMode::DraggingRegion { start, .. }) = self.screenshot_mode {
+            self.screenshot_mode = Some(ScreenshotMode::DraggingRegion {
+                start,
+                current: location,
+            });
+            self.set_cursor(CursorImageStatus::Named(CursorIcon::Crosshair));
+            self.queue_redraw();
+            return;
+        } else if self.screenshot_mode == Some(ScreenshotMode::SelectingRegion) {
+            self.set_cursor(CursorImageStatus::Named(CursorIcon::Crosshair));
+            self.queue_redraw();
+            return;
+        }
         self.advance_gesture(location);
         // While the shell drags a window, clients see no pointer at all.
         let dragging = matches!(
@@ -860,6 +895,34 @@ impl State {
     /// placed, every place it can go, the one under the pointer standing
     /// out.
     pub fn overlay(&self) -> Vec<Shape> {
+        if let Some(ScreenshotMode::DraggingRegion { start, current }) = self.screenshot_mode {
+            let p1 = model_point(start);
+            let p2 = model_point(current);
+            let x = p1.x.min(p2.x);
+            let y = p1.y.min(p2.y);
+            let w = (p1.x - p2.x).abs();
+            let h = (p1.y - p2.y).abs();
+            let rect = Rect::new(x, y, w, h);
+            let gold = self.theme.accent.gold;
+            return vec![
+                Shape {
+                    outline: rect,
+                    area: rect,
+                    color: gold,
+                    ramp: None,
+                    radii: [0; 4],
+                    border: 2,
+                },
+                Shape {
+                    outline: rect,
+                    area: rect,
+                    color: Rgba { a: 0x30, ..gold },
+                    ramp: None,
+                    radii: [0; 4],
+                    border: 0,
+                },
+            ];
+        }
         let Some(Gesture::Placing { window }) = self.gesture else {
             return Vec::new();
         };
@@ -896,8 +959,43 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let serial = SERIAL_COUNTER.next_serial();
         let location = pointer.current_location();
+        if let Some(mode) = self.screenshot_mode {
+            match (state, button) {
+                (ButtonState::Pressed, BTN_RIGHT) => {
+                    self.screenshot_mode = None;
+                    self.queue_redraw();
+                }
+                (ButtonState::Pressed, BTN_LEFT) => {
+                    self.screenshot_mode = Some(ScreenshotMode::DraggingRegion {
+                        start: location,
+                        current: location,
+                    });
+                    self.queue_redraw();
+                }
+                (ButtonState::Released, BTN_LEFT) => {
+                    if let ScreenshotMode::DraggingRegion { start, .. } = mode {
+                        self.screenshot_mode = None;
+                        self.queue_redraw();
+                        let p1 = model_point(start);
+                        let p2 = model_point(location);
+                        let x = p1.x.min(p2.x);
+                        let y = p1.y.min(p2.y);
+                        let w = (p1.x - p2.x).abs();
+                        let h = (p1.y - p2.y).abs();
+                        if w >= 4 && h >= 4 {
+                            let rect = Rect::new(x, y, w, h);
+                            if let Err(error) = crate::screenshot::capture_region(self, rect) {
+                                warn!(%error, "cannot capture region screenshot");
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        let serial = SERIAL_COUNTER.next_serial();
         let mut for_clients = true;
         self.mod_tap.disturb();
         if state == ButtonState::Pressed {

@@ -150,6 +150,27 @@ impl Rect {
             h,
         }
     }
+
+    /// Whether two rectangles overlap.
+    pub const fn intersects(self, other: Self) -> bool {
+        self.x < other.right()
+            && self.right() > other.x
+            && self.y < other.bottom()
+            && self.bottom() > other.y
+    }
+
+    /// The rectangle covered by both, if they overlap.
+    pub fn intersection(self, other: Self) -> Option<Self> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
+        if right > x && bottom > y {
+            Some(Self::new(x, y, right - x, bottom - y))
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -240,5 +261,18 @@ mod tests {
         let bounds = Rect::new(10, 10, 500, 400);
 
         assert_eq!(Rect::new(0, 0, 900, 900).clamped_to(bounds), bounds);
+    }
+
+    #[test]
+    fn rect_intersection_and_intersects() {
+        let a = Rect::new(0, 0, 100, 100);
+        let b = Rect::new(50, 50, 100, 100);
+        let c = Rect::new(200, 200, 50, 50);
+
+        assert!(a.intersects(b));
+        assert!(b.intersects(a));
+        assert!(!a.intersects(c));
+        assert_eq!(a.intersection(b), Some(Rect::new(50, 50, 50, 50)));
+        assert_eq!(a.intersection(c), None);
     }
 }

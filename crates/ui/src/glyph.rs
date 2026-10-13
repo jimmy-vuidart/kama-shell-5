@@ -36,6 +36,8 @@ pub enum Glyph {
     Mouse,
     Keyboard,
     Check,
+    Camera,
+    Crop,
 }
 
 impl Glyph {
@@ -101,6 +103,12 @@ impl Glyph {
                 r#"<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.2 10h.01M13.8 10h.01M17.5 10h.01M8 14h8"/>"#
             }
             Self::Check => r#"<path d="m5 12.5 4.5 4.5L19 7.5"/>"#,
+            Self::Camera => {
+                r#"<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>"#
+            }
+            Self::Crop => {
+                r#"<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>"#
+            }
         }
     }
 
@@ -158,6 +166,8 @@ mod tests {
             Glyph::Mouse,
             Glyph::Keyboard,
             Glyph::Check,
+            Glyph::Camera,
+            Glyph::Crop,
         ];
         for glyph in glyphs {
             let shapes = glyph.shapes();

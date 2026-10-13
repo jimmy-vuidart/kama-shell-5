@@ -19,6 +19,7 @@ use crate::backend::{SessionAction, Switch};
 use crate::model::drawer::{self, PAGE};
 use crate::model::mixer;
 use crate::model::{Identity, Orientation, Side};
+use coquille_ipc::ScreenshotTarget;
 
 /// The room of the bar, drawn again inside the drawer.
 const BAR: f32 = 60.0;
@@ -784,9 +785,10 @@ fn control_center<'a>(
         .into()
     };
 
-    let foot = match (drawer.confirm, &drawer.note) {
-        (Some(action), _) => confirmation(action, narrow, palette),
-        (None, note) => session(dock, note.as_deref(), narrow, palette),
+    let foot = match (drawer.confirm, drawer.screenshot_prompt, &drawer.note) {
+        (Some(action), _, _) => confirmation(action, narrow, palette),
+        (None, true, _) => screenshot_selector(narrow, palette),
+        (None, false, note) => session(dock, note.as_deref(), narrow, palette),
     };
     container(column![switches, sliders, rule(palette), foot].spacing(12))
         .padding(12)
@@ -845,6 +847,7 @@ fn session<'a>(
         line = line.push(avatar);
     }
     line.push(who)
+        .push(action(Glyph::Camera, Message::ScreenshotMenu, false))
         .push(action(Glyph::Sliders, Message::Settings, false))
         .push(action(
             Glyph::Logout,
@@ -898,6 +901,64 @@ fn confirmation<'a>(action: SessionAction, narrow: bool, palette: Palette) -> El
         return column![question, answers].spacing(8).into();
     }
     row![question, space().width(Length::Fill), cancel, confirm]
+        .spacing(10)
+        .height(40)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// The screenshot selector: region or full screen, or cancel.
+fn screenshot_selector<'a>(narrow: bool, palette: Palette) -> Element<'a, Message> {
+    let title = text("Capture d'écran")
+        .size(14)
+        .font(style::SEMIBOLD)
+        .color(palette.text);
+
+    let region = button(
+        row![
+            icons::glyph(Glyph::Crop, 16.0, palette.text),
+            text("Région")
+                .size(13)
+                .font(style::MEDIUM)
+                .color(palette.text),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .padding(Padding::from([10.0, 14.0]))
+    .on_press(Message::Screenshot(ScreenshotTarget::Region))
+    .style(style::tinted(palette.card, palette.hover, 10.0));
+
+    let screen = button(
+        row![
+            icons::glyph(Glyph::Screens, 16.0, palette.text),
+            text("Écran entier")
+                .size(13)
+                .font(style::MEDIUM)
+                .color(palette.text),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .padding(Padding::from([10.0, 14.0]))
+    .on_press(Message::Screenshot(ScreenshotTarget::Screen))
+    .style(style::tinted(palette.card, palette.hover, 10.0));
+
+    let cancel = button(
+        text("Annuler")
+            .size(13)
+            .font(style::MEDIUM)
+            .color(palette.muted),
+    )
+    .padding(Padding::from([10.0, 14.0]))
+    .on_press(Message::CancelScreenshot)
+    .style(style::tinted(palette.card, palette.hover, 10.0));
+
+    if narrow {
+        let answers = row![region, screen, space().width(Length::Fill), cancel].spacing(8);
+        return column![title, answers].spacing(8).into();
+    }
+    row![title, space().width(Length::Fill), region, screen, cancel]
         .spacing(10)
         .height(40)
         .align_y(Alignment::Center)

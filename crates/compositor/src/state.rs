@@ -41,7 +41,7 @@ use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
 use crate::game::{ModTap, StickyEdges};
-use crate::input::Gesture;
+use crate::input::{Gesture, ScreenshotMode};
 use crate::ipc::Ipc;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::placement::Bar;
@@ -154,6 +154,8 @@ pub struct State {
     pub panel_focus: Option<LayerSurface>,
     /// What the left mouse button is doing since it went down.
     pub gesture: Option<Gesture>,
+    /// An interactive screenshot selection in progress.
+    pub screenshot_mode: Option<ScreenshotMode>,
     /// The left button went down for the shell: its release is not for a
     /// client either.
     pub swallowed_press: bool,
@@ -302,6 +304,7 @@ impl State {
             bar_hover: None,
             panel_focus: None,
             gesture: None,
+            screenshot_mode: None,
             swallowed_press: false,
             redraw_needed: true,
             full_redraw: true,

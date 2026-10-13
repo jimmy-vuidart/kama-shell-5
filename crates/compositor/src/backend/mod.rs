@@ -9,6 +9,7 @@ use smithay::input::pointer::CursorImageStatus;
 
 use self::udev::Udev;
 use self::winit::Winit;
+use crate::render::shaders::Shaders;
 
 pub enum Backend {
     Winit(Box<Winit>),
@@ -16,6 +17,14 @@ pub enum Backend {
 }
 
 impl Backend {
+    /// The shaders compiled on the GPU.
+    pub fn shaders(&self) -> &Shaders {
+        match self {
+            Self::Winit(winit) => &winit.shaders,
+            Self::Udev(udev) => &udev.shaders,
+        }
+    }
+
     /// The renderer, for work done outside of a frame (imports, set-up).
     pub fn renderer(&mut self) -> &mut GlesRenderer {
         match self {

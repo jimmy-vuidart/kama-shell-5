@@ -298,6 +298,17 @@ impl State {
             Command::ToggleLauncher => self.toggle_launcher(),
             Command::SetTheme { theme } => self.set_theme(theme.into()),
             Command::ReloadConfig => self.reload_config(),
+            Command::Screenshot { target } => match target {
+                coquille_ipc::ScreenshotTarget::Screen => {
+                    if let Err(error) = crate::screenshot::capture_screen(self, None) {
+                        warn!(%error, "cannot capture screen screenshot");
+                    }
+                }
+                coquille_ipc::ScreenshotTarget::Region => {
+                    self.screenshot_mode = Some(crate::input::ScreenshotMode::SelectingRegion);
+                    self.queue_redraw();
+                }
+            },
             Command::Quit => {
                 info!("quitting: asked by the shell");
                 self.loop_signal.stop();

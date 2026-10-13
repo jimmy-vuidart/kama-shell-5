@@ -121,8 +121,22 @@ pub enum Command {
     /// applies what can change while it runs, and tells the other programs
     /// of the shell.
     ReloadConfig,
+    /// Captures a screenshot of a region or of a whole screen.
+    Screenshot {
+        target: ScreenshotTarget,
+    },
     /// Ends the session.
     Quit,
+}
+
+/// What should be captured in a screenshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenshotTarget {
+    /// Interactive region selection.
+    Region,
+    /// Full screen.
+    Screen,
 }
 
 #[derive(Debug, Error)]
@@ -280,6 +294,23 @@ mod tests {
             line,
             "{\"command\":\"open_on\",\"apps\":[\"firefox\"],\"screen\":\"center\"}\n"
         );
+    }
+
+    #[test]
+    fn screenshot_commands_roundtrip() {
+        let command = Command::Screenshot {
+            target: ScreenshotTarget::Region,
+        };
+        let line = encode(&command);
+        assert_eq!(line, "{\"command\":\"screenshot\",\"target\":\"region\"}\n");
+        assert_eq!(decode::<Command>(&line).unwrap(), command);
+
+        let screen_cmd = Command::Screenshot {
+            target: ScreenshotTarget::Screen,
+        };
+        let line = encode(&screen_cmd);
+        assert_eq!(line, "{\"command\":\"screenshot\",\"target\":\"screen\"}\n");
+        assert_eq!(decode::<Command>(&line).unwrap(), screen_cmd);
     }
 
     #[test]

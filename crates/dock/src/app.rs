@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
-use coquille_ipc::{Command, Event, Snapshot, ThemeName};
+use coquille_ipc::{Command, Event, ScreenshotTarget, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use iced::widget::operation;
 use iced::{Color, Element, Point, Size, Subscription, Task, keyboard, mouse, window};
@@ -107,6 +107,8 @@ pub struct Drawer {
     pub mixer: bool,
     /// The session action waiting for its confirmation.
     pub confirm: Option<SessionAction>,
+    /// The screenshot selector is open in the drawer footer.
+    pub screenshot_prompt: bool,
     /// What the last session action did, when it was only simulated.
     pub note: Option<String>,
     /// How wide the drawer is now (upright).
@@ -189,6 +191,9 @@ pub enum Message {
     Confirm(bool),
     /// A session action did not go through: why.
     SessionRefused(String),
+    ScreenshotMenu,
+    Screenshot(ScreenshotTarget),
+    CancelScreenshot,
     Settings,
     /// The whole Steam library.
     Library,
@@ -521,6 +526,7 @@ impl Dock {
             Command::OpenOn { .. }
             | Command::ToggleLauncher
             | Command::ReloadConfig
+            | Command::Screenshot { .. }
             | Command::Quit => {}
         }
         self.rebuild_entries();
@@ -653,6 +659,7 @@ impl Dock {
             selected: None,
             mixer: false,
             confirm: None,
+            screenshot_prompt: false,
             note: None,
             width: self.drawer_width(None) as f32,
             height: self.drawer_height(None) as f32,
@@ -1208,6 +1215,26 @@ impl Dock {
             }
             Message::Library => {
                 spawn("steam steam://open/games");
+                self.update(Message::CloseDrawer)
+            }
+            Message::ScreenshotMenu => {
+                if let Some(drawer) = &mut self.drawer {
+                    drawer.screenshot_prompt = !drawer.screenshot_prompt;
+                    drawer.confirm = None;
+                }
+                Task::none()
+            }
+            Message::CancelScreenshot => {
+                if let Some(drawer) = &mut self.drawer {
+                    drawer.screenshot_prompt = false;
+                }
+                Task::none()
+            }
+            Message::Screenshot(target) => {
+                if let Some(drawer) = &mut self.drawer {
+                    drawer.screenshot_prompt = false;
+                }
+                self.send(Command::Screenshot { target });
                 self.update(Message::CloseDrawer)
             }
             Message::Settings => {

@@ -18,6 +18,7 @@ mod placement;
 mod reload;
 mod render;
 mod resize;
+mod screenshot;
 mod shell;
 mod shortcuts;
 mod state;

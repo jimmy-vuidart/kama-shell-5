@@ -11,6 +11,7 @@ coquille-model.workspace = true
 coquille-apps.workspace = true
 coquille-ipc.workspace = true
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 cosmic-text = "0.19"
 resvg = "0.45"

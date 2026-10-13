@@ -4,6 +4,7 @@ use smithay::backend::renderer::gles::{
     GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram, UniformName, UniformType,
 };
 
+#[derive(Clone)]
 pub struct Shaders {
     /// Rounded rectangle, filled or ring, in one color or in a ramp from
     /// top to bottom: accent ring, window background.

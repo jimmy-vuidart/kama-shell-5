@@ -95,7 +95,7 @@ pub struct Udev {
     session: LibSeatSession,
     libinput: Libinput,
     pub renderer: GlesRenderer,
-    shaders: Shaders,
+    pub shaders: Shaders,
     manager: OutputManager,
     screens: Vec<Screen>,
     /// False while another virtual terminal is shown.
