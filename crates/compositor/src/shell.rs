@@ -772,7 +772,8 @@ impl State {
         }
         // The client keeps its implicit grab until the button is released;
         // what it does with the motion in the meantime does not matter.
-        self.gesture = Some(Gesture::Placing { window });
+        let location = pointer.current_location();
+        self.start_moving(window, location, location);
         self.queue_redraw();
     }
 

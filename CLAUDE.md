@@ -63,7 +63,7 @@ Changement de disposition : `Super+1` à `5`. Le dock ne s'en charge pas : toujo
 ### Règles de placement
 
 1. **Une appli jamais rangée s'ouvre en flottant**, sur l'écran où se trouve le curseur, sans déplacer les autres fenêtres. Une petite barre propose : laisser flottante, ranger dans un emplacement, au centre, en onglet.
-2. **Glisser une fenêtre** (par sa barre de titre) affiche les emplacements possibles sur les trois écrans ; relâcher la place.
+2. **Glisser une fenêtre par sa barre de titre la déplace** : elle flotte et suit le curseur (une fenêtre rangée quitte son emplacement). **`Super + glisser`**, n'importe où sur la fenêtre, affiche les emplacements possibles sur les trois écrans ; relâcher la place.
 3. **Un écran n'est jamais plein** : déposer sur un emplacement occupé empile la fenêtre **en onglet** avec celle qui s'y trouve.
 4. **Mémoire par application** : une appli que j'ai rangée moi-même rouvre au même écran / emplacement (clé : `app_id` Wayland ou `WM_CLASS` X11). **Les fenêtres laissées flottantes ne créent aucune habitude.**
 5. *Supprimée* : l'échange avec le centre (bouton ⇄, `Mod+C`), jugé inutile à l'usage. Il en reste « Au centre », dans la barre de rangement : la fenêtre est rangée au centre, en onglet si l'emplacement est pris, et l'appli y rouvrira.
@@ -100,7 +100,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 
 **Sans la touche Super, la souris ne fait jamais rien d'autre que ce que fait l'application.** Dans un jeu ancré, tous les boutons appartiennent au jeu.
 
-- `Super + glisser` : déplacer une fenêtre (même hors barre de titre).
+- `Super + glisser` : ranger une fenêtre (même hors barre de titre) : les emplacements s'affichent, relâcher la place.
 - `Super + glisser sur la séparation` : ajuster le ratio d'une disposition.
 - **Secouer la souris** : halo autour du curseur pour le retrouver.
 
@@ -115,7 +115,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
   - barre de titre **38 px** : icône et nom de l'appli (ceux de son fichier `.desktop` ; à défaut un carré de couleur et un nom tiré de son identifiant), sous-titre atténué ;
   - boutons à droite, pour une fenêtre flottante seulement : réduire, fermer (une fenêtre rangée les a sur sa capsule) ;
   - pas de bouton « agrandir » (la disposition s'en charge).
-- **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range).
+- **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (la fenêtre flotte et suit le curseur).
 - **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine et montre réduire et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Ni capsule pour une fenêtre flottante, ni sur un écran libre ou ancré. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
 - Fenêtre active : **anneau d'accent de 2 px**.
 - **L'accent est un or métallique, le même partout, et il ne se règle pas** : onze tons du crème au brun, un cran plus sombres en thème clair (`Accent` dans `crates/ui/src/style.rs` et `crates/compositor/src/theme.rs`), et quatre recettes de dégradés verticaux, éclairés d'en haut : anneau, pièce fine, barre, lingot. Brief, maquettes et recettes des dégradés : `docs/gold/` (les valeurs CSS des maquettes font foi). Ce qui est écrit ou dessiné sur l'or est en « encre » (`#2a1e04`) ; le texte en couleur d'accent est en « texte or ».
@@ -178,7 +178,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 ```
 
 - Le plus rapide : `scripts/debug.sh` compile (debug) et lance coquille et le dock en imbriqué. `scripts/debug.sh left` pour un seul écran, `-f` en plein écran, `--mock` pour un dock simulé, `-- <options de coquille>` pour le reste. Les boutons de session du dock y sont simulés.
-- Souris : glisser une barre de titre ou une capsule montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris) ; `Mod+glisser` déplace librement (la fenêtre devient flottante). Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
+- Souris : glisser une barre de titre déplace la fenêtre librement (rangée, elle devient flottante et reprend la taille que choisit l'appli, le curseur restant sur sa barre) ; `Mod+glisser` sur une fenêtre, ou glisser une capsule, montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris ; relâcher ailleurs ne change rien). `Mod+clic` sans bouger ne fait rien. Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
 - Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
 - Capsules : un clic affiche la fenêtre ; « réduire » la cache (sa capsule reste, grisée ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; « fermer » la ferme, affichée ou non. La barre de titre d'une fenêtre flottante garde ces deux boutons.
 - Dock : `target/debug/coquille --role left --spawn "$PWD/target/debug/coquille-dock --mock"` (tout simulé) ; sans `--mock`, vraies fenêtres et vrais services. Détail dans `crates/dock/README.md`.

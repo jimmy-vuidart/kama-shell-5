@@ -44,8 +44,8 @@ const ZONE_INSET: i32 = 4;
 /// How far from the gap between two slots their separation can be grabbed.
 const SEPARATOR_REACH: i32 = 8;
 
-/// How far the pointer must travel, button held, before a press on a title
-/// bar becomes a drag.
+/// How far the pointer must travel, button held, before a press on a
+/// window or on a capsule becomes a drag.
 const DRAG_THRESHOLD: f64 = 8.0;
 
 /// What lies under a point of the global space.
@@ -75,14 +75,25 @@ enum Hold {
     Confined(Option<RegionAttributes>),
 }
 
+/// What a press on a window becomes once the pointer has travelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drag {
+    /// The window floats and follows the pointer.
+    Move,
+    /// Drop zones are shown, and releasing on one places the window.
+    Place,
+}
+
 /// What the left mouse button is doing since it went down.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Gesture {
-    /// Down on a title bar, not moved yet: a click, or the start of a drag.
+    /// Down on a title bar, or anywhere on a window with the shell modifier,
+    /// not moved yet: a click, or the start of `drag`.
     Pressed {
         window: WindowId,
         at: Point<f64, Logical>,
         button: Option<TitlebarButton>,
+        drag: Drag,
     },
     /// Down on a capsule, not moved yet: a click on it or on the button of
     /// it that was under the pointer, or the start of a drag of its window.
@@ -103,14 +114,16 @@ pub enum Gesture {
     /// Dragging the separation between the two slots of a screen, with the
     /// shell modifier.
     Splitting { output: OutputId },
-    /// Dragging a window by its title bar: drop zones are shown, and
-    /// releasing on one places the window.
+    /// Dragging a window with the shell modifier, or by its capsule: drop
+    /// zones are shown, and releasing on one places the window.
     Placing { window: WindowId },
-    /// Dragging with the shell modifier: the window floats and follows the
-    /// pointer. `grab` is where the pointer holds it, from its corner.
+    /// Dragging a window by its title bar: it floats and follows the
+    /// pointer. `grab` is where the pointer holds it, from its corner, and
+    /// `width` how wide it was then.
     Moving {
         window: WindowId,
         grab: Point<f64, Logical>,
+        width: i32,
     },
 }
 
@@ -626,12 +639,23 @@ impl State {
 
     /// Lets the gesture in progress react to the pointer moving.
     fn advance_gesture(&mut self, location: Point<f64, Logical>) {
+        let far = |at: Point<f64, Logical>| {
+            let travelled = (location - at).to_i32_round::<i32>();
+            f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt() > DRAG_THRESHOLD
+        };
         match self.gesture {
+            Some(Gesture::Pressed {
+                window,
+                at,
+                button: None,
+                drag: Drag::Move,
+            }) if far(at) => self.start_moving(window, at, location),
             Some(
                 Gesture::Pressed {
                     window,
                     at,
                     button: None,
+                    drag: Drag::Place,
                 }
                 | Gesture::CapsulePressed {
                     capsule:
@@ -642,16 +666,12 @@ impl State {
                         },
                     at,
                 },
-            ) => {
-                let travelled = (location - at).to_i32_round::<i32>();
-                let far = f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt();
-                if far > DRAG_THRESHOLD {
-                    self.gesture = Some(Gesture::Placing { window });
-                }
-            }
-            Some(Gesture::Moving { window, grab }) => {
-                self.move_floating(window, location, grab);
-            }
+            ) if far(at) => self.gesture = Some(Gesture::Placing { window }),
+            Some(Gesture::Moving {
+                window,
+                grab,
+                width,
+            }) => self.move_floating(window, location, grab, width),
             Some(Gesture::Resizing {
                 window,
                 edges,
@@ -738,12 +758,35 @@ impl State {
         }
     }
 
-    /// Makes `window` float with the pointer holding it at `grab`.
+    /// `window` starts following the pointer, which took hold of it at
+    /// `held` and is now at `pointer`.
+    pub fn start_moving(
+        &mut self,
+        window: WindowId,
+        held: Point<f64, Logical>,
+        pointer: Point<f64, Logical>,
+    ) {
+        let Some(frame) = self.shell.by_id(window).map(ManagedWindow::frame) else {
+            return;
+        };
+        let corner = Point::<f64, Logical>::from((f64::from(frame.x), f64::from(frame.y)));
+        let grab = held - corner;
+        self.gesture = Some(Gesture::Moving {
+            window,
+            grab,
+            width: frame.w,
+        });
+        self.move_floating(window, pointer, grab, frame.w);
+    }
+
+    /// Makes `window` float with the pointer holding it at `grab`, taken
+    /// when it was `width` wide.
     fn move_floating(
         &mut self,
         window: WindowId,
         pointer: Point<f64, Logical>,
         grab: Point<f64, Logical>,
+        width: i32,
     ) {
         let point = model_point(pointer);
         let (Some(screen), Some(managed)) = (
@@ -753,6 +796,14 @@ impl State {
             return;
         };
         let size = managed.frame().size();
+        // Out of a slot, a window goes back to the size its client chooses:
+        // the pointer keeps holding the same share of its title bar.
+        let grab = Point::from((held_at(grab.x, width, size.w), grab.y));
+        self.gesture = Some(Gesture::Moving {
+            window,
+            grab,
+            width: size.w,
+        });
         let corner = model_point(pointer - grab);
         let rect = Rect::new(
             corner.x - screen.rect.x,
@@ -772,7 +823,7 @@ impl State {
         }
     }
 
-    /// Places a window dragged by its title bar where it was released.
+    /// Places a dragged window where it was released.
     fn drop_window(&mut self, window: WindowId, location: Point<f64, Logical>) {
         let point = model_point(location);
         let zones = self.shell.drop_zones(window);
@@ -805,8 +856,8 @@ impl State {
         self.apply_arrangement();
     }
 
-    /// The hints drawn above the windows: while a window is dragged by its
-    /// title bar, every place it can go, the one under the pointer standing
+    /// The hints drawn above the windows: while a window is dragged to be
+    /// placed, every place it can go, the one under the pointer standing
     /// out.
     pub fn overlay(&self) -> Vec<Shape> {
         let Some(Gesture::Placing { window }) = self.gesture else {
@@ -965,7 +1016,6 @@ impl State {
             return false;
         };
         let window = managed.id;
-        let frame = managed.frame();
         let anchored = managed.geometry.anchored;
 
         if let Some(edges) = hit.resize.filter(|_| !mod_held) {
@@ -973,24 +1023,28 @@ impl State {
                 window,
                 edges,
                 from: location,
-                frame,
+                frame: managed.frame(),
             });
             return true;
         }
         if mod_held && !anchored {
-            // Anywhere on the window: it will follow the pointer.
-            let corner = Point::<f64, Logical>::from((f64::from(frame.x), f64::from(frame.y)));
-            self.gesture = Some(Gesture::Moving {
+            // Anywhere on the window: dragged from there, it shows where it
+            // can be placed.
+            self.gesture = Some(Gesture::Pressed {
                 window,
-                grab: location - corner,
+                at: location,
+                button: None,
+                drag: Drag::Place,
             });
             return true;
         }
         if hit.titlebar {
+            // Dragged by its title bar, it floats and follows the pointer.
             self.gesture = Some(Gesture::Pressed {
                 window,
                 at: location,
                 button: hit.button,
+                drag: Drag::Move,
             });
         }
         false
@@ -1189,7 +1243,39 @@ impl State {
     }
 }
 
+/// Where the pointer holds a window that went from `was` to `now` wide,
+/// when it held it at `grab` from its left edge: at the same share of its
+/// width.
+fn held_at(grab: f64, was: i32, now: i32) -> f64 {
+    if was == now || was <= 0 {
+        return grab;
+    }
+    grab * f64::from(now) / f64::from(was)
+}
+
 /// The pixel a position falls in.
 fn model_point(location: Point<f64, Logical>) -> ModelPoint {
     ModelPoint::new(location.x.floor() as i32, location.y.floor() as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_window_that_keeps_its_width_is_held_where_it_was_taken() {
+        assert_eq!(held_at(300.0, 800, 800), 300.0);
+    }
+
+    #[test]
+    fn a_window_that_shrinks_stays_under_the_pointer() {
+        // Taken near the right end of a wide title bar: still near the
+        // right end of the narrow one, not past it.
+        assert_eq!(held_at(1500.0, 2000, 800), 600.0);
+    }
+
+    #[test]
+    fn a_window_that_grows_is_held_at_the_same_share() {
+        assert_eq!(held_at(200.0, 800, 1600), 400.0);
+    }
 }
