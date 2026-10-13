@@ -6,7 +6,7 @@ use serde::Deserialize;
 use tracing::{info, warn};
 
 use crate::outputs::RoleConfig;
-use crate::theme::ThemeKind;
+use crate::theme::{Rgba, ThemeKind};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -27,6 +27,21 @@ pub struct Config {
     /// this says otherwise.
     pub xwayland: Option<bool>,
     pub game: GameConfig,
+}
+
+impl Config {
+    /// The accent the user chose, when it is a color.
+    pub fn accent(&self) -> Option<Rgba> {
+        let text = self.accent.as_deref()?;
+        let accent = Rgba::parse(text);
+        if accent.is_none() {
+            warn!(
+                accent = text,
+                "not a color (#rrggbb): using the accent of the theme"
+            );
+        }
+        accent
+    }
 }
 
 /// A section meant for another program of the shell: anything goes in it.
@@ -112,6 +127,26 @@ pub fn load(path: Option<&Path>) -> Config {
         Err(error) => {
             warn!(path = %path.display(), %error, "invalid configuration, using the defaults");
             Config::default()
+        }
+    }
+}
+
+/// Reads the configuration again, while the compositor runs. `None` when
+/// the file is gone or broken: what was read before then stays in use.
+pub fn reload(path: Option<&Path>) -> Option<Config> {
+    let path = path.map(Path::to_path_buf).or_else(default_path)?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) => {
+            warn!(path = %path.display(), %error, "cannot read the configuration again");
+            return None;
+        }
+    };
+    match parse(&text) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            warn!(path = %path.display(), %error, "invalid configuration: nothing changes");
+            None
         }
     }
 }
@@ -267,6 +302,55 @@ mod tests {
         assert_eq!(config.game.sticky_edges_ms, Some(300));
         assert_eq!(config.game.direct_scanout, Some(true));
         assert_eq!(config.game.vrr, Some(true));
+    }
+
+    #[test]
+    fn what_the_settings_screen_writes_is_accepted() {
+        use coquille_config::{Change, DockPlace, PerScreen, apply};
+        use coquille_ipc::ThemeName;
+        use coquille_model::OutputRole;
+
+        let changes = [
+            Change::Theme(ThemeName::Dark),
+            Change::Accent(Some("#ff8800".into())),
+            Change::Terminal(Some("foot".into())),
+            Change::Xwayland(false),
+            Change::Outputs(PerScreen {
+                left: Some("DP-1".into()),
+                center: Some("DP-2".into()),
+                right: None,
+            }),
+            Change::Keyboard {
+                layout: Some("fr".into()),
+                variant: Some("bepo".into()),
+            },
+            Change::StickyEdges(450),
+            Change::DirectScanout(false),
+            Change::Vrr(false),
+            Change::Dock(OutputRole::Center, DockPlace::Horizontal),
+        ];
+        let mut text = SAMPLE.to_owned();
+        for change in &changes {
+            text = apply(&text, change).unwrap();
+        }
+
+        let config = parse(&text).unwrap();
+
+        assert_eq!(config.theme, Some(ThemeKind::Dark));
+        assert_eq!(config.accent(), Some(Rgba::rgb(0xff_88_00)));
+        assert_eq!(config.terminal.as_deref(), Some("foot"));
+        assert_eq!(config.xwayland, Some(false));
+        assert_eq!(config.outputs.left.as_deref(), Some("DP-1"));
+        assert_eq!(config.outputs.right, None);
+        assert_eq!(config.keyboard.variant.as_deref(), Some("bepo"));
+        assert_eq!(config.game.sticky_edges_ms(), 450);
+        assert!(!config.game.direct_scanout() && !config.game.vrr());
+    }
+
+    #[test]
+    fn an_accent_that_is_not_a_color_is_ignored() {
+        assert_eq!(parse("accent = \"blue\"").unwrap().accent(), None);
+        assert_eq!(parse("").unwrap().accent(), None);
     }
 
     #[test]

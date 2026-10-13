@@ -1,5 +1,7 @@
 # Configuration de coquille : à placer dans ~/.config/coquille/config.toml.
 # Tout est facultatif ; une ligne absente garde la valeur par défaut.
+# L'écran « Paramètres » (bouton du dock) règle la plupart de ces lignes à la
+# souris, sans toucher au reste du fichier.
 #
 # Les réglages généraux viennent d'abord : en TOML, tout ce qui suit un titre
 # de section comme [outputs] appartient à cette section.

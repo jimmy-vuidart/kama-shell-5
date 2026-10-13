@@ -787,6 +787,7 @@ dependencies = [
  "anyhow",
  "clap",
  "coquille-apps",
+ "coquille-config",
  "coquille-ipc",
  "coquille-model",
  "cosmic-text 0.19.0",
@@ -810,14 +811,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "coquille-config"
+version = "0.1.0"
+dependencies = [
+ "coquille-ipc",
+ "coquille-model",
+ "toml_edit",
+]
+
+[[package]]
 name = "coquille-dock"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
  "coquille-apps",
+ "coquille-config",
  "coquille-ipc",
  "coquille-model",
+ "coquille-ui",
  "iced",
  "iced_layershell",
  "serde",
@@ -845,6 +857,31 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "coquille-settings"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "coquille-config",
+ "coquille-ipc",
+ "coquille-model",
+ "coquille-ui",
+ "iced",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "coquille-ui"
+version = "0.1.0"
+dependencies = [
+ "coquille-ipc",
+ "iced",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -131,15 +131,19 @@ coquille/
 │  │                # AUCUNE dépendance Wayland. Entièrement testé unitairement.
 │  ├─ ipc/          # ce que le compositeur et le dock se disent (JSON par lignes).
 │  ├─ apps/         # les applis installées (fichiers .desktop, icônes du thème).
+│  ├─ config/       # le fichier de configuration : le lire, en réécrire un réglage à la fois.
+│  ├─ ui/           # ce que partagent les programmes du shell dessinés avec iced :
+│  │                # couleurs, police Figtree, symboles, lien au compositeur.
 │  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.
-│  └─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
+│  ├─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
+│  └─ settings/     # binaire `coquille-settings` : l'écran « Paramètres ».
 ├─ vendor/          # code tiers porté dans le dépôt (voir vendor/README.md).
 ├─ docs/maquettes/
 └─ CLAUDE.md
 ```
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
-- Le shell est fait de **programmes séparés**, affichés par layer-shell et reliés au compositeur par un socket Unix (crate `ipc`). Le dock est le premier ; il est écrit avec **iced** et `iced_layershell`. Notifications et instantanés n'ont pas encore de forme.
+- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Notifications et instantanés n'ont pas encore de forme.
 - Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, ratios, délai des bords collants).
 - État persistant (mémoire par appli, instantanés) : `~/.local/state/coquille/`.
 
@@ -158,6 +162,8 @@ coquille/
 - **winit et iced** : `iced_layershell` est écrit pour winit-core 0.31.0-beta.2, Smithay épingle la beta.3. `vendor/iced_exdevtools` (une ligne modifiée) les réconcilie par `[patch.crates-io]` ; à retirer quand `iced_layershell` suivra.
 - **Le dock passe par les outils des services** (`pactl`, `parec`, `nmcli`, `bluetoothctl`, `ddcutil`) plutôt que par leurs bibliothèques : rien à lier, un outil absent grise sa commande.
 - **Thème et accent** : `theme` et `accent` de la configuration valent pour le compositeur et le dock ; le thème change en cours de session (commande `set_theme`).
+- **Configuration relue à chaud** : la commande `reload_config` fait relire `config.toml` au compositeur (`reload.rs`), qui applique ce qui peut changer en cours de route (thème, accent, terminal, disposition du clavier, bords collants, affichage direct et VRR) puis prévient les autres programmes (`config_changed`) : le dock relit alors sa part et déplace ses barres. **Le rôle des écrans et XWayland ne changent qu'au démarrage.** Un fichier illisible ou invalide ne change rien.
+- **Un seul endroit écrit le fichier** : la crate `config` (`toml_edit`). Elle remplace une valeur là où elle est, commentaires conservés ; un réglage que le fichier ne fait que suggérer (`# vrr = true`) est activé sur place, sous son explication. Le compositeur, lui, lit le fichier strictement (`deny_unknown_fields`) : un test vérifie qu'il accepte tout ce que l'écran « Paramètres » écrit.
 
 ### Lancer le compositeur
 
@@ -183,11 +189,13 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 - Clients de test utiles en imbriqué : `kitty --start-as fullscreen` (plein écran Wayland), `kitty -o linux_display_server=x11` et `glxgears` (X11), `GDK_BACKEND=x11 gnome-calculator` (menus X11). Un client SDL2 (`SDL_VIDEODRIVER=wayland` ou `x11`, `SDL_SetRelativeMouseMode`) verrouille le pointeur ; `libSDL2` est là, quelques lignes de Python `ctypes` suffisent.
 - `--probe` exerce sur la vraie carte tout ce qui ne demande pas de posséder les écrans : EGL sur GBM, moteur de rendu, shaders, détection et rôles des écrans, capacité VRR de chacun. À lancer après tout changement du backend matériel.
 
+- Paramètres : le bouton du dock (à côté de la déconnexion) lance `coquille-settings` sur le fichier que lit le dock. À la main : `target/debug/coquille-settings --config FICHIER --page screens` (`appearance`, `screens`, `game`, `system`). Détail dans `crates/settings/README.md`.
+
 Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
 
 ### Installer
 
-`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
+`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
 
 Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options. Ses boutons Se déconnecter, Redémarrer et Éteindre sont **réels** (après confirmation) partout sauf avec `--mock` : en imbriqué aussi, Redémarrer redémarre la machine.
 
@@ -243,6 +251,19 @@ Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth de
 Intégration à la session : écrite, **essayée en imbriqué et dans un dossier d'essai seulement** (`scripts/install.sh` avec `PREFIX`, `SESSIONS_DIR` et les dossiers XDG redirigés ; `coquille-dock-watch` relance bien un dock tué et s'arrête avec le compositeur). Jamais lancée depuis l'écran de connexion. Si le dock ne s'affiche pas sur le matériel (il dessine avec le GPU, par wgpu), `ICED_BACKEND=tiny-skia` le fait dessiner sans.
 
 Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un écran. Limites du dock : `crates/dock/README.md`.
+
+### État de l'écran « Paramètres »
+
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : quatre pages (Apparence, Écrans et dock, Mode jeu, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, accent, sens du dock par écran, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
+
+Fait mais **jamais exécuté** (backend matériel) : le choix du connecteur de chaque écran (en imbriqué les écrans sont simulés, la liste est remplacée par « Écrans simulés » ; l'échange de deux connecteurs a été essayé sans compositeur et par tests) ; l'affichage direct et le VRR coupés ou remis en cours de session (`Udev::set_game`).
+
+Limites connues :
+
+- pas de réglage pour les favoris du dock, les épinglées et la taille du lanceur : ils se règlent à la souris dans le dock ;
+- les dispositions du clavier portent leur nom anglais (celui de XKB) ;
+- la disposition donnée par `--keyboard-layout` l'emporte sur le fichier : la changer dans l'écran est alors sans effet jusqu'au prochain démarrage sans l'option ;
+- changer la disposition d'un écran (`Mod+1` à `5`) n'y est pas : ce n'est pas un réglage du fichier.
 
 ### État des capsules
 

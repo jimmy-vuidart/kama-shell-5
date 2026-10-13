@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/model", "crates/ipc", "crates/apps", "crates/compositor", "crates/dock"]
+members = [
+    "crates/model",
+    "crates/ipc",
+    "crates/apps",
+    "crates/config",
+    "crates/ui",
+    "crates/compositor",
+    "crates/dock",
+    "crates/settings",
+]
 exclude = ["vendor"]
 
 [workspace.package]
@@ -13,8 +22,14 @@ publish = false
 coquille-model = { path = "crates/model" }
 coquille-ipc = { path = "crates/ipc" }
 coquille-apps = { path = "crates/apps" }
+coquille-config = { path = "crates/config" }
+coquille-ui = { path = "crates/ui" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+toml_edit = "0.25"
+tracing = "0.1"
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "process", "rt", "macros"] }
+iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "web-colors", "tokio", "svg", "image", "advanced"] }
 
 # iced_layershell (the dock) is written for winit-core 0.31.0-beta.2, Smithay
 # (the compositor) pins 0.31.0-beta.3, and a workspace holds only one of the

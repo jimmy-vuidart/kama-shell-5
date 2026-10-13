@@ -15,6 +15,7 @@ mod outputs;
 mod panels;
 mod persist;
 mod placement;
+mod reload;
 mod render;
 mod resize;
 mod shell;
@@ -44,7 +45,7 @@ use crate::backend::winit::{REFRESH, Simulated};
 use crate::config::Config;
 use crate::shortcuts::ModKey;
 use crate::state::{ClientState, Options, State};
-use crate::theme::{Rgba, ThemeKind};
+use crate::theme::ThemeKind;
 
 /// Where the compositor runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -423,20 +424,12 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         .keyboard_variant
         .as_deref()
         .or(config.keyboard.variant.as_deref());
-    let accent = config.accent.as_deref().and_then(|text| {
-        let accent = Rgba::parse(text);
-        if accent.is_none() {
-            warn!(
-                accent = text,
-                "not a color (#rrggbb): using the accent of the theme"
-            );
-        }
-        accent
-    });
     Options {
         theme: cli.theme.or(config.theme).unwrap_or(ThemeKind::Light),
-        accent,
+        accent: config.accent(),
         keyboard: keyboard_layout::detect(layout, variant),
+        keyboard_pinned: cli.keyboard_layout.is_some(),
+        config_path: cli.config.clone(),
         mod_key,
         terminal: config.terminal.clone().unwrap_or_else(default_terminal),
         state_dir: None,

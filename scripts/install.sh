@@ -15,8 +15,12 @@ prefix="${PREFIX:-$HOME/.local}"
 bin="$prefix/bin/coquille"
 dock_bin="$prefix/bin/coquille-dock"
 dock_watch="$prefix/bin/coquille-dock-watch"
+settings_bin="$prefix/bin/coquille-settings"
 session_bin="$prefix/bin/coquille-session"
 entry="$prefix/share/applications/coquille.desktop"
+# Named after the windows of the settings screen: their title bar and their
+# icon in the dock take its name and its icon.
+settings_entry="$prefix/share/applications/coquille-settings.desktop"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/coquille/config.toml"
 # Logs of sessions started from the menu or the login screen.
 log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
@@ -35,7 +39,8 @@ as_root() {
 }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-    rm -f -- "${bin:?}" "${dock_bin:?}" "${dock_watch:?}" "${session_bin:?}" "${entry:?}"
+    rm -f -- "${bin:?}" "${dock_bin:?}" "${dock_watch:?}" "${settings_bin:?}" "${session_bin:?}" \
+        "${entry:?}" "${settings_entry:?}"
     for session_entry in "${session_entries[@]}"; do
         if [[ -e "$session_entry" ]]; then
             as_root rm -f -- "${session_entry:?}"
@@ -60,9 +65,10 @@ if [[ -z "$terminal" ]]; then
     exit 1
 fi
 
-cargo build --release --locked -p coquille -p coquille-dock
+cargo build --release --locked -p coquille -p coquille-dock -p coquille-settings
 install -Dm755 target/release/coquille "$bin"
 install -Dm755 target/release/coquille-dock "$dock_bin"
+install -Dm755 target/release/coquille-settings "$settings_bin"
 install -Dm755 scripts/coquille-dock-watch "$dock_watch"
 sed "s|@TERMINAL@|$terminal|" scripts/coquille-session >"$session_bin"
 chmod 755 "$session_bin"
@@ -111,6 +117,21 @@ Name=Plein écran, comme écran droit
 Exec=$(launch "--fullscreen --role right")
 DESKTOP
 
+# The settings screen only makes sense inside coquille, where the dock opens
+# it; elsewhere it still edits the configuration file.
+cat >"$settings_entry" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Paramètres de coquille
+GenericName=Paramètres
+Comment=Apparence, écrans et dock, mode jeu, clavier
+Exec="$settings_bin"
+Icon=preferences-system
+Terminal=false
+Categories=Settings;
+StartupWMClass=coquille-settings
+DESKTOP
+
 if command -v update-desktop-database >/dev/null; then
     update-desktop-database -q "$(dirname "$entry")" || true
 fi
@@ -150,6 +171,7 @@ cat <<DONE
 coquille est installé :
   programme        $bin
   dock             $dock_bin
+  paramètres       $settings_bin  (bouton du dock, à côté de la déconnexion)
   session          $session_bin  (lance aussi le dock)
   menu             $entry
   configuration    $config  ($config_note)

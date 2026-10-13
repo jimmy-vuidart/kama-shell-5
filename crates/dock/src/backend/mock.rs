@@ -38,6 +38,7 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
     Snapshot {
         theme,
         accent: String::new(),
+        simulated: true,
         screens: vec![
             screen(
                 "mock-left",

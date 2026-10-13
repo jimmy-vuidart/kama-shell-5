@@ -187,6 +187,12 @@ impl Boost {
         }
     }
 
+    /// The configuration changed what is allowed: a shortcut given up after
+    /// a failure gets another chance.
+    pub fn allow(&mut self, scanout: bool, vrr: bool) {
+        *self = Self::new(scanout, vrr);
+    }
+
     /// Whether the next frame may show the buffer of the game directly. Only
     /// a screen held by a fullscreen window may.
     pub fn scanout(&self, anchored: bool) -> bool {
@@ -255,6 +261,21 @@ mod tests {
 
         assert!(!boost.scanout(true));
         assert!(!boost.vrr(true));
+    }
+
+    #[test]
+    fn the_configuration_can_take_a_shortcut_back_and_give_it_again() {
+        let mut boost = Boost::new(true, true);
+
+        boost.allow(false, true);
+        assert!(!boost.scanout(true));
+        assert!(boost.vrr(true));
+
+        // Given up after a failure, then allowed again by the user.
+        boost.vrr_failed();
+        boost.allow(true, true);
+        assert!(boost.scanout(true));
+        assert!(boost.vrr(true));
     }
 
     #[test]

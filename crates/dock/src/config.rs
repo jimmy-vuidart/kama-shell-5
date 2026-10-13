@@ -1,12 +1,15 @@
-//! The part of `~/.config/coquille/config.toml` the dock reads, and how it
-//! writes back what the user changes with the mouse (favorites, theme)
-//! without touching the rest of the file, comments included.
+//! The part of `~/.config/coquille/config.toml` the dock reads, and what it
+//! writes back when the user changes it with the mouse (favorites, theme,
+//! size of the launcher). The `coquille-config` crate does the writing,
+//! which leaves the rest of the file as it was, comments included.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use coquille_config::{Array, Change, Value, apply, with_value};
+pub use coquille_config::{default_path, update};
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
-use toml_edit::{Array, DocumentMut, Item, Table, Value};
+use toml_edit::{DocumentMut, Item};
 
 use crate::model::Orientation;
 
@@ -103,90 +106,27 @@ pub fn parse(text: &str) -> Config {
 /// The file with other favorites; everything else is kept as it was.
 /// `None` when the file is not valid TOML: it is then left alone.
 pub fn with_favorites(text: &str, favorites: &[String]) -> Option<String> {
-    with_names(text, "dock", "favorites", favorites)
+    let names: Array = favorites.iter().map(String::as_str).collect();
+    with_value(text, &["dock", "favorites"], Value::Array(names))
 }
 
 /// The file with another width for the drawer.
 pub fn with_drawer_width(text: &str, width: u32) -> Option<String> {
-    with_value(text, "drawer", "width", Value::from(i64::from(width)))
+    with_value(text, &["drawer", "width"], i64::from(width).into())
 }
 
 /// The file with another height for the horizontal launcher.
 pub fn with_drawer_height(text: &str, height: u32) -> Option<String> {
-    with_value(text, "drawer", "height", Value::from(i64::from(height)))
-}
-
-fn with_names(text: &str, section: &str, key: &str, names: &[String]) -> Option<String> {
-    let array: Array = names.iter().map(String::as_str).collect();
-    with_value(text, section, key, Value::Array(array))
-}
-
-/// The file with another value for a setting of a section, which is added
-/// at the end when the file has none.
-fn with_value(text: &str, section: &str, key: &str, new: Value) -> Option<String> {
-    let mut document = text.parse::<DocumentMut>().ok()?;
-    let table = document
-        .entry(section)
-        .or_insert_with(|| Item::Table(Table::new()))
-        .as_table_mut()?;
-    set(table, key, new);
-    Some(document.to_string())
-}
-
-/// Gives a setting another value. The comments written above it and at the
-/// end of its line stay where they are.
-fn set(table: &mut Table, key: &str, mut new: Value) {
-    match table.get_mut(key).and_then(Item::as_value_mut) {
-        Some(old) => {
-            *new.decor_mut() = old.decor().clone();
-            *old = new;
-        }
-        None => {
-            table.insert(key, Item::Value(new));
-        }
-    }
+    with_value(text, &["drawer", "height"], i64::from(height).into())
 }
 
 /// The file with another theme.
 pub fn with_theme(text: &str, theme: ThemeName) -> Option<String> {
-    let mut document = text.parse::<DocumentMut>().ok()?;
-    let name = match theme {
-        ThemeName::Light => "light",
-        ThemeName::Dark => "dark",
-    };
-    set(document.as_table_mut(), "theme", Value::from(name));
-    Some(document.to_string())
-}
-
-/// Where the configuration is, unless a path is given.
-pub fn default_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")))?;
-    Some(base.join("coquille/config.toml"))
+    apply(text, &Change::Theme(theme))
 }
 
 pub fn load(path: &Path) -> Config {
     parse(&std::fs::read_to_string(path).unwrap_or_default())
-}
-
-/// Rewrites the file through `change`, which gets its text and returns the
-/// new one. A file that cannot be read as TOML is not touched.
-pub fn update(path: &Path, change: impl Fn(&str) -> Option<String>) -> std::io::Result<()> {
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    let Some(changed) = change(&text) else {
-        return Err(std::io::Error::other("the configuration is not valid TOML"));
-    };
-    if changed == text {
-        return Ok(());
-    }
-    if let Some(directory) = path.parent() {
-        std::fs::create_dir_all(directory)?;
-    }
-    // Written next to the file, then moved over it: never half a file.
-    let temporary = path.with_extension("toml.tmp");
-    std::fs::write(&temporary, changed)?;
-    std::fs::rename(&temporary, path)
 }
 
 #[cfg(test)]

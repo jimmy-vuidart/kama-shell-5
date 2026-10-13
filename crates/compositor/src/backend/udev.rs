@@ -87,6 +87,8 @@ struct Screen {
     boost: Boost,
     /// The refresh rate follows the game at the moment.
     vrr_on: bool,
+    /// The screen and the driver can follow a game without a mode set.
+    vrr_usable: bool,
 }
 
 pub struct Udev {
@@ -100,6 +102,8 @@ pub struct Udev {
     active: bool,
     /// Explicit synchronisation with clients, where the driver has it.
     pub syncobj: Option<DrmSyncobjState>,
+    /// What the configuration allows in game mode, as it was read last.
+    game: GameConfig,
 }
 
 /// A plugged screen found while scanning, before it is lit.
@@ -304,6 +308,7 @@ pub fn init(
         screens,
         active: true,
         syncobj: None,
+        game: game.clone(),
     };
     Ok((udev, outputs))
 }
@@ -476,11 +481,31 @@ fn light(
         failures: 0,
         boost: Boost::new(game.direct_scanout(), game.vrr() && vrr_usable),
         vrr_on: false,
+        vrr_usable,
     };
     Ok((screen, output))
 }
 
 impl Udev {
+    /// The configuration was read again: what it allows in game mode takes
+    /// effect at the next frame. Nothing moves when it says the same as
+    /// before, so that a shortcut given up after a failure stays given up.
+    pub fn set_game(&mut self, game: &GameConfig) {
+        if *game == self.game {
+            return;
+        }
+        info!(
+            direct_scanout = game.direct_scanout(),
+            vrr = game.vrr(),
+            "game mode: settings changed"
+        );
+        for screen in &mut self.screens {
+            let vrr = game.vrr() && screen.vrr_usable;
+            screen.boost.allow(game.direct_scanout(), vrr);
+        }
+        self.game = game.clone();
+    }
+
     pub fn switch_vt(&mut self, vt: i32) {
         if let Err(error) = self.session.change_vt(vt) {
             warn!(vt, %error, "cannot switch terminal");

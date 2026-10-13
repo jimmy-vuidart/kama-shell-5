@@ -1,0 +1,21 @@
+[package]
+name = "coquille-settings"
+description = "The settings screen of the coquille shell."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+coquille-config.workspace = true
+coquille-ipc.workspace = true
+coquille-model.workspace = true
+coquille-ui.workspace = true
+clap = { version = "4", features = ["derive"] }
+iced.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

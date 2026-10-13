@@ -25,6 +25,9 @@ phase 2 » et « État de la phase 3 »).
       dock avec le compositeur et le relance s'il tombe (journal :
       `dock.log`). Essayée en imbriqué et dans un dossier d'essai ; **reste à
       lancer `scripts/install.sh` et à ouvrir la session pour de vrai**.
+- [x] 8 bis. Écran « Paramètres » (`coquille-settings`, crate `settings`) :
+      une vraie fenêtre, ouverte par le bouton du centre de contrôle, qui
+      règle `config.toml` et le fait relire à chaud. Essayé en imbriqué.
 - [ ] 9. Optionnel : messages non lus réels (`com.canonical.Unity.LauncherEntry`),
       glisser une icône du tiroir vers un écran.
 
@@ -66,6 +69,7 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
 | Voir les fenêtres ouvertes | toutes, des trois écrans (favoris puis « OUVERTES »), avec leur écran |
 | Heure, réseau, son | dock et centre de contrôle |
 | Bascule « ne pas déranger » | centre de contrôle, sans effet |
+| Thème, accent, sens du dock, clavier, mode jeu | écran « Paramètres » |
 | Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `5`) |
 | « Tout envoyer vers l'écran… » | **toujours rien** |
 | Afficher les notifications | **toujours rien** (concept conservé) |

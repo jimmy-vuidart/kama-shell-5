@@ -17,8 +17,9 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, Mode, PostAction};
 use tracing::{debug, info, warn};
 
+use crate::backend::Backend;
 use crate::state::State;
-use crate::theme::{Theme, ThemeKind};
+use crate::theme::{Rgba, Theme, ThemeKind};
 
 pub struct Ipc {
     pub path: PathBuf,
@@ -253,6 +254,7 @@ impl State {
         Snapshot {
             theme: self.theme.kind.into(),
             accent: self.theme.accent.hex(),
+            simulated: matches!(self.backend, Backend::Winit(_)),
             screens: screens.collect(),
             windows: windows.collect(),
             habits: habits.collect(),
@@ -296,6 +298,7 @@ impl State {
             }
             Command::ToggleLauncher => self.toggle_launcher(),
             Command::SetTheme { theme } => self.set_theme(theme.into()),
+            Command::ReloadConfig => self.reload_config(),
             Command::Quit => {
                 info!("quitting: asked by the shell");
                 self.loop_signal.stop();
@@ -315,15 +318,30 @@ impl State {
         }
     }
 
+    /// Tells the programs of the shell that read the configuration file to
+    /// read it again.
+    pub fn config_changed(&mut self) {
+        if let Some(ipc) = self.ipc.as_mut() {
+            ipc.broadcast(&Event::ConfigChanged);
+        }
+    }
+
     /// Switches between the light and the dark theme, keeping the accent
     /// the user chose.
     pub fn set_theme(&mut self, kind: ThemeKind) {
-        if self.theme.kind == kind {
+        self.restyle(kind, self.accent);
+    }
+
+    /// Gives the chrome a theme and an accent; `None` is the accent of the
+    /// theme.
+    pub fn restyle(&mut self, kind: ThemeKind, accent: Option<Rgba>) {
+        if self.theme.kind == kind && self.accent == accent {
             return;
         }
-        info!(?kind, "theme changed");
+        info!(?kind, accent = ?accent.map(Rgba::hex), "theme changed");
+        self.accent = accent;
         let theme = Theme::new(kind);
-        self.theme = match self.accent {
+        self.theme = match accent {
             Some(accent) => theme.with_accent(accent),
             None => theme,
         };

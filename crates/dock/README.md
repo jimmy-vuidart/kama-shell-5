@@ -106,6 +106,9 @@ Un nom est celui d'un fichier `.desktop` (sans l'extension), sa dernière
 partie (`nautilus` pour `org.gnome.Nautilus`), le programme qu'il lance, ou
 ce que les fenêtres annoncent (`app_id`, `WM_CLASS`).
 
+L'écran « Paramètres » écrit dans le même fichier (`theme`, `accent`,
+`[dock.screens]`) ; le dock le relit quand le compositeur l'en prévient.
+
 Le dock **réécrit ce fichier** quand on change à la souris les favoris
 (épingler, retirer, réordonner), le thème ou la taille du lanceur : seule la ligne concernée
 change, les commentaires restent. Un fichier qui n'est pas du TOML valide
@@ -127,7 +130,10 @@ n'est jamais réécrit.
   laisser de place au mixeur), le bord haut du lanceur horizontal
   (`[drawer] height`, jamais moins de 480 px).
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
-  curseur pour le régler), « Par appli » ouvre le mixeur.
+  curseur pour le régler), « Par appli » ouvre le mixeur. Le bouton aux
+  curseurs, à côté de la déconnexion, ouvre l'écran « Paramètres »
+  (`coquille-settings`, voir `crates/settings/README.md`) : c'est là que se
+  règle le sens du dock sur chaque écran, que les barres suivent aussitôt.
 
 ## Comment c'est fait
 
@@ -140,8 +146,9 @@ n'est jamais réécrit.
   services. Le son passe par `pactl` et `parec` (l'interface PulseAudio de
   PipeWire), le réseau par `nmcli`, le Bluetooth par `bluetoothctl`, la
   luminosité par `ddcutil`. Un outil absent laisse sa commande grisée.
-- La police Figtree (licence OFL, `assets/fonts/`) est embarquée dans le
-  binaire.
+- Couleurs, symboles, lien au compositeur et police Figtree (licence OFL,
+  embarquée dans le binaire) viennent de la crate `coquille-ui`, partagée
+  avec l'écran « Paramètres ».
 
 ## Limites
 

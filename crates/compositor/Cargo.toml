@@ -22,6 +22,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 xcursor = "0.3"
 
+[dev-dependencies]
+coquille-config.workspace = true
+
 [dependencies.smithay]
 git = "https://github.com/Smithay/smithay.git"
 # Same commit as niri 26.4.0, so that niri reads as a reference for this API.

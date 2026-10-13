@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds coquille and its dock, then runs them nested, in a window of the
-# current session: the quick way to try a change.
+# Builds coquille, its dock and its settings screen, then runs them nested,
+# in a window of the current session: the quick way to try a change.
 #
 #   scripts/debug.sh                 the three screens, side by side
 #   scripts/debug.sh left            one screen, as the left one (the dock's)
@@ -71,7 +71,8 @@ else
     layout=(--role "$screen")
 fi
 
-build=(cargo build -p coquille -p coquille-dock)
+# The dock opens the settings screen built next to it.
+build=(cargo build -p coquille -p coquille-dock -p coquille-settings)
 if [[ "$profile" == release ]]; then
     build+=(--release)
 fi

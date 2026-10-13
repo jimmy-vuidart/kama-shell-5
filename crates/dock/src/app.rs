@@ -2,7 +2,7 @@
 //! drawer), and everything that changes it.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
@@ -231,18 +231,9 @@ pub struct Dock {
 
 impl Dock {
     pub fn new(options: Options) -> (Self, Task<Message>) {
-        let mut config = config::load(&options.config);
         let catalog = Catalog::load();
         let games = steam::load();
-        // A favorite written twice under two names would show once and
-        // break the count: keep the first name of each application.
-        let mut seen = Vec::new();
-        config.favorites.retain(|name| {
-            let key = identify(&catalog, &games, name).key;
-            let new = !seen.contains(&key);
-            seen.push(key);
-            new
-        });
+        let config = read_config(&options.config, &catalog, &games);
 
         // Steam writes a desktop file for each game: those are listed with
         // the games, not among the applications.
@@ -529,7 +520,10 @@ impl Dock {
             Command::Close { window } => windows.retain(|known| known.id != window),
             Command::Forget { app } => self.snapshot.habits.retain(|habit| habit.app != app),
             Command::SetTheme { theme } => self.snapshot.theme = theme,
-            Command::OpenOn { .. } | Command::ToggleLauncher | Command::Quit => {}
+            Command::OpenOn { .. }
+            | Command::ToggleLauncher
+            | Command::ReloadConfig
+            | Command::Quit => {}
         }
         self.rebuild_entries();
     }
@@ -577,6 +571,36 @@ impl Dock {
         if let Err(error) = config::update(&self.options.config, change) {
             warn!(%error, path = %self.options.config.display(), "cannot write the configuration");
         }
+    }
+
+    /// The configuration file changed (the settings screen wrote it): the
+    /// bars follow what it now says of each screen.
+    fn reload_config(&mut self) -> Task<Message> {
+        let config = read_config(&self.options.config, &self.catalog, &self.games);
+        if config == self.config {
+            return Task::none();
+        }
+        info!("configuration read again");
+        self.config = config;
+        // A bar whose screen lost its dock, or whose dock now lies the
+        // other way, goes; `show_bars` opens the ones that are missing.
+        let docks = &self.config.docks;
+        let (kept, gone): (Vec<BarState>, Vec<BarState>) = std::mem::take(&mut self.bars)
+            .into_iter()
+            .partition(|bar| docks.contains(&(bar.screen, bar.orientation)));
+        self.bars = kept;
+        self.drag = None;
+        let mut tasks = vec![self.close_menu()];
+        // The launcher goes with the bar that opened it.
+        let orphan = |drawer: &Drawer| gone.iter().any(|bar| bar.screen == drawer.screen);
+        if self.drawer.as_ref().is_some_and(orphan) {
+            tasks.push(self.update(Message::CloseDrawer));
+        }
+        tasks.extend(gone.iter().map(|bar| window::close(bar.id)));
+        tasks.push(self.show_bars());
+        self.rebuild_entries();
+        tasks.push(self.fit_bars());
+        Task::batch(tasks)
     }
 
     fn save_favorites(&self) {
@@ -1178,9 +1202,7 @@ impl Dock {
                 self.update(Message::CloseDrawer)
             }
             Message::Settings => {
-                if let Some(command) = self.identify("org.gnome.Settings").command {
-                    spawn(&command);
-                }
+                spawn(&settings_command(&self.options.config));
                 self.update(Message::CloseDrawer)
             }
             // The messages added for the layer shell are handled by it.
@@ -1201,6 +1223,7 @@ impl Dock {
             compositor::Update::Event(Event::ToggleLauncher { screen }) => {
                 self.toggle_drawer(screen)
             }
+            compositor::Update::Event(Event::ConfigChanged) => self.reload_config(),
             compositor::Update::Event(Event::State(snapshot)) => {
                 self.snapshot = snapshot;
                 let show = self.show_bars();
@@ -1380,6 +1403,40 @@ fn unfold_target(bar: &BarState) -> f32 {
     }
 }
 
+/// Reads the configuration of the dock.
+fn read_config(path: &Path, catalog: &Catalog, games: &[Game]) -> Config {
+    let mut config = config::load(path);
+    // A favorite written twice under two names would show once and break
+    // the count: keep the first name of each application.
+    let mut seen = Vec::new();
+    config.favorites.retain(|name| {
+        let key = identify(catalog, games, name).key;
+        let new = !seen.contains(&key);
+        seen.push(key);
+        new
+    });
+    config
+}
+
+/// A text as one word of a shell command.
+fn quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The command of the settings screen of the shell: the program installed
+/// next to this one, else the one of the `PATH`, on the configuration file
+/// this dock reads.
+fn settings_command(config: &Path) -> String {
+    const PROGRAM: &str = "coquille-settings";
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|dock| Some(dock.parent()?.join(PROGRAM)))
+        .filter(|program| program.is_file());
+    let program = beside.map_or_else(|| PROGRAM.to_owned(), |path| path.display().to_string());
+    let config = config.display().to_string();
+    format!("{} --config {}", quoted(&program), quoted(&config))
+}
+
 /// Starts a program of the user, detached from the dock.
 pub fn spawn(command: &str) {
     info!(command, "starting");
@@ -1404,4 +1461,23 @@ fn user_name() -> String {
         (name == login && !full.is_empty()).then(|| full.to_owned())
     });
     full.unwrap_or(login)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_with_spaces_or_quotes_stays_one_word_of_the_command() {
+        assert_eq!(quoted("/home/a b/config.toml"), "'/home/a b/config.toml'");
+        assert_eq!(quoted("l'essai"), "'l'\\''essai'");
+    }
+
+    #[test]
+    fn the_settings_screen_opens_on_the_file_the_dock_reads() {
+        let command = settings_command(Path::new("/tmp/essai/config.toml"));
+
+        assert!(command.contains("coquille-settings"));
+        assert!(command.ends_with(" --config '/tmp/essai/config.toml'"));
+    }
 }

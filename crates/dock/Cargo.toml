@@ -8,17 +8,19 @@ publish.workspace = true
 
 [dependencies]
 coquille-apps.workspace = true
+coquille-config.workspace = true
 coquille-ipc.workspace = true
 coquille-model.workspace = true
+coquille-ui.workspace = true
 serde.workspace = true
 serde_json = "1"
-toml_edit = "0.25"
+toml_edit.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
-tokio = { version = "1", features = ["net", "io-util", "sync", "time", "process", "rt", "macros"] }
-tracing = "0.1"
+tokio.workspace = true
+tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "wayland", "crisp", "web-colors", "tokio", "svg", "image", "advanced"] }
+iced.workspace = true
 iced_layershell = "0.19.1"
 
 [lints]

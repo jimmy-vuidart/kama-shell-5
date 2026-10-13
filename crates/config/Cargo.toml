@@ -1,0 +1,15 @@
+[package]
+name = "coquille-config"
+description = "The configuration file of coquille, as the programs of its shell read and rewrite it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+coquille-ipc.workspace = true
+coquille-model.workspace = true
+toml_edit.workspace = true
+
+[lints]
+workspace = true

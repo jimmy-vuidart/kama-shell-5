@@ -54,6 +54,11 @@ pub struct Options {
     /// The accent the user chose, when it is not the one of the theme.
     pub accent: Option<Rgba>,
     pub keyboard: KeyboardLayout,
+    /// The layout comes from the command line: the configuration file does
+    /// not change it.
+    pub keyboard_pinned: bool,
+    /// The configuration file, when it is not the usual one.
+    pub config_path: Option<PathBuf>,
     pub mod_key: ModKey,
     /// Command of the terminal opened by the shortcut.
     pub terminal: String,
@@ -118,6 +123,12 @@ pub struct State {
     pub sticky_edges: StickyEdges,
     pub sticky_edges_ms: u64,
     pub terminal: String,
+    /// The layout of the keyboard in use, and whether the configuration
+    /// file may change it.
+    pub keyboard: KeyboardLayout,
+    pub keyboard_pinned: bool,
+    /// The configuration file, when it is not the usual one.
+    pub config_path: Option<PathBuf>,
 
     pub outputs: Vec<ScreenOutput>,
     pub backend: Backend,
@@ -270,6 +281,9 @@ impl State {
             sticky_edges: StickyEdges::default(),
             sticky_edges_ms: options.sticky_edges_ms,
             terminal: options.terminal,
+            keyboard: options.keyboard,
+            keyboard_pinned: options.keyboard_pinned,
+            config_path: options.config_path,
             outputs,
             backend,
             shell: Shell::new(infos, habits.clone()),

@@ -1,0 +1,16 @@
+[package]
+name = "coquille-ui"
+description = "What the programs of the coquille shell drawn with iced share: colors, font, symbols, the link to the compositor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+coquille-ipc.workspace = true
+iced.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

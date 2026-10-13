@@ -32,6 +32,10 @@ pub struct Snapshot {
     pub theme: ThemeName,
     /// The accent color, as `#rrggbb`.
     pub accent: String,
+    /// The screens are made up (the compositor runs in a window): their
+    /// names are not connectors.
+    #[serde(default)]
+    pub simulated: bool,
     pub screens: Vec<Screen>,
     /// The window focused last comes first.
     pub windows: Vec<Window>,
@@ -84,6 +88,9 @@ pub enum Event {
         #[serde(default)]
         screen: Option<OutputRole>,
     },
+    /// The configuration file was read again: programs that read it too
+    /// should do the same.
+    ConfigChanged,
 }
 
 /// From a program of the shell to the compositor.
@@ -112,6 +119,10 @@ pub enum Command {
     SetTheme {
         theme: ThemeName,
     },
+    /// The configuration file changed: the compositor reads it again,
+    /// applies what can change while it runs, and tells the other programs
+    /// of the shell.
+    ReloadConfig,
     /// Ends the session.
     Quit,
 }
@@ -178,6 +189,7 @@ mod tests {
         Snapshot {
             theme: ThemeName::Dark,
             accent: "#7aa7ff".into(),
+            simulated: false,
             screens: vec![Screen {
                 name: "HDMI-A-1".into(),
                 role: OutputRole::Left,
@@ -219,6 +231,7 @@ mod tests {
             Command::SetTheme {
                 theme: ThemeName::Dark,
             },
+            Command::ReloadConfig,
             Command::Quit,
         ];
 
@@ -239,11 +252,24 @@ mod tests {
             screen: Some(OutputRole::Right),
         };
         assert_eq!(decode::<Event>(&encode(&toggle)).unwrap(), toggle);
+        let changed = Event::ConfigChanged;
+        assert_eq!(decode::<Event>(&encode(&changed)).unwrap(), changed);
         // An older compositor does not say where the pointer is.
         assert_eq!(
             decode::<Event>(r#"{"event":"toggle_launcher"}"#).unwrap(),
             Event::ToggleLauncher { screen: None }
         );
+    }
+
+    #[test]
+    fn a_state_from_an_older_compositor_has_real_screens() {
+        let line = r##"{"event":"state","theme":"dark","accent":"#7aa7ff","screens":[],"windows":[],"habits":[]}"##;
+
+        let Event::State(snapshot) = decode::<Event>(line).unwrap() else {
+            panic!("not a state");
+        };
+
+        assert!(!snapshot.simulated);
     }
 
     #[test]
