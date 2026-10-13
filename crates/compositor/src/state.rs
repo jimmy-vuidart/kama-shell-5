@@ -47,12 +47,10 @@ use crate::placement::Bar;
 use crate::render::scene::Cursor;
 use crate::shell::{CapsuleHit, ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
-use crate::theme::{Rgba, Theme, ThemeKind};
+use crate::theme::{Theme, ThemeKind};
 
 pub struct Options {
     pub theme: ThemeKind,
-    /// The accent the user chose, when it is not the one of the theme.
-    pub accent: Option<Rgba>,
     pub keyboard: KeyboardLayout,
     /// The layout comes from the command line: the configuration file does
     /// not change it.
@@ -136,8 +134,6 @@ pub struct State {
     /// The applications installed, for the names and icons of title bars.
     pub catalog: Catalog,
     pub theme: Theme,
-    /// The accent the user chose, kept across changes of theme.
-    pub accent: Option<Rgba>,
     pub painter: Painter,
     /// The socket of the shell, once it is open.
     pub ipc: Option<Ipc>,
@@ -289,11 +285,7 @@ impl State {
             shell: Shell::new(infos, habits.clone()),
             state_dir: options.state_dir,
             saved_habits: habits,
-            theme: match options.accent {
-                Some(accent) => Theme::new(options.theme).with_accent(accent),
-                None => Theme::new(options.theme),
-            },
-            accent: options.accent,
+            theme: Theme::new(options.theme),
             catalog: Catalog::load(),
             painter: Painter::new(),
             ipc: None,

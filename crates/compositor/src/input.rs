@@ -814,8 +814,8 @@ impl State {
         };
         let point = model_point(self.pointer_location());
         let radius = self.shell.desk.metrics().corner_radius;
-        let accent = self.theme.accent;
-        let tint = |alpha: u8| Rgba { a: alpha, ..accent };
+        let gold = self.theme.accent.gold;
+        let tint = |alpha: u8| Rgba { a: alpha, ..gold };
 
         let mut shapes = Vec::new();
         for (rect, ..) in self.shell.drop_zones(window) {

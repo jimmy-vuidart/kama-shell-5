@@ -34,7 +34,7 @@ impl Page {
     /// What the page is about, under its name.
     pub fn summary(self) -> &'static str {
         match self {
-            Self::Appearance => "Le thème et la couleur d'accent des fenêtres et du dock.",
+            Self::Appearance => "Le thème des fenêtres, du dock et de cet écran.",
             Self::Screens => "Quel écran est lequel, et où se tient le dock.",
             Self::Game => "Ce qui se passe sur l'écran d'un jeu en plein écran.",
             Self::System => "Le clavier, le terminal et les applications X11.",
@@ -88,11 +88,6 @@ pub fn chosen(choices: &[Choice], value: Option<&str>) -> Option<Choice> {
         .find(|choice| choice.value.as_deref() == value);
     found.cloned()
 }
-
-/// The accents offered besides the one of the theme, as `#rrggbb`.
-pub const ACCENTS: [&str; 8] = [
-    "#2f6fed", "#7c5cf5", "#c6409f", "#e5484d", "#f08a24", "#c99a06", "#2f9e63", "#0f9aa8",
-];
 
 /// The keyboard layouts XKB knows, and the variants of each.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

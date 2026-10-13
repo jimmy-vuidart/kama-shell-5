@@ -37,7 +37,6 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
     let (browser, messenger) = (name(0, "firefox"), name(1, "discord"));
     Snapshot {
         theme,
-        accent: String::new(),
         simulated: true,
         screens: vec![
             screen(

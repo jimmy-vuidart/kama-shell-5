@@ -426,7 +426,6 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         .or(config.keyboard.variant.as_deref());
     Options {
         theme: cli.theme.or(config.theme).unwrap_or(ThemeKind::Light),
-        accent: config.accent(),
         keyboard: keyboard_layout::detect(layout, variant),
         keyboard_pinned: cli.keyboard_layout.is_some(),
         config_path: cli.config.clone(),

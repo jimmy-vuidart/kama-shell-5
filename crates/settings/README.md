@@ -38,7 +38,7 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 
 | Page | Réglages | Prend effet |
 |---|---|---|
-| Apparence | thème clair ou sombre, couleur d'accent (celle du thème, huit pastilles, ou `#rrggbb` saisi) | aussitôt |
+| Apparence | thème clair ou sombre (l'accent, un or, ne se règle pas) | aussitôt |
 | Écrans et dock | connecteur de chaque écran | **au prochain démarrage** |
 | | dock de chaque écran : à gauche, à droite, en bas, aucun | aussitôt |
 | Mode jeu | bords collants et leur délai, affichage direct, fréquence variable | aussitôt |
@@ -74,7 +74,7 @@ L'écriture est faite par la crate `coquille-config`, comme pour le dock :
   le dessin des trois écrans.
 - `app.rs` : l'état et ce qui le change ; `view.rs` : les vues, avec iced.
 - Couleurs, police et lien au compositeur viennent de `coquille-ui`, comme
-  pour le dock : la fenêtre suit le thème et l'accent en cours.
+  pour le dock : la fenêtre suit le thème en cours.
 
 ## Limites
 

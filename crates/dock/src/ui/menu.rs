@@ -120,7 +120,7 @@ fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Eleme
     let mini = |role: OutputRole| {
         let lit = role == screen;
         let color = if lit {
-            palette.accent
+            palette.accent.gold
         } else {
             style::alpha(palette.muted, 0.45)
         };
@@ -147,13 +147,13 @@ fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Eleme
         .center_y(Length::Fill);
 
     let idle = if current {
-        style::alpha(palette.accent, 0.16)
+        style::alpha(palette.accent.gold, 0.16)
     } else {
         palette.hover
     };
-    let hover = style::alpha(palette.accent, 0.26);
+    let hover = style::alpha(palette.accent.gold, 0.26);
     let outline = if current {
-        palette.accent
+        palette.accent.gold
     } else {
         Color::TRANSPARENT
     };

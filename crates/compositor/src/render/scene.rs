@@ -259,7 +259,7 @@ pub fn build(
             let shape = Shape {
                 outline,
                 area: outline,
-                color: theme.accent,
+                color: theme.accent.gold,
                 radii: [radius + ring; 4],
                 border: ring,
             };

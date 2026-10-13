@@ -255,16 +255,12 @@ favorites = ["firefox", "discord"]
 
     #[test]
     fn a_general_setting_is_added_before_the_sections() {
-        let changed = with_value(
-            "[outputs]\nleft = \"DP-1\"\n",
-            &["accent"],
-            "#ff8800".into(),
-        );
+        let changed = with_value("[outputs]\nleft = \"DP-1\"\n", &["terminal"], "foot".into());
 
         // Written after a section, it would belong to it.
         let changed = changed.unwrap();
-        assert!(changed.find("accent").unwrap() < changed.find("[outputs]").unwrap());
-        assert_eq!(value_of(&changed, &["accent"]).unwrap(), "\"#ff8800\"");
+        assert!(changed.find("terminal").unwrap() < changed.find("[outputs]").unwrap());
+        assert_eq!(value_of(&changed, &["terminal"]).unwrap(), "\"foot\"");
     }
 
     #[test]
@@ -352,7 +348,7 @@ favorites = ["firefox", "discord"]
 
         assert_eq!(value_of(&changed, &["outputs", "left"]), None);
         assert_eq!(value_of(&changed, &["theme"]).unwrap(), "\"dark\"");
-        assert_eq!(without(FILE, &["accent"]).unwrap(), FILE);
+        assert_eq!(without(FILE, &["terminal"]).unwrap(), FILE);
         assert_eq!(without(FILE, &["keyboard", "layout"]).unwrap(), FILE);
     }
 

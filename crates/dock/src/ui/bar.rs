@@ -301,7 +301,7 @@ fn label<'a>(
     let (detail, color) = if unread > 0 {
         (
             format!("{} · {unread} non lus", entry.subtitle),
-            palette.accent,
+            palette.accent.text,
         )
     } else {
         (entry.subtitle.clone(), palette.muted)
@@ -346,7 +346,7 @@ fn lying<'a>(
     let pinned = state.pinned();
     let divider = || {
         let line = container(space().width(1).height(22))
-            .style(move |_| style::fill(palette.separator, 0.0));
+            .style(move |_| style::fill(palette.bar_separator, 0.0));
         container(line).center_x(DIVIDER).center_y(WIDTH)
     };
 
@@ -383,9 +383,9 @@ fn lying_launcher<'a>(
 ) -> Element<'a, Message> {
     let open = dock.drawer.is_some();
     let (color, background) = if open {
-        (palette.on_accent(), palette.accent)
+        (palette.on_accent(), palette.accent.gold)
     } else {
-        (palette.accent, iced::Color::TRANSPARENT)
+        (palette.accent.gold, iced::Color::TRANSPARENT)
     };
     let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
         .center_x(SLOT)
@@ -414,7 +414,7 @@ fn lying_entry<'a>(
 
     let mark: Element<'_, Message> = match entry.indicator {
         Indicator::Here => container(space().width(12).height(3))
-            .style(move |_| style::fill(palette.accent, 1.5))
+            .style(move |_| style::fill(palette.accent.gold, 1.5))
             .into(),
         Indicator::Elsewhere => container(space().width(4).height(3))
             .style(move |_| style::fill(palette.muted, 1.5))
@@ -463,7 +463,7 @@ fn lying_time<'a>(now: &DateTime<Local>, palette: Palette) -> Element<'a, Messag
     let time = text(format!("{hours}:{minutes}"))
         .size(14)
         .font(style::BOLD)
-        .color(palette.text);
+        .color(palette.accent.text);
     let date = text(short).size(10).color(palette.muted);
     container(column![time, date].align_x(Alignment::End))
         .width(CLOCK_WIDTH)
@@ -549,10 +549,10 @@ fn launcher<'a>(
     let color = if open {
         palette.on_accent()
     } else {
-        palette.accent
+        palette.accent.gold
     };
     let background = if open {
-        palette.accent
+        palette.accent.gold
     } else {
         iced::Color::TRANSPARENT
     };
@@ -591,7 +591,7 @@ fn section(
         let title = text(title)
             .size(10)
             .font(style::SEMIBOLD)
-            .color(palette.muted);
+            .color(palette.accent.text);
         return container(title)
             .height(SECTION)
             .width(Length::Fill)
@@ -601,7 +601,7 @@ fn section(
             .into();
     }
     let line = container(space().width(Length::Fill).height(1))
-        .style(move |_| style::fill(palette.separator, 0.0));
+        .style(move |_| style::fill(palette.bar_separator, 0.0));
     container(line)
         .height(SECTION)
         .padding(Padding::from([0.0, 9.0]))
@@ -624,7 +624,7 @@ fn entry_row<'a>(
 
     let mark: Element<'_, Message> = match entry.indicator {
         Indicator::Here => container(space().width(3).height(12))
-            .style(move |_| style::fill(palette.accent, 1.5))
+            .style(move |_| style::fill(palette.accent.gold, 1.5))
             .into(),
         Indicator::Elsewhere => container(space().width(3).height(4))
             .style(move |_| style::fill(palette.muted, 1.5))
@@ -670,7 +670,7 @@ fn entry_row<'a>(
         let (detail, color) = if unread > 0 {
             (
                 format!("{} · {unread} non lus", entry.subtitle),
-                palette.accent,
+                palette.accent.text,
             )
         } else {
             (entry.subtitle.clone(), palette.muted)
@@ -740,7 +740,7 @@ fn time<'a>(
         let time = text(format!("{hours}:{minutes}"))
             .size(20)
             .font(style::BOLD)
-            .color(palette.text);
+            .color(palette.accent.text);
         let date = text(long).size(12).color(palette.muted);
         let line = from_edge(side, vec![time.into(), date.into()]).spacing(10);
         return container(line)
@@ -751,7 +751,12 @@ fn time<'a>(
             .center_y(CLOCK)
             .into();
     }
-    let digits = |value: String| text(value).size(14).font(style::BOLD).color(palette.text);
+    let digits = |value: String| {
+        text(value)
+            .size(14)
+            .font(style::BOLD)
+            .color(palette.accent.text)
+    };
     let date = text(short).size(10).color(palette.muted);
     let stacked = column![digits(hours), digits(minutes), space().height(2), date]
         .align_x(Alignment::Center)

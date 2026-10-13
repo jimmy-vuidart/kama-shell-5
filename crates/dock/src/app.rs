@@ -30,7 +30,7 @@ use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
 use crate::ui::icons::Icons;
-use crate::ui::style::{Palette, parse_color};
+use crate::ui::style::Palette;
 use coquille_apps::{App, Catalog};
 
 /// How long the bar takes to unfold under the pointer.
@@ -243,9 +243,7 @@ impl Dock {
         let theme = config.theme.unwrap_or_default();
         let simulated = |backend| !options.is_real(backend);
         let snapshot = if simulated(Backend::Compositor) {
-            let mut snapshot = mock::snapshot(theme, &config.favorites);
-            snapshot.accent = config.accent.clone().unwrap_or_default();
-            snapshot
+            mock::snapshot(theme, &config.favorites)
         } else {
             Snapshot::default()
         };
@@ -320,8 +318,7 @@ impl Dock {
     }
 
     pub fn palette(&self) -> Palette {
-        let accent = parse_color(&self.snapshot.accent);
-        Palette::new(self.snapshot.theme, accent)
+        Palette::new(self.snapshot.theme)
     }
 
     pub fn identify(&self, name: &str) -> Identity {

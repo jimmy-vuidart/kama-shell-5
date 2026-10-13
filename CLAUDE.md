@@ -109,7 +109,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de toucher au rendu). Celles d'origine, dans `docs/maquettes/shell/`, font référence pour les fenêtres, leurs décorations et le rangement ; **plus pour les barres latérales ni pour le lanceur**, abandonnés sous cette forme.
 
 - Style proche de Windows 11 / Fluent : coins arrondis, surfaces translucides, sobre.
-- Thèmes **clair** et **sombre**.
+- Thèmes **clair** et **sombre**, aux gris chauds : un noir tiré vers le brun en sombre, un ivoire en clair.
 - Fenêtres : rayon **12 px**, espacement **8 px** entre emplacements et avec les bords.
 - **Décorations côté serveur** (dessinées par le compositeur, via `xdg-decoration`) :
   - barre de titre **38 px** : icône et nom de l'appli (ceux de son fichier `.desktop` ; à défaut un carré de couleur et un nom tiré de son identifiant), sous-titre atténué ;
@@ -117,7 +117,8 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
   - pas de bouton « agrandir » (la disposition s'en charge).
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range).
 - **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine et montre réduire et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Ni capsule pour une fenêtre flottante, ni sur un écran libre ou ancré. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
-- Fenêtre active : **anneau d'accent de 2 px**. Accent par défaut : `#2f6fed` (clair), `#7aa7ff` (sombre).
+- Fenêtre active : **anneau d'accent de 2 px**.
+- **L'accent est un or métallique, le même partout, et il ne se règle pas** : onze tons du crème au brun, un cran plus sombres en thème clair (`Accent` dans `crates/ui/src/style.rs` et `crates/compositor/src/theme.rs`). Brief, maquettes et recettes des dégradés : `docs/gold/` (les valeurs CSS des maquettes font foi). Ce qui est écrit ou dessiné sur l'or est en « encre » (`#2a1e04`) ; le texte en couleur d'accent est en « texte or ».
 - Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, cahier des charges `docs/maquettes/dock.md`) est une barre de 44 px à 8 px du bord, avec une zone réservée de 60 px. Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche.
 - Police d'interface : Figtree (repli : police système sans-serif).
 
@@ -145,7 +146,7 @@ coquille/
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
 - Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Notifications et instantanés n'ont pas encore de forme.
-- Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, ratios, délai des bords collants).
+- Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, thème, ratios, délai des bords collants).
 - État persistant (mémoire par appli, instantanés) : `~/.local/state/coquille/`.
 
 ### Décisions techniques
@@ -162,8 +163,8 @@ coquille/
 - **Canal du shell**, `ipc.rs` : socket `$XDG_RUNTIME_DIR/coquille-<affichage Wayland>.sock`, annoncé par `COQUILLE_SOCKET` aux programmes lancés. L'état entier (écrans, fenêtres, habitudes, thème) est poussé à chaque changement ; les commandes sont dans `crates/ipc`. Un message mal formé est journalisé et ignoré.
 - **winit et iced** : `iced_layershell` est écrit pour winit-core 0.31.0-beta.2, Smithay épingle la beta.3. `vendor/iced_exdevtools` (une ligne modifiée) les réconcilie par `[patch.crates-io]` ; à retirer quand `iced_layershell` suivra.
 - **Le dock passe par les outils des services** (`pactl`, `parec`, `nmcli`, `bluetoothctl`, `ddcutil`) plutôt que par leurs bibliothèques : rien à lier, un outil absent grise sa commande.
-- **Thème et accent** : `theme` et `accent` de la configuration valent pour le compositeur et le dock ; le thème change en cours de session (commande `set_theme`).
-- **Configuration relue à chaud** : la commande `reload_config` fait relire `config.toml` au compositeur (`reload.rs`), qui applique ce qui peut changer en cours de route (thème, accent, terminal, disposition du clavier, bords collants, affichage direct et VRR) puis prévient les autres programmes (`config_changed`) : le dock relit alors sa part et déplace ses barres. **Le rôle des écrans et XWayland ne changent qu'au démarrage.** Un fichier illisible ou invalide ne change rien.
+- **Thème** : `theme` de la configuration vaut pour le compositeur et le dock ; il change en cours de session (commande `set_theme`). **Il n'y a plus de réglage `accent`** : une ligne `accent = "…"` restée dans un fichier est ignorée, avec un avertissement dans le journal (le compositeur lit pourtant le fichier strictement ; un test le prouve).
+- **Configuration relue à chaud** : la commande `reload_config` fait relire `config.toml` au compositeur (`reload.rs`), qui applique ce qui peut changer en cours de route (thème, terminal, disposition du clavier, bords collants, affichage direct et VRR) puis prévient les autres programmes (`config_changed`) : le dock relit alors sa part et déplace ses barres. **Le rôle des écrans et XWayland ne changent qu'au démarrage.** Un fichier illisible ou invalide ne change rien.
 - **Un seul endroit écrit le fichier** : la crate `config` (`toml_edit`). Elle remplace une valeur là où elle est, commentaires conservés ; un réglage que le fichier ne fait que suggérer (`# vrr = true`) est activé sur place, sous son explication. Le compositeur, lui, lit le fichier strictement (`deny_unknown_fields`) : un test vérifie qu'il accepte tout ce que l'écran « Paramètres » écrit.
 
 ### Lancer le compositeur
@@ -192,7 +193,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 
 - Paramètres : le bouton du dock (à côté de la déconnexion) lance `coquille-settings` sur le fichier que lit le dock. À la main : `target/debug/coquille-settings --config FICHIER --page screens` (`appearance`, `screens`, `game`, `system`). Détail dans `crates/settings/README.md`.
 
-Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"vertical-right"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
+Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `terminal`, `xwayland`, `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"vertical-right"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
 
 ### Installer
 
@@ -255,7 +256,7 @@ Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un é
 
 ### État de l'écran « Paramètres »
 
-Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : quatre pages (Apparence, Écrans et dock, Mode jeu, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, accent, sens du dock par écran, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : quatre pages (Apparence, Écrans et dock, Mode jeu, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, sens du dock par écran, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
 
 Fait mais **jamais exécuté** (backend matériel) : le choix du connecteur de chaque écran (en imbriqué les écrans sont simulés, la liste est remplacée par « Écrans simulés » ; l'échange de deux connecteurs a été essayé sans compositeur et par tests) ; l'affichage direct et le VRR coupés ou remis en cours de session (`Udev::set_game`).
 
@@ -265,6 +266,14 @@ Limites connues :
 - les dispositions du clavier portent leur nom anglais (celui de XKB) ;
 - la disposition donnée par `--keyboard-layout` l'emporte sur le fichier : la changer dans l'écran est alors sans effet jusqu'au prochain démarrage sans l'option ;
 - changer la disposition d'un écran (`Mod+1` à `5`) n'y est pas : ce n'est pas un réglage du fichier.
+
+### État de l'accent or
+
+Trois étapes, d'après `docs/gold/PROMPT.md` :
+
+1. **Fait**, vérifié en imbriqué (captures relues en clair et en sombre) et par tests unitaires : la couleur d'accent réglable a disparu (configuration, écran « Paramètres », canal du shell), la palette de l'or et les gris réchauffés sont posés. **L'or est encore à plat** (ton « or ») partout.
+2. À faire : le métal dans le compositeur (dégradé de l'anneau, tour de la capsule active).
+3. À faire : le métal dans le dock et l'écran « Paramètres » (lingots, pièces fines, barres, filets à arête haute).
 
 ### État des capsules
 

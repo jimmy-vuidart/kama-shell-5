@@ -45,7 +45,6 @@ pub struct TitlebarSpec {
     /// Whether the bar has its buttons.
     pub buttons: bool,
     pub theme: ThemeKind,
-    pub accent: Rgba,
     pub corner_radius: i32,
 }
 
@@ -59,7 +58,6 @@ pub struct GroupSpec {
     /// The capsule under the pointer, and its button there if any.
     pub hovered: Option<(usize, Option<CapsuleButton>)>,
     pub theme: ThemeKind,
-    pub accent: Rgba,
 }
 
 /// One window of a slot.
@@ -99,7 +97,6 @@ pub struct BarSpec {
     pub labels: Vec<String>,
     pub hovered: Option<usize>,
     pub theme: ThemeKind,
-    pub accent: Rgba,
 }
 
 /// A bar painted to pixels, with where its buttons ended up.
@@ -138,7 +135,7 @@ impl Painter {
     /// Paints a title bar: rounded top corners, badge, title, subtitle,
     /// buttons. Returns `None` for an empty size.
     pub fn titlebar(&mut self, spec: &TitlebarSpec) -> Option<Pixmap> {
-        let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        let theme = Theme::new(spec.theme);
         let (width, height) = (spec.size.w as f32, spec.size.h as f32);
         let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
         let layout = TitlebarLayout::new(spec.size, spec.buttons);
@@ -231,7 +228,7 @@ impl Painter {
     pub fn capsule_group(&mut self, spec: &GroupSpec) -> Option<PaintedGroup> {
         /// How much of the backdrop shows through the box.
         const BOX_OPACITY: u8 = 217;
-        let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        let theme = Theme::new(spec.theme);
         let label_widths: Vec<i32> = spec
             .capsules
             .iter()
@@ -287,7 +284,7 @@ impl Painter {
         if capsule.shown && capsule.focused {
             // Inside the capsule, so that the box keeps its margin.
             if let Some(path) = pill(cell.rect, RING_WIDTH / 2.0) {
-                outline(pixmap, &path, theme.accent, RING_WIDTH);
+                outline(pixmap, &path, theme.accent.gold, RING_WIDTH);
             }
         }
 
@@ -354,7 +351,7 @@ impl Painter {
         if spec.labels.is_empty() {
             return None;
         }
-        let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        let theme = Theme::new(spec.theme);
 
         let widths: Vec<i32> = spec
             .labels
@@ -381,7 +378,7 @@ impl Painter {
             let cell = Rect::new(x, PADDING, width, HEIGHT - 2 * PADDING);
             // The first choice is the default one: it stands out.
             let (background, ink) = match (index, spec.hovered == Some(index)) {
-                (0, _) => (Some(theme.accent), Rgba::WHITE),
+                (0, _) => (Some(theme.accent.gold), theme.accent.ink),
                 (_, true) => (Some(theme.button_hover), theme.text),
                 (_, false) => (None, theme.text),
             };
@@ -706,7 +703,6 @@ mod tests {
             ],
             hovered: Some(1),
             theme: ThemeKind::Light,
-            accent: Theme::new(ThemeKind::Light).accent,
         };
 
         let bar = Painter::new().placement_bar(&spec).unwrap();
@@ -734,7 +730,6 @@ mod tests {
             labels: Vec::new(),
             hovered: None,
             theme: ThemeKind::Dark,
-            accent: Theme::new(ThemeKind::Dark).accent,
         };
 
         assert!(Painter::new().placement_bar(&spec).is_none());
@@ -760,7 +755,6 @@ mod tests {
             capsules,
             hovered: None,
             theme: ThemeKind::Light,
-            accent: Theme::new(ThemeKind::Light).accent,
         }
     }
 
@@ -797,7 +791,7 @@ mod tests {
 
         let cell = painted.layout.capsules[0].rect;
         let top = pixel(&painted.pixmap, (cell.x + cell.w / 2) as u32, cell.y as u32);
-        assert_eq!(&top[..3], &[0x2f, 0x6f, 0xed]);
+        assert_eq!(&top[..3], &[0xc2, 0x9a, 0x38]);
     }
 
     #[test]

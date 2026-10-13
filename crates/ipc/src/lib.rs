@@ -30,8 +30,6 @@ pub enum ThemeName {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Snapshot {
     pub theme: ThemeName,
-    /// The accent color, as `#rrggbb`.
-    pub accent: String,
     /// The screens are made up (the compositor runs in a window): their
     /// names are not connectors.
     #[serde(default)]
@@ -188,7 +186,6 @@ mod tests {
     fn snapshot() -> Snapshot {
         Snapshot {
             theme: ThemeName::Dark,
-            accent: "#7aa7ff".into(),
             simulated: false,
             screens: vec![Screen {
                 name: "HDMI-A-1".into(),

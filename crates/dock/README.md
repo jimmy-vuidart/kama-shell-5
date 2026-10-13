@@ -83,7 +83,6 @@ Dans `~/.config/coquille/config.toml`, partagé avec le compositeur (modèle :
 
 ```toml
 theme = "dark"
-accent = "#7aa7ff"
 
 [dock]
 favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
@@ -108,7 +107,7 @@ Un nom est celui d'un fichier `.desktop` (sans l'extension), sa dernière
 partie (`nautilus` pour `org.gnome.Nautilus`), le programme qu'il lance, ou
 ce que les fenêtres annoncent (`app_id`, `WM_CLASS`).
 
-L'écran « Paramètres » écrit dans le même fichier (`theme`, `accent`,
+L'écran « Paramètres » écrit dans le même fichier (`theme`,
 `[dock.screens]`) ; le dock le relit quand le compositeur l'en prévient.
 
 Le dock **réécrit ce fichier** quand on change à la souris les favoris
@@ -119,7 +118,7 @@ n'est jamais réécrit.
 ## Ce que fait la souris
 
 - **Barre** : elle montre les favoris, puis toutes les autres applis
-  ouvertes, quel que soit leur écran (barre d'accent : ouverte sur l'écran
+  ouvertes, quel que soit leur écran (barre d'or : ouverte sur l'écran
   du dock ; point gris : ouverte ailleurs). Clic gauche lance ou montre la fenêtre utilisée en dernier (un
   nouveau clic passe à la suivante, une fenêtre réduite revient) ; clic
   milieu ouvre une nouvelle fenêtre ; clic droit ouvre le menu (ouvrir sur un

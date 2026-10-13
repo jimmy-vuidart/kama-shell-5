@@ -5,11 +5,11 @@ use coquille_config::{Change, DockPlace, PerScreen};
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
 use coquille_ui::glyph::{Glyph, glyph};
-use coquille_ui::style::{self, Palette, parse_color};
+use coquille_ui::style::{self, Palette};
 use iced::overlay::menu;
 use iced::widget::{
     Column, Row, button, column, container, pick_list, row, scrollable, slider, space, text,
-    text_input, toggler,
+    toggler,
 };
 use iced::{Alignment, Border, Color, Element, Length, Padding};
 
@@ -77,7 +77,7 @@ fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, M
         (palette.muted, style::MEDIUM)
     };
     let mark_color = if current {
-        palette.accent
+        palette.accent.gold
     } else {
         Color::TRANSPARENT
     };
@@ -150,74 +150,23 @@ fn banner<'a>(error: &'a str, palette: Palette) -> Element<'a, Message> {
 // ---- The pages ----
 
 fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
-    let custom = app.file.accent.as_deref().and_then(parse_color);
     let current = app.theme();
     let themes = row![
-        theme_tile(ThemeName::Light, "Clair", current, custom, palette),
-        theme_tile(ThemeName::Dark, "Sombre", current, custom, palette)
+        theme_tile(ThemeName::Light, "Clair", current, palette),
+        theme_tile(ThemeName::Dark, "Sombre", current, palette)
     ]
     .spacing(12);
     let theme = column![
-        words("Thème", "Celui des fenêtres et du dock.", palette),
+        words(
+            "Thème",
+            "Clair ou sombre ; l'or de l'accent est le même dans les deux.",
+            palette
+        ),
         themes
     ]
     .spacing(12);
 
-    // The accent of the theme first, then the ones offered.
-    let usual = Palette::new(current, None).accent;
-    let mut swatches: Row<'_, Message> =
-        row![usual_accent(usual, app.file.accent.is_none(), palette)]
-            .spacing(8)
-            .align_y(Alignment::Center);
-    for accent in model::ACCENTS {
-        let chosen = app
-            .file
-            .accent
-            .as_deref()
-            .is_some_and(|set| set.eq_ignore_ascii_case(accent));
-        let change = Change::Accent(Some(accent.to_owned()));
-        if let Some(color) = parse_color(accent) {
-            swatches = swatches.push(swatch(color, chosen, change, palette));
-        }
-    }
-    let typed = &app.accent_text;
-    let wrong = !typed.is_empty() && parse_color(typed).is_none();
-    let field = text_input("#rrggbb", typed)
-        .on_input(Message::AccentText)
-        .size(13)
-        .font(style::MEDIUM)
-        .width(104)
-        .padding(Padding::from([7.0, 10.0]))
-        .style(move |_, status| {
-            let line = match status {
-                _ if wrong => style::DANGER,
-                text_input::Status::Focused { .. } => palette.accent,
-                _ => palette.separator,
-            };
-            text_input::Style {
-                background: palette.block.into(),
-                border: Border {
-                    color: line,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                icon: palette.muted,
-                placeholder: palette.muted,
-                value: palette.text,
-                selection: style::alpha(palette.accent, 0.35),
-            }
-        });
-    let accent = column![
-        words(
-            "Couleur d'accent",
-            "L'anneau de la fenêtre active et les repères du dock.",
-            palette
-        ),
-        row![swatches, space().width(Length::Fill), field].align_y(Alignment::Center)
-    ]
-    .spacing(12);
-
-    card(vec![theme.into(), accent.into()], palette)
+    card(vec![theme.into()], palette)
 }
 
 /// A theme to choose, shown as a small screen in its colors.
@@ -225,10 +174,9 @@ fn theme_tile<'a>(
     theme: ThemeName,
     name: &'a str,
     current: ThemeName,
-    accent: Option<Color>,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let look = Palette::new(theme, accent);
+    let look = Palette::new(theme);
     let chosen = theme == current;
     let bar = |width: f32, color: Color| {
         container(space().width(width).height(4)).style(move |_| style::fill(color, 2.0))
@@ -245,7 +193,7 @@ fn theme_tile<'a>(
         .padding(10)
         .style(move |_| container::Style {
             border: Border {
-                color: look.accent,
+                color: look.accent.gold,
                 width: 2.0,
                 radius: 6.0.into(),
             },
@@ -271,7 +219,7 @@ fn theme_tile<'a>(
         .style(move |_, status| {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             let (line, width) = match (chosen, hovered) {
-                (true, _) => (palette.accent, 2.0),
+                (true, _) => (palette.accent.gold, 2.0),
                 (false, true) => (palette.muted, 1.0),
                 (false, false) => (palette.separator, 1.0),
             };
@@ -280,75 +228,6 @@ fn theme_tile<'a>(
                     color: line,
                     width,
                     radius: 12.0.into(),
-                },
-                ..button::Style::default()
-            }
-        })
-        .into()
-}
-
-/// The choice that leaves the accent to the theme.
-fn usual_accent<'a>(color: Color, chosen: bool, palette: Palette) -> Element<'a, Message> {
-    let dot = container(space().width(14).height(14)).style(move |_| style::fill(color, 7.0));
-    let name = text("Celle du thème")
-        .size(13)
-        .font(style::MEDIUM)
-        .color(palette.text);
-    let line = row![dot, name].spacing(8).align_y(Alignment::Center);
-    button(container(line).center_y(Length::Fill))
-        .height(30)
-        .padding(Padding::from([0.0, 12.0]))
-        .on_press(Message::Change(Change::Accent(None)))
-        .style(move |_, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let line = match (chosen, hovered) {
-                (true, _) => palette.accent,
-                (false, true) => palette.muted,
-                (false, false) => palette.separator,
-            };
-            button::Style {
-                background: Some(palette.block.into()),
-                border: Border {
-                    color: line,
-                    width: if chosen { 2.0 } else { 1.0 },
-                    radius: 15.0.into(),
-                },
-                ..button::Style::default()
-            }
-        })
-        .into()
-}
-
-/// A color to choose as the accent.
-fn swatch<'a>(
-    color: Color,
-    chosen: bool,
-    change: Change,
-    palette: Palette,
-) -> Element<'a, Message> {
-    let mark: Element<'a, Message> = if chosen {
-        glyph(Glyph::Check, 16.0, Color::WHITE)
-    } else {
-        space().into()
-    };
-    button(container(mark).center(Length::Fill))
-        .width(30)
-        .height(30)
-        .padding(0)
-        .on_press(Message::Change(change))
-        .style(move |_, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let line = if chosen || hovered {
-                palette.text
-            } else {
-                Color::TRANSPARENT
-            };
-            button::Style {
-                background: Some(color.into()),
-                border: Border {
-                    color: line,
-                    width: 2.0,
-                    radius: 15.0.into(),
                 },
                 ..button::Style::default()
             }
@@ -438,7 +317,7 @@ fn drawing<'a>(
             .center(Length::Fill);
         let dock = |width: Length, height: Length| {
             container(space().width(width).height(height))
-                .style(move |_| style::fill(palette.accent, 2.0))
+                .style(move |_| style::fill(palette.accent.gold, 2.0))
         };
         let inside: Element<'a, Message> = match app.file.dock(role) {
             DockPlace::Vertical => row![dock(4.0.into(), Length::Fill), label].into(),
@@ -680,7 +559,7 @@ fn switch<'a>(
                 | toggler::Status::Disabled { is_toggled } => (is_toggled, false),
             };
             let track = if toggled {
-                palette.accent
+                palette.accent.gold
             } else {
                 style::alpha(palette.muted, 0.45)
             };
@@ -720,7 +599,11 @@ fn segmented<'a, T: Copy + PartialEq>(
     for (value, name) in options {
         let taken = *value == chosen;
         let (idle, hover, color) = if taken {
-            (palette.accent, palette.accent, palette.on_accent())
+            (
+                palette.accent.gold,
+                palette.accent.gold,
+                palette.on_accent(),
+            )
         } else {
             (Color::TRANSPARENT, palette.hover, palette.text)
         };
@@ -753,7 +636,9 @@ fn picker<'a>(
         .style(move |_, status| {
             let line = match status {
                 pick_list::Status::Active => palette.separator,
-                pick_list::Status::Hovered | pick_list::Status::Opened { .. } => palette.accent,
+                pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
+                    palette.accent.gold
+                }
             };
             pick_list::Style {
                 text_color: palette.text,
@@ -776,7 +661,7 @@ fn picker<'a>(
             },
             text_color: palette.text,
             selected_text_color: palette.on_accent(),
-            selected_background: palette.accent.into(),
+            selected_background: palette.accent.gold.into(),
             shadow: palette.shadow(),
         })
         .into()
@@ -790,10 +675,7 @@ fn level<'a>(delay: u32, palette: Palette) -> Element<'a, Message> {
         .width(200)
         .style(move |_, _| slider::Style {
             rail: slider::Rail {
-                backgrounds: (
-                    palette.accent.into(),
-                    style::alpha(palette.muted, 0.3).into(),
-                ),
+                backgrounds: (palette.accent.gold.into(), palette.track.into()),
                 width: 4.0,
                 border: Border {
                     radius: 2.0.into(),

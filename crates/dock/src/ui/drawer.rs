@@ -71,7 +71,7 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
 /// wider or narrower. It shows as a small grip, brighter while it is held.
 fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
     let color = if drawer.resizing {
-        palette.accent
+        palette.accent.gold
     } else {
         style::alpha(Color::WHITE, 0.55)
     };
@@ -164,7 +164,7 @@ fn heading<'a>(title: &'a str, detail: String, palette: Palette) -> Row<'a, Mess
         text(title)
             .size(15)
             .font(style::SEMIBOLD)
-            .color(palette.text),
+            .color(palette.accent.text),
         text(detail).size(13).color(palette.muted)
     ]
     .spacing(10)
@@ -184,7 +184,7 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
             icon: palette.muted,
             placeholder: palette.muted,
             value: palette.text,
-            selection: style::alpha(palette.accent, 0.35),
+            selection: style::alpha(palette.accent.gold, 0.35),
         });
     let line = row![icons::glyph(Glyph::Search, 18.0, palette.muted), field]
         .spacing(12)
@@ -193,7 +193,7 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
         .padding(Padding::from([12.0, 16.0]))
         .style(move |_| container::Style {
             border: Border {
-                color: palette.accent,
+                color: palette.accent.gold,
                 width: 1.5,
                 radius: 12.0.into(),
             },
@@ -219,7 +219,7 @@ fn pinned<'a>(dock: &'a Dock, width: f32, palette: Palette) -> Element<'a, Messa
         let color = if floating {
             palette.muted
         } else {
-            palette.accent
+            palette.accent.text
         };
         let pill = container(
             text(place.label())
@@ -248,7 +248,7 @@ fn pinned<'a>(dock: &'a Dock, width: f32, palette: Palette) -> Element<'a, Messa
     let title = text("Épinglées")
         .size(15)
         .font(style::SEMIBOLD)
-        .color(palette.text);
+        .color(palette.accent.text);
     column![title, tiles].spacing(8).into()
 }
 
@@ -341,12 +341,12 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
             palette.text
         };
         let idle = if current {
-            palette.accent
+            palette.accent.gold
         } else {
             Color::TRANSPARENT
         };
         let hover = if current {
-            palette.accent
+            palette.accent.gold
         } else {
             palette.hover
         };
@@ -551,10 +551,7 @@ fn level<'a>(
         .step(0.01_f32)
         .style(move |_, _| slider::Style {
             rail: slider::Rail {
-                backgrounds: (
-                    palette.accent.into(),
-                    style::alpha(palette.muted, 0.3).into(),
-                ),
+                backgrounds: (palette.accent.gold.into(), palette.track.into()),
                 width: 4.0,
                 border: Border {
                     radius: 2.0.into(),
@@ -590,7 +587,7 @@ fn switch<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let (idle, color) = match (on, available) {
-        (true, true) => (palette.accent, palette.on_accent()),
+        (true, true) => (palette.accent.gold, palette.on_accent()),
         (_, false) => (style::alpha(palette.card, 0.5), palette.muted),
         (false, true) => (palette.card, palette.text),
     };
@@ -713,8 +710,8 @@ fn control_center<'a>(
     .padding(Padding::from([6.0, 10.0]))
     .on_press(Message::ToggleMixer)
     .style(style::tinted(
-        palette.accent,
-        style::mix(palette.accent, palette.text, 0.1),
+        palette.accent.gold,
+        style::mix(palette.accent.gold, palette.text, 0.1),
         8.0,
     ));
     let screens = dock.snapshot.screens.len();
@@ -790,7 +787,7 @@ fn session<'a>(
     let avatar_text = palette.on_accent();
     let avatar = container(text(initials).size(13).font(style::BOLD).color(avatar_text))
         .center(36)
-        .style(move |_| style::fill(palette.accent, 18.0));
+        .style(move |_| style::fill(palette.accent.gold, 18.0));
     let detail = note.unwrap_or("Compte local");
     let who = column![
         text(dock.user.clone())
@@ -927,7 +924,7 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
 
     // Its top edge is dragged to make it higher or lower.
     let color = if drawer.resizing {
-        palette.accent
+        palette.accent.gold
     } else {
         style::alpha(Color::WHITE, 0.55)
     };
