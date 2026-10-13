@@ -149,6 +149,25 @@ coquille/
 - Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, thème, ratios, délai des bords collants).
 - État persistant (mémoire par appli, instantanés) : `~/.local/state/coquille/`.
 
+### Trouver son chemin dans le code
+
+`AGENTS.md` est un lien vers ce fichier : les agents qui ne lisent pas `CLAUDE.md` (Antigravity, Gemini, Codex) partent du même contexte. Ne modifier que `CLAUDE.md`.
+
+Avant de planifier une fonctionnalité, **interroger le graphe du code plutôt que lire les crates fichier après fichier**. [codegraph](https://github.com/colbymchenry/codegraph) (version épinglée dans `scripts/codegraph.sh`) indexe les symboles Rust et leurs appels, d'une crate à l'autre :
+
+```
+scripts/codegraph.sh explore "how a setting is reloaded while running"   # le code d'un sujet, et ce qui en dépend
+scripts/codegraph.sh callers apply_arrangement                           # qui appelle
+scripts/codegraph.sh callees manage                                      # ce qui est appelé
+scripts/codegraph.sh impact Ratio                                        # ce qu'un changement touche
+scripts/codegraph.sh files                                               # l'arbre des fichiers indexés
+```
+
+- Les agents qui parlent MCP ont la même chose par l'outil `codegraph_explore` : `.mcp.json` pour Claude Code, `agy mcp list` pour Antigravity. Le serveur suit les fichiers modifiés ; le script, lui, met l'index à jour avant chaque question.
+- L'index est dans `.codegraph/`, jamais commité, construit au premier appel (moins d'une seconde). Rien ne quitte la machine, télémétrie coupée.
+- Poser les questions **en anglais**, comme les identifiants. Chaque fichier commence par un commentaire `//!` qui dit son rôle : c'est ce que la recherche retrouve.
+- Limites : le graphe s'arrête au dépôt. Une méthode que Smithay appelle (les gestionnaires de `handlers/`, comme `new_toplevel`) y figure sans appelant, et le code de `vendor/` n'y est pas. Pour ce qui vient de Smithay, `cargo doc` et ses exemples.
+
 ### Décisions techniques
 
 - **Smithay est épinglé sur un commit git** (le même que niri, voir `Cargo.toml`), pas sur crates.io. Sa documentation se lit avec `cargo doc -p smithay --open` ; les exemples `anvil` et `smallvil` sont dans `~/.cargo/git/checkouts/smithay-*/`.
