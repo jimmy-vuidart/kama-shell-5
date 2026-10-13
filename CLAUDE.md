@@ -9,6 +9,7 @@ Ce fichier donne le contexte du projet à Claude Code. Le garder à la racine du
 - Textes visibles par l'utilisateur (barre, lanceur, notifications, menus) en **français**.
 - Rust stable, `cargo fmt` et `cargo clippy -- -D warnings` propres, logs avec `tracing`.
 - Pas de `unsafe` sauf nécessité documentée par un commentaire.
+- **Sauf contre-indication, commiter sur `main` dès qu'une tâche est finalisée** (CI locale verte), sans attendre qu'on le demande. Ne pas pousser sans demande.
 - Les API de Smithay et des crates Wayland évoluent vite : **toujours vérifier la documentation de la version réellement utilisée** avant d'écrire du code, et ne pas se fier à la mémoire.
 
 ## Le projet en une phrase
