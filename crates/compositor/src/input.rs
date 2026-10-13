@@ -825,6 +825,8 @@ impl State {
                 outline,
                 area: outline,
                 color: tint(if aimed { 0xff } else { 0x8c }),
+                // Not in the mockups: the gold stays flat here.
+                ramp: None,
                 radii: [radius; 4],
                 border: 2,
             };

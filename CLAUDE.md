@@ -272,7 +272,7 @@ Limites connues :
 Trois étapes, d'après `docs/gold/PROMPT.md` :
 
 1. **Fait**, vérifié en imbriqué (captures relues en clair et en sombre) et par tests unitaires : la couleur d'accent réglable a disparu (configuration, écran « Paramètres », canal du shell), la palette de l'or et les gris réchauffés sont posés. **L'or est encore à plat** (ton « or ») partout.
-2. À faire : le métal dans le compositeur (dégradé de l'anneau, tour de la capsule active).
+2. **Fait**, vérifié en imbriqué (captures agrandies, relues à côté des gros plans du brief) et par tests unitaires : le métal dans le compositeur. L'anneau de la fenêtre active est un dégradé à huit arrêts sur la hauteur de la fenêtre, avec sa coupure nette à 45 % (`rounded.frag` sait peindre une rampe verticale en plus d'une couleur unie ; les recettes sont dans `Accent::ring`, `thin_piece` et `ingot`). Le tour de la capsule active est une « pièce fine », le premier choix de la barre de rangement un « lingot » à biseau, texte en encre. Le groupe de capsules a son filet d'or (contour, arête haute), la barre de titre de la fenêtre active son filet d'or en bas. Les emplacements de dépôt gardent l'or à plat. Jamais vu sur les vrais écrans.
 3. À faire : le métal dans le dock et l'écran « Paramètres » (lingots, pièces fines, barres, filets à arête haute).
 
 ### État des capsules

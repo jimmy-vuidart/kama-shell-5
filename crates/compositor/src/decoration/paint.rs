@@ -7,14 +7,16 @@ use cosmic_text::{
     SwashCache, Weight, Wrap,
 };
 use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
-    PremultipliedColorU8, Stroke, Transform,
+    Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Mask, Paint, Path,
+    PathBuilder, Pixmap, PixmapPaint, Point, PremultipliedColorU8, SpreadMode, Stroke, Transform,
 };
 
 use super::capsules::{CapsuleButton, CapsuleCell, GroupLayout};
 use super::icons::IconCache;
 use super::layout::{TitlebarButton, TitlebarLayout};
-use crate::theme::{Rgba, Theme, ThemeKind};
+use crate::theme::{
+    Accent, INGOT_DARK_FLANK, INGOT_EDGE, INGOT_FOOT, INGOT_LIT_FLANK, Rgba, Stop, Theme, ThemeKind,
+};
 
 const UI_FONT: &str = "Figtree";
 const FONT_SIZE: f32 = 13.0;
@@ -143,8 +145,14 @@ impl Painter {
         let radius = spec.corner_radius as f32;
         let background = rounded_rect(0.0, 0.0, width, height, [radius, radius, 0.0, 0.0])?;
         fill(&mut pixmap, &background, theme.titlebar);
+        // The bar of the active window stands on a line of gold.
+        let rule = if spec.focused {
+            theme.accent.hairline.opacity(45)
+        } else {
+            theme.separator
+        };
         if let Some(line) = rounded_rect(0.0, height - 1.0, width, 1.0, [0.0; 4]) {
-            fill(&mut pixmap, &line, theme.separator);
+            fill(&mut pixmap, &line, rule);
         }
 
         let place = layout.icon;
@@ -226,8 +234,6 @@ impl Painter {
     /// Paints the capsules of a slot: a rounded box, and in it one capsule
     /// per window. Returns `None` when there is nothing to show.
     pub fn capsule_group(&mut self, spec: &GroupSpec) -> Option<PaintedGroup> {
-        /// How much of the backdrop shows through the box.
-        const BOX_OPACITY: u8 = 217;
         let theme = Theme::new(spec.theme);
         let label_widths: Vec<i32> = spec
             .capsules
@@ -240,12 +246,21 @@ impl Painter {
         }
         let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
 
-        let frame = Rgba {
-            a: BOX_OPACITY,
-            ..theme.titlebar
-        };
-        if let Some(frame_path) = pill(layout.rect, 0.0) {
-            fill(&mut pixmap, &frame_path, frame);
+        if let Some(frame) = pill(layout.rect, 0.0) {
+            fill(&mut pixmap, &frame, theme.capsule_box);
+            // A hairline of gold around the box, brighter along its top.
+            let gold = &theme.accent;
+            if let Some(inside) = pill(layout.rect, 1.0) {
+                rim(
+                    &mut pixmap,
+                    &frame,
+                    &inside,
+                    &paint(gold.contour.opacity(42)),
+                );
+            }
+            if let Some(lower) = moved(&frame, 0.0, 1.0) {
+                rim(&mut pixmap, &frame, &lower, &paint(gold.ridge.opacity(55)));
+            }
         }
         for (index, (capsule, cell)) in spec.capsules.iter().zip(&layout.capsules).enumerate() {
             let hovered = spec.hovered.filter(|(under, _)| *under == index);
@@ -282,9 +297,13 @@ impl Painter {
             fill(pixmap, &path, background);
         }
         if capsule.shown && capsule.focused {
-            // Inside the capsule, so that the box keeps its margin.
-            if let Some(path) = pill(cell.rect, RING_WIDTH / 2.0) {
-                outline(pixmap, &path, theme.accent.gold, RING_WIDTH);
+            // Inside the capsule, so that the box keeps its margin: a thin
+            // piece of gold, lit from above.
+            let (top, bottom) = (cell.rect.y as f32, cell.rect.bottom() as f32);
+            let gold = ramp(&theme.accent.thin_piece(), top, bottom);
+            let (outer, inner) = (pill(cell.rect, 0.0), pill(cell.rect, RING_WIDTH));
+            if let (Some(outer), Some(inner), Some(gold)) = (outer, inner, gold) {
+                rim(pixmap, &outer, &inner, &gold);
             }
         }
 
@@ -376,11 +395,13 @@ impl Painter {
         let mut x = PADDING;
         for (index, (label, width)) in spec.labels.iter().zip(widths).enumerate() {
             let cell = Rect::new(x, PADDING, width, HEIGHT - 2 * PADDING);
-            // The first choice is the default one: it stands out.
-            let (background, ink) = match (index, spec.hovered == Some(index)) {
-                (0, _) => (Some(theme.accent.gold), theme.accent.ink),
-                (_, true) => (Some(theme.button_hover), theme.text),
-                (_, false) => (None, theme.text),
+            // The first choice is the default one: it stands out, as an
+            // ingot.
+            let hovered = spec.hovered == Some(index);
+            let ink = if index == 0 {
+                theme.accent.ink
+            } else {
+                theme.text
             };
             let pill = rounded_rect(
                 x as f32,
@@ -389,8 +410,10 @@ impl Painter {
                 cell.h as f32,
                 [8.0; 4],
             );
-            if let (Some(background), Some(pill)) = (background, pill) {
-                fill(&mut pixmap, &pill, background);
+            match pill {
+                Some(pill) if index == 0 => ingot(&mut pixmap, &pill, &theme.accent),
+                Some(pill) if hovered => fill(&mut pixmap, &pill, theme.button_hover),
+                _ => {}
             }
             let left = (x + BUTTON_PADDING) as f32;
             let room = (width - BUTTON_PADDING) as f32;
@@ -526,6 +549,83 @@ fn paint(color: Rgba) -> Paint<'static> {
     paint.set_color(Color::from_rgba8(color.r, color.g, color.b, color.a));
     paint.anti_alias = true;
     paint
+}
+
+/// A paint that goes down a ramp, from `top` to `bottom` of the pixmap.
+fn ramp(stops: &[Stop], top: f32, bottom: f32) -> Option<Paint<'static>> {
+    let stops = stops
+        .iter()
+        .map(|stop| {
+            let Rgba { r, g, b, a } = stop.color;
+            GradientStop::new(stop.fraction(), Color::from_rgba8(r, g, b, a))
+        })
+        .collect();
+    let shader = LinearGradient::new(
+        Point::from_xy(0.0, top),
+        Point::from_xy(0.0, bottom),
+        stops,
+        SpreadMode::Pad,
+        Transform::identity(),
+    )?;
+    Some(Paint {
+        shader,
+        anti_alias: true,
+        ..Paint::default()
+    })
+}
+
+/// The same path, somewhere else.
+fn moved(path: &Path, dx: f32, dy: f32) -> Option<Path> {
+    path.clone().transform(Transform::from_translate(dx, dy))
+}
+
+/// Fills what of `outer` lies outside `inner`: a ring when `inner` is a
+/// smaller shape, the edge of a bevel when it is `outer` moved a little.
+fn rim(pixmap: &mut Pixmap, outer: &Path, inner: &Path, paint: &Paint) {
+    let Some(mut within) = Mask::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    within.fill_path(outer, FillRule::Winding, true, Transform::identity());
+    let mut both = PathBuilder::new();
+    both.push_path(outer);
+    both.push_path(inner);
+    if let Some(both) = both.finish() {
+        // Where exactly one of the two is: `within` keeps what is in `outer`.
+        pixmap.fill_path(
+            &both,
+            paint,
+            FillRule::EvenOdd,
+            Transform::identity(),
+            Some(&within),
+        );
+    }
+}
+
+/// Paints a shape as an ingot: gold from light to bronze, then its bevel.
+fn ingot(pixmap: &mut Pixmap, shape: &Path, gold: &Accent) {
+    let bounds = shape.bounds();
+    if let Some(metal) = ramp(&gold.ingot(), bounds.top(), bounds.bottom()) {
+        pixmap.fill_path(
+            shape,
+            &metal,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+    // Each edge is what the shape, pushed away from it, leaves bare. The
+    // bright edge of the top comes last, over the flanks.
+    let bevel = [
+        ((-1.0, 0.0), INGOT_DARK_FLANK),
+        ((1.0, 0.0), INGOT_LIT_FLANK),
+        ((0.0, -2.0), INGOT_FOOT),
+        ((0.0, 1.0), INGOT_EDGE),
+    ];
+    for ((dx, dy), color) in bevel {
+        if let Some(pushed) = moved(shape, dx, dy) {
+            rim(pixmap, shape, &pushed, &paint(color));
+        }
+    }
 }
 
 fn fill(pixmap: &mut Pixmap, path: &Path, color: Rgba) {
@@ -789,9 +889,98 @@ mod tests {
 
         let painted = Painter::new().capsule_group(&spec).unwrap();
 
+        // A thin piece of gold: light at the top, brown at the foot.
+        let gold = Theme::new(ThemeKind::Light).accent;
+        let cell = painted.layout.capsules[0].rect;
+        let middle = (cell.x + cell.w / 2) as u32;
+        let top = pixel(&painted.pixmap, middle, cell.y as u32);
+        let foot = pixel(&painted.pixmap, middle, (cell.bottom() - 1) as u32);
+        assert!(close(top, gold.light), "{top:?}");
+        assert!(close(foot, gold.brown), "{foot:?}");
+        // Inside the ring, the capsule itself.
+        let inside = pixel(&painted.pixmap, middle, (cell.y + 4) as u32);
+        assert!(close(inside, Theme::new(ThemeKind::Light).button_hover));
+    }
+
+    /// Whether a pixel is nearly a color: a ramp is never exactly its ends.
+    fn close(pixel: [u8; 4], color: Rgba) -> bool {
+        let near = |a: u8, b: u8| a.abs_diff(b) <= 12;
+        near(pixel[0], color.r) && near(pixel[1], color.g) && near(pixel[2], color.b)
+    }
+
+    #[test]
+    fn the_capsule_of_a_window_that_is_not_active_has_no_ring() {
+        let spec = group(vec![capsule("kitty", true)]);
+
+        let painted = Painter::new().capsule_group(&spec).unwrap();
+
+        let theme = Theme::new(ThemeKind::Light);
         let cell = painted.layout.capsules[0].rect;
         let top = pixel(&painted.pixmap, (cell.x + cell.w / 2) as u32, cell.y as u32);
-        assert_eq!(&top[..3], &[0xc2, 0x9a, 0x38]);
+        assert!(close(top, theme.button_hover), "{top:?}");
+    }
+
+    #[test]
+    fn the_first_choice_of_the_bar_is_an_ingot_darker_at_its_foot() {
+        let spec = BarSpec {
+            labels: vec!["Laisser flottante".into(), "Ranger ici".into()],
+            hovered: None,
+            theme: ThemeKind::Dark,
+        };
+
+        let bar = Painter::new().placement_bar(&spec).unwrap();
+
+        let gold = Theme::new(ThemeKind::Dark).accent;
+        let button = bar.buttons[0];
+        // Away from the text, which sits in the middle of the button.
+        let x = (button.x + 3) as u32;
+        let top = pixel(&bar.pixmap, x, (button.y + 3) as u32);
+        let foot = pixel(&bar.pixmap, x, (button.bottom() - 4) as u32);
+        let brightness = |pixel: [u8; 4]| u32::from(pixel[0]) + u32::from(pixel[1]);
+        assert!(brightness(top) > brightness(foot) + 100, "{top:?} {foot:?}");
+        // Near the top: somewhere from the light tone to the gold one.
+        let between = |value: u8, dark: u8, light: u8| (dark..=light).contains(&value);
+        assert!(
+            between(top[0], gold.gold.r, gold.light.r)
+                && between(top[2], gold.gold.b, gold.light.b),
+            "{top:?}"
+        );
+        // The other choice is not gold.
+        let other = bar.buttons[1];
+        let plain = pixel(&bar.pixmap, (other.x + 3) as u32, (other.y + 3) as u32);
+        assert!(
+            close(plain, Theme::new(ThemeKind::Dark).titlebar),
+            "{plain:?}"
+        );
+    }
+
+    #[test]
+    fn the_bar_of_the_active_window_stands_on_a_line_of_gold() {
+        let spec = |focused| TitlebarSpec {
+            size: Size::new(300, 38),
+            title: "kitty".into(),
+            subtitle: String::new(),
+            icon: None,
+            badge: [0x2f, 0x6f, 0xed],
+            focused,
+            hovered: None,
+            buttons: true,
+            theme: ThemeKind::Dark,
+            corner_radius: 12,
+        };
+        let mut painter = Painter::new();
+
+        let active = painter.titlebar(&spec(true)).unwrap();
+        let other = painter.titlebar(&spec(false)).unwrap();
+
+        let theme = Theme::new(ThemeKind::Dark);
+        assert!(close(pixel(&other, 150, 37), theme.separator));
+        // Gold seen through, over the bar: warmer and brighter than the gray.
+        let line = pixel(&active, 150, 37);
+        assert!(
+            line[0] > theme.separator.r + 40 && line[0] > line[2] + 40,
+            "{line:?}"
+        );
     }
 
     #[test]

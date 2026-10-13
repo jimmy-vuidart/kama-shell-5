@@ -22,7 +22,7 @@ use super::shaders::Shaders;
 use crate::decoration::paint::TitlebarSpec;
 use crate::panels::Panel;
 use crate::shell::Shell;
-use crate::theme::{Rgba, Theme};
+use crate::theme::{Rgba, Stop, Theme};
 
 /// The compositor draws at scale 1 for now.
 const SCALE: f64 = 1.0;
@@ -46,6 +46,9 @@ pub struct Shape {
     /// The part of it that is drawn.
     pub area: Rect,
     pub color: Rgba,
+    /// Painted instead of `color` when there is one: a ramp from the top of
+    /// the outline to its bottom.
+    pub ramp: Option<[Stop; 8]>,
     /// Top-left, top-right, bottom-right, bottom-left.
     pub radii: [i32; 4],
     /// 0 fills the shape; otherwise the thickness of the ring.
@@ -71,22 +74,41 @@ impl ShapeCache {
 }
 
 fn shape_element(program: &GlesPixelProgram, shape: Shape) -> PixelShaderElement {
+    /// The colors of a ramp, as the shader names them.
+    const STOPS: [&str; 8] = [
+        "stop_0", "stop_1", "stop_2", "stop_3", "stop_4", "stop_5", "stop_6", "stop_7",
+    ];
     let (outline, area) = (shape.outline, shape.area);
+    let mut uniforms = vec![
+        Uniform::new("shape_size", [outline.w as f32, outline.h as f32]),
+        Uniform::new(
+            "shape_offset",
+            [(area.x - outline.x) as f32, (area.y - outline.y) as f32],
+        ),
+        Uniform::new("color", shape.color.premultiplied()),
+        Uniform::new("ramp", if shape.ramp.is_some() { 1.0 } else { 0.0 }),
+        Uniform::new("radius", shape.radii.map(|radius| radius as f32)),
+        Uniform::new("border", shape.border as f32),
+    ];
+    // A shape in one color leaves the ramp as it was: the shader does not
+    // read it then.
+    if let Some(ramp) = shape.ramp {
+        let at = |index: usize| ramp[index].fraction();
+        uniforms.extend(
+            STOPS
+                .iter()
+                .zip(ramp)
+                .map(|(name, stop)| Uniform::new(*name, stop.color.premultiplied())),
+        );
+        uniforms.push(Uniform::new("stops_upper", [at(0), at(1), at(2), at(3)]));
+        uniforms.push(Uniform::new("stops_lower", [at(4), at(5), at(6), at(7)]));
+    }
     PixelShaderElement::new(
         program.clone(),
         rectangle(area),
         None,
         1.0,
-        vec![
-            Uniform::new("shape_size", [outline.w as f32, outline.h as f32]),
-            Uniform::new(
-                "shape_offset",
-                [(area.x - outline.x) as f32, (area.y - outline.y) as f32],
-            ),
-            Uniform::new("color", shape.color.premultiplied()),
-            Uniform::new("radius", shape.radii.map(|radius| radius as f32)),
-            Uniform::new("border", shape.border as f32),
-        ],
+        uniforms,
         Kind::Unspecified,
     )
 }
@@ -260,6 +282,7 @@ pub fn build(
                 outline,
                 area: outline,
                 color: theme.accent.gold,
+                ramp: Some(theme.accent.ring()),
                 radii: [radius + ring; 4],
                 border: ring,
             };
@@ -322,6 +345,7 @@ pub fn build(
             } else {
                 Rgba::rgb(0)
             },
+            ramp: None,
             radii: [top, top, radius, radius],
             border: 0,
         };
