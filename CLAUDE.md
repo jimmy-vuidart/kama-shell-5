@@ -118,7 +118,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (emplacements affichés, relâcher range).
 - **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine et montre réduire et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Ni capsule pour une fenêtre flottante, ni sur un écran libre ou ancré. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
 - Fenêtre active : **anneau d'accent de 2 px**.
-- **L'accent est un or métallique, le même partout, et il ne se règle pas** : onze tons du crème au brun, un cran plus sombres en thème clair (`Accent` dans `crates/ui/src/style.rs` et `crates/compositor/src/theme.rs`). Brief, maquettes et recettes des dégradés : `docs/gold/` (les valeurs CSS des maquettes font foi). Ce qui est écrit ou dessiné sur l'or est en « encre » (`#2a1e04`) ; le texte en couleur d'accent est en « texte or ».
+- **L'accent est un or métallique, le même partout, et il ne se règle pas** : onze tons du crème au brun, un cran plus sombres en thème clair (`Accent` dans `crates/ui/src/style.rs` et `crates/compositor/src/theme.rs`), et quatre recettes de dégradés verticaux, éclairés d'en haut : anneau, pièce fine, barre, lingot. Brief, maquettes et recettes des dégradés : `docs/gold/` (les valeurs CSS des maquettes font foi). Ce qui est écrit ou dessiné sur l'or est en « encre » (`#2a1e04`) ; le texte en couleur d'accent est en « texte or ».
 - Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, cahier des charges `docs/maquettes/dock.md`) est une barre de 44 px à 8 px du bord, avec une zone réservée de 60 px. Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche.
 - Police d'interface : Figtree (repli : police système sans-serif).
 
@@ -135,7 +135,7 @@ coquille/
 │  ├─ apps/         # les applis installées (fichiers .desktop, icônes du thème).
 │  ├─ config/       # le fichier de configuration : le lire, en réécrire un réglage à la fois.
 │  ├─ ui/           # ce que partagent les programmes du shell dessinés avec iced :
-│  │                # couleurs, police Figtree, symboles, lien au compositeur.
+│  │                # couleurs, recettes de l'or, police Figtree, symboles, lien au compositeur.
 │  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.
 │  ├─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
 │  └─ settings/     # binaire `coquille-settings` : l'écran « Paramètres ».
@@ -273,7 +273,15 @@ Trois étapes, d'après `docs/gold/PROMPT.md` :
 
 1. **Fait**, vérifié en imbriqué (captures relues en clair et en sombre) et par tests unitaires : la couleur d'accent réglable a disparu (configuration, écran « Paramètres », canal du shell), la palette de l'or et les gris réchauffés sont posés. **L'or est encore à plat** (ton « or ») partout.
 2. **Fait**, vérifié en imbriqué (captures agrandies, relues à côté des gros plans du brief) et par tests unitaires : le métal dans le compositeur. L'anneau de la fenêtre active est un dégradé à huit arrêts sur la hauteur de la fenêtre, avec sa coupure nette à 45 % (`rounded.frag` sait peindre une rampe verticale en plus d'une couleur unie ; les recettes sont dans `Accent::ring`, `thin_piece` et `ingot`). Le tour de la capsule active est une « pièce fine », le premier choix de la barre de rangement un « lingot » à biseau, texte en encre. Le groupe de capsules a son filet d'or (contour, arête haute), la barre de titre de la fenêtre active son filet d'or en bas. Les emplacements de dépôt gardent l'or à plat. Jamais vu sur les vrais écrans.
-3. À faire : le métal dans le dock et l'écran « Paramètres » (lingots, pièces fines, barres, filets à arête haute).
+3. **Fait**, vérifié en imbriqué (captures agrandies, en clair et en sombre, relues à côté des gros plans du brief) et par tests unitaires : le métal dans le dock et l'écran « Paramètres ». Les recettes pour iced sont dans `crates/ui/src/metal.rs`. Lingots : bascules allumées, « Par appli », page affichée, avatar, lanceur ouvert, choix pris et bascules de « Paramètres ». Pièces fines : carrés du lanceur, repères des applis ouvertes, tour du thème en cours. Barres : partie remplie des curseurs, trait sous la recherche. Le dock et le lanceur ont leur filet d'or à arête haute.
+
+Ce que iced impose (il remplit un fond d'un dégradé, pas une bordure ni une ombre intérieure) :
+
+- le biseau d'un lingot est cuit dans son dégradé (arête haute, pied), d'où une hauteur à connaître ; ses deux flancs sont des lignes de 1 px posées à côté de ce qu'il porte ;
+- un filet est une boîte remplie du dégradé du filet, autour d'une boîte plus petite de 1 px ; il lui faut aussi sa hauteur. Le mixeur, haut comme ce qu'il liste, n'a donc que le contour, sans l'arête haute ; la ligne choisie d'une liste déroulante est un lingot sans biseau ;
+- les bordures restent en or à plat : champ ou liste survolés, choix d'écran en cours dans le menu du dock. Les aplats d'or en transparence (sélection de texte, survol dans le menu) aussi, comme le veut le brief.
+
+**Jamais vu sur les vrais écrans**, ni l'un ni l'autre des trois moteurs de rendu.
 
 ### État des capsules
 

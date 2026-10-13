@@ -5,13 +5,14 @@ use coquille_config::{Change, DockPlace, PerScreen};
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
 use coquille_ui::glyph::{Glyph, glyph};
+use coquille_ui::metal;
 use coquille_ui::style::{self, Palette};
 use iced::overlay::menu;
 use iced::widget::{
     Column, Row, button, column, container, pick_list, row, scrollable, slider, space, text,
     toggler,
 };
-use iced::{Alignment, Border, Color, Element, Length, Padding};
+use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
 
 use crate::app::{App, Message};
 use crate::model::{self, Choice, Page, ScreenCard};
@@ -76,10 +77,11 @@ fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, M
     } else {
         (palette.muted, style::MEDIUM)
     };
-    let mark_color = if current {
-        palette.accent.gold
+    // The page shown is marked with a thin piece of gold.
+    let mark_color: Background = if current {
+        metal::ramp(&palette.accent.thin_piece())
     } else {
-        Color::TRANSPARENT
+        Color::TRANSPARENT.into()
     };
     let mark = container(space().width(3).height(16)).style(move |_| style::fill(mark_color, 2.0));
     let line = row![
@@ -187,18 +189,17 @@ fn theme_tile<'a>(
         bar(56.0, style::alpha(look.muted, 0.6))
     ]
     .spacing(6);
+    // The active window of the theme, in its ring of gold.
     let pane = container(lines)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(10)
-        .style(move |_| container::Style {
-            border: Border {
-                color: look.accent.gold,
-                width: 2.0,
-                radius: 6.0.into(),
-            },
-            ..style::fill(look.card, 6.0)
-        });
+        .padding(8)
+        .style(move |_| style::fill(look.card, 4.0));
+    let pane = container(pane)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(2)
+        .style(move |_| style::fill(metal::ramp(&look.accent.ring()), 6.0));
     let dock = container(space().width(6).height(Length::Fill))
         .style(move |_| style::fill(style::alpha(look.muted, 0.45), 3.0));
     let scene = container(row![dock, pane].spacing(6))
@@ -213,20 +214,30 @@ fn theme_tile<'a>(
     };
     let label = text(name).size(13).font(font).color(palette.text);
     let tile = column![scene, label].spacing(8).align_x(Alignment::Center);
-    button(tile)
-        .padding(8)
-        .on_press(Message::Change(Change::Theme(theme)))
+    let tile = button(tile).on_press(Message::Change(Change::Theme(theme)));
+    if chosen {
+        // The theme in use is ringed with a thin piece of gold: the tile
+        // sits 2 px inside it, on the color of its card.
+        let tile = tile
+            .padding(6)
+            .style(style::tinted(palette.card, palette.card, 10.0));
+        return container(tile)
+            .padding(2)
+            .style(move |_| style::fill(metal::ramp(&palette.accent.thin_piece()), 12.0))
+            .into();
+    }
+    tile.padding(8)
         .style(move |_, status| {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let (line, width) = match (chosen, hovered) {
-                (true, _) => (palette.accent.gold, 2.0),
-                (false, true) => (palette.muted, 1.0),
-                (false, false) => (palette.separator, 1.0),
+            let line = if hovered {
+                palette.muted
+            } else {
+                palette.separator
             };
             button::Style {
                 border: Border {
                     color: line,
-                    width,
+                    width: 1.0,
                     radius: 12.0.into(),
                 },
                 ..button::Style::default()
@@ -315,16 +326,21 @@ fn drawing<'a>(
         };
         let label = container(text(name).size(12).font(style::MEDIUM).color(palette.muted))
             .center(Length::Fill);
-        let dock = |width: Length, height: Length| {
-            container(space().width(width).height(height))
-                .style(move |_| style::fill(palette.accent.gold, 2.0))
+        // Upright, a dock is a thin piece of gold; lying down, a bar.
+        let dock = |width: Length, height: Length, gold: Background| {
+            container(space().width(width).height(height)).style(move |_| style::fill(gold, 2.0))
+        };
+        let upright = || {
+            let gold = metal::ramp(&palette.accent.thin_piece());
+            dock(4.0.into(), Length::Fill, gold)
         };
         let inside: Element<'a, Message> = match app.file.dock(role) {
-            DockPlace::Vertical => row![dock(4.0.into(), Length::Fill), label].into(),
-            DockPlace::VerticalRight => row![label, dock(4.0.into(), Length::Fill)].into(),
+            DockPlace::Vertical => row![upright(), label].into(),
+            DockPlace::VerticalRight => row![label, upright()].into(),
             DockPlace::Horizontal => {
+                let gold = metal::ramp(&palette.accent.bar());
                 let lying =
-                    container(dock((width * 0.45).into(), 4.0.into())).center_x(Length::Fill);
+                    container(dock((width * 0.45).into(), 4.0.into(), gold)).center_x(Length::Fill);
                 column![label, lying].into()
             }
             DockPlace::Off => label.into(),
@@ -549,24 +565,23 @@ fn switch<'a>(
     on_toggle: impl Fn(bool) -> Message + 'a,
     palette: Palette,
 ) -> Element<'a, Message> {
+    /// How high the switch is.
+    const SWITCH: f32 = 22.0;
     toggler(on)
         .on_toggle(on_toggle)
-        .size(22)
+        .size(SWITCH)
         .style(move |_, status| {
             let (toggled, hovered) = match status {
                 toggler::Status::Hovered { is_toggled } => (is_toggled, true),
                 toggler::Status::Active { is_toggled }
                 | toggler::Status::Disabled { is_toggled } => (is_toggled, false),
             };
-            let track = if toggled {
-                palette.accent.gold
-            } else {
-                style::alpha(palette.muted, 0.45)
-            };
-            let track = if hovered {
-                style::mix(track, palette.text, 0.14)
-            } else {
-                track
+            // Switched on, it is an ingot, and its knob is in ink.
+            let off = style::alpha(palette.muted, 0.45);
+            let track: Background = match (toggled, hovered) {
+                (true, _) => metal::ingot(&palette.accent, SWITCH, hovered),
+                (false, true) => style::mix(off, palette.text, 0.14).into(),
+                (false, false) => off.into(),
             };
             let knob = if toggled {
                 palette.on_accent()
@@ -574,7 +589,7 @@ fn switch<'a>(
                 Color::WHITE
             };
             toggler::Style {
-                background: track.into(),
+                background: track,
                 background_border_width: 0.0,
                 background_border_color: Color::TRANSPARENT,
                 foreground: knob.into(),
@@ -595,20 +610,29 @@ fn segmented<'a, T: Copy + PartialEq>(
     on_pick: impl Fn(T) -> Message,
     palette: Palette,
 ) -> Element<'a, Message> {
+    /// How high a choice is.
+    const CHOICE: f32 = 29.0;
     let mut line: Row<'_, Message> = row![].spacing(2);
     for (value, name) in options {
         let taken = *value == chosen;
-        let (idle, hover, color) = if taken {
-            (
-                palette.accent.gold,
-                palette.accent.gold,
-                palette.on_accent(),
-            )
+        let color = if taken {
+            palette.on_accent()
         } else {
-            (Color::TRANSPARENT, palette.hover, palette.text)
+            palette.text
         };
-        let choice = button(text(*name).size(13).font(style::MEDIUM).color(color))
-            .padding(Padding::from([6.0, 12.0]))
+        let name = container(text(*name).size(13).font(style::MEDIUM).color(color))
+            .center_y(Length::Fill)
+            .padding(Padding::from([0.0, if taken { 11.0 } else { 12.0 }]));
+        // The choice taken is an ingot.
+        let (name, idle, hover): (Element<'a, Message>, Background, Background) = if taken {
+            let ingot = metal::ingot(&palette.accent, CHOICE, false);
+            (metal::flanked(name, 6.0).into(), ingot, ingot)
+        } else {
+            (name.into(), Color::TRANSPARENT.into(), palette.hover.into())
+        };
+        let choice = button(name)
+            .height(CHOICE)
+            .padding(0)
             .on_press(on_pick(*value))
             .style(style::tinted(idle, hover, 6.0));
         line = line.push(choice);
@@ -661,7 +685,9 @@ fn picker<'a>(
             },
             text_color: palette.text,
             selected_text_color: palette.on_accent(),
-            selected_background: palette.accent.gold.into(),
+            // A line of the list is as high as its text makes it: an ingot
+            // without the bevel, which needs a height.
+            selected_background: metal::ramp(&palette.accent.ingot()),
             shadow: palette.shadow(),
         })
         .into()
@@ -673,21 +699,6 @@ fn level<'a>(delay: u32, palette: Palette) -> Element<'a, Message> {
         .step(model::STICKY_STEP)
         .on_release(Message::StickyReleased)
         .width(200)
-        .style(move |_, _| slider::Style {
-            rail: slider::Rail {
-                backgrounds: (palette.accent.gold.into(), palette.track.into()),
-                width: 4.0,
-                border: Border {
-                    radius: 2.0.into(),
-                    ..Border::default()
-                },
-            },
-            handle: slider::Handle {
-                shape: slider::HandleShape::Circle { radius: 7.0 },
-                background: Color::WHITE.into(),
-                border_width: 1.0,
-                border_color: style::alpha(palette.muted, 0.6),
-            },
-        })
+        .style(move |_, _| metal::slider_style(&palette))
         .into()
 }

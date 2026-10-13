@@ -58,6 +58,12 @@ pub struct Accent {
     pub text: Color,
     /// Text laid on gold.
     pub ink: Color,
+    /// The hairline around what floats (dock, drawer), and the brighter
+    /// one along its top edge. Both are seen through.
+    pub contour: Color,
+    pub ridge: Color,
+    /// A line that parts two things, seen through as well.
+    pub hairline: Color,
 }
 
 impl Accent {
@@ -76,6 +82,9 @@ impl Accent {
                 rebound: tone(0xcf_a6_4c),
                 text: tone(0xe6_c6_80),
                 ink: tone(0x2a_1e_04),
+                contour: tone(0x8c_62_1e),
+                ridge: tone(0xf6_e3_a1),
+                hairline: tone(0xe3_c1_5a),
             },
             ThemeName::Light => Self {
                 glint: tone(0xf6_e7_b0),
@@ -90,6 +99,9 @@ impl Accent {
                 rebound: tone(0xb8_90_2f),
                 text: tone(0x77_56_0f),
                 ink: tone(0x2a_1e_04),
+                contour: tone(0xbe_a0_5a),
+                ridge: tone(0x98_72_1f),
+                hairline: tone(0x96_71_0f),
             },
         }
     }
@@ -125,13 +137,14 @@ impl Palette {
     /// The grays are warm, drawn to brown: a black next to the gold in the
     /// dark theme, an ivory in the light one.
     pub fn new(theme: ThemeName) -> Self {
+        let accent = Accent::new(theme);
         match theme {
             ThemeName::Dark => Self {
                 dark: true,
-                accent: Accent::new(theme),
+                accent,
                 bar: Color::from_rgba8(28, 25, 20, 0.96),
-                bar_border: Color::from_rgba8(140, 98, 30, 0.5),
-                bar_separator: Color::from_rgba8(227, 193, 90, 0.3),
+                bar_border: alpha(accent.contour, 0.5),
+                bar_separator: alpha(accent.hairline, 0.3),
                 panel: Color::from_rgba8(28, 25, 20, 0.98),
                 block: Color::from_rgb8(0x25, 0x21, 0x1a),
                 card: Color::from_rgb8(0x2f, 0x2a, 0x21),
@@ -144,10 +157,10 @@ impl Palette {
             },
             ThemeName::Light => Self {
                 dark: false,
-                accent: Accent::new(theme),
+                accent,
                 bar: Color::from_rgba8(255, 253, 247, 0.94),
-                bar_border: Color::from_rgba8(190, 160, 90, 0.5),
-                bar_separator: Color::from_rgba8(150, 113, 15, 0.3),
+                bar_border: alpha(accent.contour, 0.5),
+                bar_separator: alpha(accent.hairline, 0.3),
                 panel: Color::from_rgba8(250, 247, 240, 0.98),
                 block: Color::from_rgb8(0xf1, 0xeb, 0xdc),
                 card: Color::WHITE,
@@ -182,10 +195,10 @@ impl Palette {
     }
 }
 
-/// A filled rounded rectangle.
-pub fn fill(color: Color, radius: f32) -> container::Style {
+/// A filled rounded rectangle; with a color, or with a ramp of gold.
+pub fn fill(background: impl Into<Background>, radius: f32) -> container::Style {
     container::Style {
-        background: Some(Background::Color(color)),
+        background: Some(background.into()),
         border: Border {
             radius: radius.into(),
             ..Border::default()
@@ -214,17 +227,18 @@ pub fn flat(hover: Color, radius: f32) -> impl Fn(&iced::Theme, button::Status) 
 
 /// A button filled with `idle`, and with `hover` under the pointer.
 pub fn tinted(
-    idle: Color,
-    hover: Color,
+    idle: impl Into<Background>,
+    hover: impl Into<Background>,
     radius: f32,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+    let (idle, hover) = (idle.into(), hover.into());
     move |_, status| {
-        let color = match status {
+        let background = match status {
             button::Status::Hovered | button::Status::Pressed => hover,
             button::Status::Active | button::Status::Disabled => idle,
         };
         button::Style {
-            background: Some(Background::Color(color)),
+            background: Some(background),
             border: Border {
                 radius: radius.into(),
                 ..Border::default()

@@ -2,9 +2,10 @@
 
 use coquille_model::OutputRole;
 use iced::widget::{Column, button, column, container, row, space, text};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Background, Color, Element, Length, Padding};
 
 use super::icons::{self, Glyph};
+use super::metal;
 use super::style::{self, Palette};
 use crate::app::{Dock, Message};
 use crate::model::bar::{self, Entry, Menu, MenuAction};
@@ -119,10 +120,11 @@ fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Eleme
     };
     let mini = |role: OutputRole| {
         let lit = role == screen;
-        let color = if lit {
-            palette.accent.gold
+        // The screen the menu speaks of is a thin piece of gold.
+        let color: Background = if lit {
+            metal::ramp(&palette.accent.thin_piece())
         } else {
-            style::alpha(palette.muted, 0.45)
+            style::alpha(palette.muted, 0.45).into()
         };
         let (width, height) = if role == OutputRole::Center {
             (13, 12)

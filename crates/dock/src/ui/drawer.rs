@@ -7,9 +7,12 @@ use iced::widget::{
     Column, Row, button, column, container, image, mouse_area, opaque, progress_bar, row, slider,
     space, stack, text, text_input,
 };
-use iced::{Alignment, Border, Color, ContentFit, Element, Length, Padding, border, mouse};
+use iced::{
+    Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, border, mouse,
+};
 
 use super::icons::{self, Glyph};
+use super::metal;
 use super::style::{self, Palette};
 use crate::app::{Dock, Drawer, Message, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
@@ -22,6 +25,8 @@ const BAR: f32 = 60.0;
 const MIXER: f32 = 292.0;
 /// The strip beside the drawer that is dragged to resize it.
 const EDGE: f32 = 14.0;
+/// How high the search field is.
+const SEARCH_HEIGHT: f32 = 44.0;
 /// How many games fit in the row.
 const GAMES: usize = 5;
 /// How many pinned applications fit in the row.
@@ -70,10 +75,10 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
 /// The edge of the drawer away from its bar, which is dragged to make it
 /// wider or narrower. It shows as a small grip, brighter while it is held.
 fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
-    let color = if drawer.resizing {
-        palette.accent.gold
+    let color: Background = if drawer.resizing {
+        metal::ramp(&palette.accent.thin_piece())
     } else {
-        style::alpha(Color::WHITE, 0.55)
+        style::alpha(Color::WHITE, 0.55).into()
     };
     let grip = container(space().width(4).height(44)).style(move |_| style::fill(color, 2.0));
     let strip = container(grip)
@@ -139,18 +144,31 @@ fn panel<'a>(
         ),
     };
 
-    container(inside)
-        .width(drawer.width)
+    let inside = container(inside)
+        .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| container::Style {
             border: Border {
-                radius,
+                radius: metal::within(radius),
                 ..Border::default()
             },
-            shadow: palette.shadow(),
             ..style::fill(palette.panel, 0.0)
-        })
+        });
+    // As high as its screen.
+    let height = drawer.surface.map_or(1080.0, |surface| surface.height);
+    container(inside)
+        .width(drawer.width)
+        .height(Length::Fill)
+        .padding(1)
+        .style(move |_| frame(height, radius, palette))
         .into()
+}
+
+/// The frame of a panel `height` pixels high: the hairline of gold all
+/// around it, brighter along its top edge.
+fn frame(height: f32, radius: impl Into<border::Radius>, palette: Palette) -> container::Style {
+    let hairline = palette.accent.hairline(0.45, 0.65, height);
+    metal::frame(&hairline, radius, palette.shadow())
 }
 
 fn rule<'a>(palette: Palette) -> Element<'a, Message> {
@@ -189,15 +207,18 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
     let line = row![icons::glyph(Glyph::Search, 18.0, palette.muted), field]
         .spacing(12)
         .align_y(Alignment::Center);
+    // The field stands on a bar of gold, which is part of its background.
     container(line)
-        .padding(Padding::from([12.0, 16.0]))
-        .style(move |_| container::Style {
-            border: Border {
-                color: palette.accent.gold,
-                width: 1.5,
-                radius: 12.0.into(),
-            },
-            ..style::fill(palette.card, 12.0)
+        .center_y(SEARCH_HEIGHT)
+        .padding(Padding {
+            top: 0.0,
+            right: 16.0,
+            bottom: 2.0,
+            left: 16.0,
+        })
+        .style(move |_| {
+            let card = palette.accent.underline(palette.card, SEARCH_HEIGHT);
+            style::fill(metal::ramp(&card), 12.0)
         })
         .into()
 }
@@ -340,22 +361,24 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
         } else {
             palette.text
         };
-        let idle = if current {
-            palette.accent.gold
-        } else {
-            Color::TRANSPARENT
-        };
-        let hover = if current {
-            palette.accent.gold
-        } else {
-            palette.hover
-        };
         let label = text((number + 1).to_string())
             .size(13)
             .font(style::SEMIBOLD)
             .color(color);
+        let label = container(label).center(Length::Fill);
+        // The page shown is an ingot.
+        let (label, idle, hover): (Element<'_, Message>, Background, Background) = if current {
+            let ingot = metal::ingot(&palette.accent, 28.0, false);
+            (metal::flanked(label, 8.0).into(), ingot, ingot)
+        } else {
+            (
+                label.into(),
+                Color::TRANSPARENT.into(),
+                palette.hover.into(),
+            )
+        };
         pager = pager.push(
-            button(container(label).center(Length::Fill))
+            button(label)
                 .width(28)
                 .height(28)
                 .padding(0)
@@ -484,7 +507,7 @@ fn games_column<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     let title = text("Jeux")
         .size(15)
         .font(style::SEMIBOLD)
-        .color(palette.text);
+        .color(palette.accent.text);
     let mut cards: Column<'_, Message> = column![title].spacing(6);
     if count == 0 {
         let nothing = text("Aucun jeu Steam installé.")
@@ -549,22 +572,7 @@ fn level<'a>(
     let scrolled = on_change.clone();
     let slider = slider(0.0..=1.0, value, on_change)
         .step(0.01_f32)
-        .style(move |_, _| slider::Style {
-            rail: slider::Rail {
-                backgrounds: (palette.accent.gold.into(), palette.track.into()),
-                width: 4.0,
-                border: Border {
-                    radius: 2.0.into(),
-                    ..Border::default()
-                },
-            },
-            handle: slider::Handle {
-                shape: slider::HandleShape::Circle { radius: 7.0 },
-                background: Color::WHITE.into(),
-                border_width: 1.0,
-                border_color: style::alpha(palette.muted, 0.6),
-            },
-        });
+        .style(move |_, _| metal::slider_style(&palette));
     // The wheel over a slider moves it.
     mouse_area(slider)
         .on_scroll(move |delta| {
@@ -586,12 +594,26 @@ fn switch<'a>(
     toggle: Toggle,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let (idle, color) = match (on, available) {
-        (true, true) => (palette.accent.gold, palette.on_accent()),
-        (_, false) => (style::alpha(palette.card, 0.5), palette.muted),
-        (false, true) => (palette.card, palette.text),
+    /// How high a tile is.
+    const HEIGHT: f32 = 54.0;
+    // What is on is an ingot, written in ink.
+    let lit = on && available;
+    let (idle, hover, color): (Background, Background, Color) = match (on, available) {
+        (true, true) => (
+            metal::ingot(&palette.accent, HEIGHT, false),
+            metal::ingot(&palette.accent, HEIGHT, true),
+            palette.on_accent(),
+        ),
+        (_, false) => {
+            let dim = style::alpha(palette.card, 0.5);
+            (dim.into(), dim.into(), palette.muted)
+        }
+        (false, true) => (
+            palette.card.into(),
+            style::mix(palette.card, palette.text, 0.08).into(),
+            palette.text,
+        ),
     };
-    let hover = style::mix(idle, palette.text, 0.08);
     // Long names take two lines: at a readable size they do not fit on one.
     let name = text(name)
         .size(11)
@@ -600,7 +622,7 @@ fn switch<'a>(
         .line_height(1.15);
     let detail = text(detail)
         .size(10)
-        .color(style::alpha(color, 0.8))
+        .color(style::alpha(color, if lit { 0.86 } else { 0.8 }))
         .wrapping(Wrapping::None);
     let texts = column![name, container(detail).width(Length::Fill).clip(true)]
         .spacing(1)
@@ -608,10 +630,19 @@ fn switch<'a>(
     let content = row![icons::glyph(glyph, 15.0, color), texts]
         .spacing(7)
         .align_y(Alignment::Center);
-    let tile = button(container(content).center_y(Length::Fill))
+    let content = container(content)
+        .width(Length::Fill)
+        .center_y(Length::Fill)
+        .padding(Padding::from([0.0, if lit { 8.0 } else { 9.0 }]));
+    let content: Element<'_, Message> = if lit {
+        metal::flanked(content, 10.0).into()
+    } else {
+        content.into()
+    };
+    let tile = button(content)
         .width(Length::FillPortion(1))
-        .height(54)
-        .padding(Padding::from([0.0, 9.0]))
+        .height(HEIGHT)
+        .padding(0)
         .style(style::tinted(idle, hover, 10.0));
     if available {
         tile.on_press(Message::Toggle(toggle)).into()
@@ -701,19 +732,22 @@ fn control_center<'a>(
         .on_press(Message::VolumeMute)
         .style(style::flat(palette.hover, 8.0));
     let per_app_color = palette.on_accent();
-    let per_app = button(
-        text("Par appli ›")
-            .size(12)
-            .font(style::SEMIBOLD)
-            .color(per_app_color),
-    )
-    .padding(Padding::from([6.0, 10.0]))
-    .on_press(Message::ToggleMixer)
-    .style(style::tinted(
-        palette.accent.gold,
-        style::mix(palette.accent.gold, palette.text, 0.1),
-        8.0,
-    ));
+    let per_app_label = text("Par appli ›")
+        .size(12)
+        .font(style::SEMIBOLD)
+        .color(per_app_color);
+    let per_app_label = container(per_app_label)
+        .center_y(Length::Fill)
+        .padding(Padding::from([0.0, 9.0]));
+    let per_app = button(metal::flanked(per_app_label, 8.0))
+        .height(28)
+        .padding(0)
+        .on_press(Message::ToggleMixer)
+        .style(style::tinted(
+            metal::ingot(&palette.accent, 28.0, false),
+            metal::ingot(&palette.accent, 28.0, true),
+            8.0,
+        ));
     let screens = dock.snapshot.screens.len();
     let screens_label = match (dock.brightness, screens) {
         (None, _) => "indisponible".to_owned(),
@@ -787,7 +821,7 @@ fn session<'a>(
     let avatar_text = palette.on_accent();
     let avatar = container(text(initials).size(13).font(style::BOLD).color(avatar_text))
         .center(36)
-        .style(move |_| style::fill(palette.accent.gold, 18.0));
+        .style(move |_| style::fill(metal::ingot(&palette.accent, 36.0, false), 18.0));
     let detail = note.unwrap_or("Compte local");
     let who = column![
         text(dock.user.clone())
@@ -912,21 +946,25 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
         .spacing(14)
         .into()
     };
-    let panel = container(column![search(drawer, palette), body].spacing(12))
-        .width(width)
-        .height(drawer.height)
-        .padding(14)
+    let inside = container(column![search(drawer, palette), body].spacing(12))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(13)
         .clip(true)
-        .style(move |_| container::Style {
-            shadow: palette.shadow(),
-            ..style::fill(palette.panel, 16.0)
-        });
+        .style(move |_| style::fill(palette.panel, 15.0));
+    let height = drawer.height;
+    let panel = container(inside)
+        .width(width)
+        .height(height)
+        .padding(1)
+        .style(move |_| frame(height, 16.0, palette));
 
-    // Its top edge is dragged to make it higher or lower.
-    let color = if drawer.resizing {
-        palette.accent.gold
+    // Its top edge is dragged to make it higher or lower: lying down, the
+    // grip is a bar of gold while it is held.
+    let color: Background = if drawer.resizing {
+        metal::ramp(&palette.accent.bar())
     } else {
-        style::alpha(Color::WHITE, 0.55)
+        style::alpha(Color::WHITE, 0.55).into()
     };
     let grip = container(space().width(44).height(4)).style(move |_| style::fill(color, 2.0));
     let edge = mouse_area(container(grip).width(width).center_x(width).center_y(EDGE))
@@ -1088,11 +1126,14 @@ fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
         .padding(16)
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::fill(
+            // As high as what it lists: the hairline of gold without its
+            // brighter top edge, which needs a height.
+            ..style::outlined(
                 Color {
                     a: 1.0,
                     ..palette.panel
                 },
+                style::alpha(palette.accent.contour, 0.45),
                 16.0,
             )
         })

@@ -3,9 +3,10 @@
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use iced::widget::{Column, Row, column, container, mouse_area, row, space, stack, text};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Background, Element, Length, Padding};
 
-use super::icons::{self, Glyph};
+use super::icons;
+use super::metal;
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
 use crate::model::bar::{Entry, Indicator};
@@ -359,13 +360,11 @@ fn lying<'a>(
     }
     items = items.push(divider()).push(lying_time(&dock.now, palette));
 
-    let body = container(items)
-        .height(WIDTH)
-        .padding(Padding::from([0.0, PADDING]))
-        .style(move |_| container::Style {
-            shadow: palette.shadow(),
-            ..style::outlined(palette.bar, palette.bar_border, RADIUS)
-        });
+    let inside = container(items)
+        .height(Length::Fill)
+        .padding(Padding::from([0.0, PADDING - 1.0]))
+        .style(move |_| style::fill(palette.bar, RADIUS - 1.0));
+    let body = framed(inside, WIDTH, palette).height(WIDTH);
     if !live {
         return body.into();
     }
@@ -382,15 +381,7 @@ fn lying_launcher<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let open = dock.drawer.is_some();
-    let (color, background) = if open {
-        (palette.on_accent(), palette.accent.gold)
-    } else {
-        (palette.accent.gold, iced::Color::TRANSPARENT)
-    };
-    let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
-        .center_x(SLOT)
-        .center_y(SLOT)
-        .style(move |_| style::fill(background, 10.0));
+    let icon = launcher_mark(open, palette);
     let area = mouse_area(container(icon).center_y(WIDTH));
     if live || open {
         area.on_press(Message::Launcher(Some(state.screen))).into()
@@ -413,8 +404,9 @@ fn lying_entry<'a>(
     let unread = dock.unread_of(entry);
 
     let mark: Element<'_, Message> = match entry.indicator {
+        // Lying down, the mark is a bar of gold.
         Indicator::Here => container(space().width(12).height(3))
-            .style(move |_| style::fill(palette.accent.gold, 1.5))
+            .style(move |_| style::fill(metal::ramp(&palette.accent.bar()), 1.5))
             .into(),
         Indicator::Elsewhere => container(space().width(4).height(3))
             .style(move |_| style::fill(palette.muted, 1.5))
@@ -503,15 +495,14 @@ fn bar<'a>(
     rows = rows.push(space().height(Length::Fill));
     rows = rows.push(time(&dock.now, side, labels, palette));
 
-    let body = container(rows)
-        .width(width)
-        .height(bar_height(pinned, others))
-        .padding(Padding::from([PADDING, 0.0]))
+    let height = bar_height(pinned, others);
+    let inside = container(rows)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding::from([PADDING - 1.0, 0.0]))
         .clip(true)
-        .style(move |_| container::Style {
-            shadow: palette.shadow(),
-            ..style::outlined(palette.bar, palette.bar_border, RADIUS)
-        });
+        .style(move |_| style::fill(palette.bar, RADIUS - 1.0));
+    let body = framed(inside, height, palette).width(width).height(height);
     let body: Element<'_, Message> = if live {
         mouse_area(body)
             .on_enter(Message::BarHover(state.id, true))
@@ -537,6 +528,47 @@ fn bar<'a>(
         .into()
 }
 
+/// A bar, `height` pixels high, in its frame: the hairline of gold all
+/// around it, brighter along its top edge.
+fn framed<'a>(
+    inside: impl Into<Element<'a, Message>>,
+    height: f32,
+    palette: Palette,
+) -> iced::widget::Container<'a, Message> {
+    container(inside).padding(1).style(move |_| {
+        let hairline = palette.accent.hairline(0.5, 0.7, height);
+        metal::frame(&hairline, RADIUS, palette.shadow())
+    })
+}
+
+/// The symbol of the launcher: four squares of gold, the lower two a
+/// little dimmer. While the drawer is open they are in ink, on an ingot.
+fn launcher_mark<'a>(open: bool, palette: Palette) -> Element<'a, Message> {
+    let square = move |opacity: f32| {
+        let background = if open {
+            Background::Color(style::alpha(palette.on_accent(), opacity))
+        } else {
+            metal::faded(&palette.accent.thin_piece(), opacity)
+        };
+        container(space().width(9).height(9)).style(move |_| style::fill(background, 2.5))
+    };
+    let line = |opacity: f32| row![square(opacity), square(opacity)].spacing(3);
+    let squares = container(column![line(1.0), line(0.78)].spacing(3)).center(Length::Fill);
+    let (inside, background): (Element<'_, Message>, Background) = if open {
+        (
+            metal::flanked(squares, 10.0).into(),
+            metal::ingot(&palette.accent, SLOT, false),
+        )
+    } else {
+        (squares.into(), iced::Color::TRANSPARENT.into())
+    };
+    container(inside)
+        .width(SLOT)
+        .height(SLOT)
+        .style(move |_| style::fill(background, 10.0))
+        .into()
+}
+
 /// The button of the drawer, at the top of the bar.
 fn launcher<'a>(
     dock: &Dock,
@@ -546,21 +578,8 @@ fn launcher<'a>(
 ) -> Element<'a, Message> {
     let Look { side, labels, live } = look;
     let open = dock.drawer.is_some();
-    let color = if open {
-        palette.on_accent()
-    } else {
-        palette.accent.gold
-    };
-    let background = if open {
-        palette.accent.gold
-    } else {
-        iced::Color::TRANSPARENT
-    };
-    let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
-        .center_x(SLOT)
-        .center_y(SLOT)
-        .style(move |_| style::fill(background, 10.0));
-    let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon.into()];
+    let icon = launcher_mark(open, palette);
+    let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon];
     if labels {
         let label = text("Lanceur")
             .size(14)
@@ -624,7 +643,7 @@ fn entry_row<'a>(
 
     let mark: Element<'_, Message> = match entry.indicator {
         Indicator::Here => container(space().width(3).height(12))
-            .style(move |_| style::fill(palette.accent.gold, 1.5))
+            .style(move |_| style::fill(metal::ramp(&palette.accent.thin_piece()), 1.5))
             .into(),
         Indicator::Elsewhere => container(space().width(3).height(4))
             .style(move |_| style::fill(palette.muted, 1.5))
