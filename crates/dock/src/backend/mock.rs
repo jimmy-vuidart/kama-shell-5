@@ -183,3 +183,88 @@ pub fn unread(favorites: &[String]) -> Vec<(String, u32)> {
         .unwrap_or_else(|| "discord".to_owned());
     vec![(messenger, 3)]
 }
+
+/// Simulated system tray items for trying the tray without running applications.
+pub fn tray() -> Vec<crate::model::tray::TrayItem> {
+    use crate::model::tray::TrayItem;
+    use system_tray::menu::{MenuItem, MenuType, TrayMenu};
+
+    let item = |address: &str,
+                id: &str,
+                title: &str,
+                tooltip: &str,
+                icon: &str,
+                menu: Option<TrayMenu>| TrayItem {
+        address: address.to_owned(),
+        id: id.to_owned(),
+        title: title.to_owned(),
+        tooltip: Some(tooltip.to_owned()),
+        icon_name: Some(icon.to_owned()),
+        pixmap: None,
+        menu_path: menu.as_ref().map(|_| "/MenuBar".to_owned()),
+        menu,
+    };
+
+    let cloud_menu = TrayMenu {
+        id: 1,
+        submenus: vec![
+            MenuItem {
+                id: 1,
+                menu_type: MenuType::Standard,
+                label: Some("Ouvrir le dossier".to_owned()),
+                enabled: true,
+                visible: true,
+                ..Default::default()
+            },
+            MenuItem {
+                id: 2,
+                menu_type: MenuType::Standard,
+                label: Some("Pause de la synchronisation".to_owned()),
+                enabled: true,
+                visible: true,
+                ..Default::default()
+            },
+            MenuItem {
+                id: 3,
+                menu_type: MenuType::Separator,
+                visible: true,
+                ..Default::default()
+            },
+            MenuItem {
+                id: 4,
+                menu_type: MenuType::Standard,
+                label: Some("Quitter".to_owned()),
+                enabled: true,
+                visible: true,
+                ..Default::default()
+            },
+        ],
+    };
+
+    vec![
+        item(
+            ":mock/player",
+            "mock-player",
+            "Musique",
+            "Musique · En lecture",
+            "audio-player",
+            None,
+        ),
+        item(
+            ":mock/cloud",
+            "mock-cloud",
+            "Cloud",
+            "Cloud · Synchronisé",
+            "folder-cloud",
+            Some(cloud_menu),
+        ),
+        item(
+            ":mock/obs",
+            "mock-obs",
+            "Enregistrement",
+            "Enregistrement · Prêt",
+            "camera-video",
+            None,
+        ),
+    ]
+}

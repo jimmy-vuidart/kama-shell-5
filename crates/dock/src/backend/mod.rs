@@ -6,10 +6,12 @@ pub mod audio;
 pub mod compositor;
 pub mod mock;
 pub mod services;
+pub mod tray;
 
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::model::mixer::Stream;
+use crate::model::tray::TrayItem;
 
 /// A backend that can be the real one or a simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
@@ -26,18 +28,21 @@ pub enum Backend {
     Brightness,
     /// Logging out, restarting, powering off: always after a confirmation.
     Session,
+    /// The system tray (StatusNotifierItem and DBusMenu).
+    Tray,
 }
 
 impl Backend {
     /// The backends that are real unless the dock is told otherwise: all
     /// of them.
-    pub const DEFAULT: [Self; 6] = [
+    pub const DEFAULT: [Self; 7] = [
         Self::Compositor,
         Self::Audio,
         Self::Network,
         Self::Bluetooth,
         Self::Brightness,
         Self::Session,
+        Self::Tray,
     ];
 }
 
@@ -74,6 +79,7 @@ pub enum Update {
     /// The brightness of the screens, from 0 to 1; `None` when no screen
     /// can be reached.
     Brightness(Option<f32>),
+    Tray(Vec<TrayItem>),
 }
 
 /// What the dock asks of a backend.
@@ -88,6 +94,21 @@ pub enum Request {
     Network(bool),
     Bluetooth(bool),
     Brightness(f32),
+    TrayActivate {
+        address: String,
+        x: i32,
+        y: i32,
+    },
+    TraySecondary {
+        address: String,
+        x: i32,
+        y: i32,
+    },
+    TrayMenuItem {
+        address: String,
+        menu_path: String,
+        id: i32,
+    },
 }
 
 impl Request {
@@ -102,6 +123,9 @@ impl Request {
             Self::Network(_) => Backend::Network,
             Self::Bluetooth(_) => Backend::Bluetooth,
             Self::Brightness(_) => Backend::Brightness,
+            Self::TrayActivate { .. } | Self::TraySecondary { .. } | Self::TrayMenuItem { .. } => {
+                Backend::Tray
+            }
         }
     }
 }
@@ -127,7 +151,8 @@ mod tests {
     #[test]
     fn every_service_is_real_unless_the_dock_is_told_to_pretend() {
         assert!(Backend::DEFAULT.contains(&Backend::Session));
-        assert_eq!(Backend::DEFAULT.len(), 6);
+        assert!(Backend::DEFAULT.contains(&Backend::Tray));
+        assert_eq!(Backend::DEFAULT.len(), 7);
     }
 
     #[test]

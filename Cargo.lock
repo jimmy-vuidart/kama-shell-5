@@ -836,6 +836,7 @@ dependencies = [
  "iced_layershell",
  "serde",
  "serde_json",
+ "system-tray",
  "tokio",
  "toml_edit",
  "tracing",
@@ -4796,6 +4797,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "system-tray"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab761caca0fb6cb7c57e09df241eb26ea8cdc63df88f1badca4818494f74d55f"
+dependencies = [
+ "cfg-if",
+ "futures-lite",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4967,6 +4983,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -6556,6 +6573,7 @@ dependencies = [
  "rustix 1.1.5",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",

@@ -22,6 +22,7 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 iced.workspace = true
 iced_layershell = "0.19.1"
+system-tray = { version = "0.8.9", default-features = false, features = ["data"] }
 
 [lints]
 workspace = true

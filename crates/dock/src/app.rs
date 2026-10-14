@@ -26,6 +26,7 @@ use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
+use crate::model::tray::TrayItem;
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
@@ -82,6 +83,7 @@ pub struct BarState {
     /// From 0 (folded) to 1 (unfolded): an upright bar only.
     pub unfold: f32,
     pub hover_entry: Option<usize>,
+    pub hover_tray: Option<usize>,
 }
 
 impl BarState {
@@ -170,6 +172,16 @@ pub enum Message {
     EntryRelease(window::Id, usize),
     EntryMiddle(window::Id, usize),
     EntryMenu(window::Id, usize),
+    /// What happens on the system tray.
+    TrayHover(window::Id, Option<usize>),
+    TrayClick(String),
+    TrayMiddle(String),
+    TrayMenu(window::Id, usize),
+    TrayMenuItemClick {
+        address: String,
+        menu_path: String,
+        id: i32,
+    },
     /// Opens or closes the launcher, on this screen if it can be.
     Launcher(Option<OutputRole>),
     Menu(MenuAction),
@@ -221,6 +233,8 @@ pub struct Dock {
     /// The menu, with the bar it opened from and the key of its
     /// application.
     pub menu: Option<(window::Id, window::Id, String)>,
+    pub tray: Vec<TrayItem>,
+    pub tray_menu: Option<(window::Id, window::Id, String)>,
     pub drawer: Option<Drawer>,
 
     pub audio: Audio,
@@ -278,6 +292,12 @@ impl Dock {
             } else {
                 Vec::new()
             },
+            tray: if simulated(Backend::Tray) {
+                mock::tray()
+            } else {
+                Vec::new()
+            },
+            tray_menu: None,
             options,
             config,
             catalog,
@@ -415,7 +435,8 @@ impl Dock {
             let entries = self.entries_for(screen);
             let pinned = entries.iter().filter(|entry| entry.pinned).count();
             let metrics = self.metrics();
-            let size = metrics.surface_size(orientation, pinned, entries.len() - pinned);
+            let size =
+                metrics.surface_size(orientation, pinned, entries.len() - pinned, self.tray.len());
             let anchor = match orientation {
                 Orientation::Vertical(Side::Left) => Anchor::Left,
                 Orientation::Vertical(Side::Right) => Anchor::Right,
@@ -441,6 +462,7 @@ impl Dock {
                 hovered: false,
                 unfold: 0.0,
                 hover_entry: None,
+                hover_tray: None,
             });
             tasks.push(task);
         }
@@ -455,7 +477,12 @@ impl Dock {
         for index in 0..self.bars.len() {
             let bar = &self.bars[index];
             let (id, pinned) = (bar.id, bar.pinned());
-            let size = metrics.surface_size(bar.orientation, pinned, bar.entries.len() - pinned);
+            let size = metrics.surface_size(
+                bar.orientation,
+                pinned,
+                bar.entries.len() - pinned,
+                self.tray.len(),
+            );
             let resize = if size == bar.size {
                 Task::none()
             } else {
@@ -571,6 +598,9 @@ impl Dock {
             Request::Network(on) => self.network.on = on,
             Request::Bluetooth(on) => self.bluetooth.on = on,
             Request::Brightness(level) => self.brightness = Some(level),
+            Request::TrayActivate { .. }
+            | Request::TraySecondary { .. }
+            | Request::TrayMenuItem { .. } => {}
         }
     }
 
@@ -713,6 +743,13 @@ impl Dock {
 
     fn close_menu(&mut self) -> Task<Message> {
         match self.menu.take() {
+            Some((id, ..)) => window::close(id),
+            None => Task::none(),
+        }
+    }
+
+    fn close_tray_menu(&mut self) -> Task<Message> {
+        match self.tray_menu.take() {
             Some((id, ..)) => window::close(id),
             None => Task::none(),
         }
@@ -882,6 +919,12 @@ impl Dock {
                     }
                     return self.input_region(bar);
                 }
+                if let Some((_, bar, _)) = self.tray_menu.take_if(|(menu, ..)| *menu == id) {
+                    if let Some(bar) = self.bar_mut(bar) {
+                        bar.hover_tray = None;
+                    }
+                    return self.input_region(bar);
+                }
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
                     self.drawer = None;
                 }
@@ -890,7 +933,11 @@ impl Dock {
             }
             Message::BarHover(id, hovered) => {
                 // The menu keeps its bar as it is while it is open.
-                let has_menu = self.menu.as_ref().is_some_and(|(_, bar, _)| *bar == id);
+                let has_menu = self.menu.as_ref().is_some_and(|(_, bar, _)| *bar == id)
+                    || self
+                        .tray_menu
+                        .as_ref()
+                        .is_some_and(|(_, bar, _)| *bar == id);
                 if has_menu && !hovered {
                     return Task::none();
                 }
@@ -900,6 +947,7 @@ impl Dock {
                 bar.hovered = hovered;
                 if !hovered {
                     bar.hover_entry = None;
+                    bar.hover_tray = None;
                     if let Some(drag) = self.drag.take() {
                         if drag.moved {
                             self.save_favorites();
@@ -931,7 +979,7 @@ impl Dock {
                     at: index,
                     moved: false,
                 });
-                self.close_menu()
+                self.close_menu().chain(self.close_tray_menu())
             }
             Message::EntryRelease(id, index) => {
                 if let Some(Drag { moved: true, .. }) = self.drag.take() {
@@ -985,11 +1033,84 @@ impl Dock {
                     .anchor(corner)
                     .gravity(grows);
                 let key = entry.identity.key.clone();
-                let close = self.close_menu();
+                let close = self.close_menu().chain(self.close_tray_menu());
                 let (popup, open) = Message::popup_open(settings);
                 self.menu = Some((popup, id, key));
                 self.drag = None;
                 close.chain(open)
+            }
+            Message::TrayHover(id, hover) => {
+                let Some(bar) = self.bar_mut(id) else {
+                    return Task::none();
+                };
+                bar.hover_tray = hover;
+                Task::none()
+            }
+            Message::TrayClick(address) => {
+                self.request(backend::Request::TrayActivate {
+                    address,
+                    x: 0,
+                    y: 0,
+                });
+                Task::none()
+            }
+            Message::TrayMiddle(address) => {
+                self.request(backend::Request::TraySecondary {
+                    address,
+                    x: 0,
+                    y: 0,
+                });
+                Task::none()
+            }
+            Message::TrayMenu(id, index) => {
+                let Some(bar) = self.bar(id) else {
+                    return Task::none();
+                };
+                let Some(item) = self.tray.get(index) else {
+                    return Task::none();
+                };
+                let height = ui::tray_menu::height(item);
+                let size = (ui::tray_menu::WIDTH, height);
+                let unfolded = bar.unfold > 0.5;
+                let pinned = bar.pinned();
+                let others = bar.entries.len() - pinned;
+                let anchor = self.metrics().tray_rect(
+                    bar.orientation,
+                    index,
+                    pinned,
+                    others,
+                    self.tray.len(),
+                    unfolded,
+                );
+                let (corner, grows) = match bar.orientation {
+                    Orientation::Vertical(Side::Left) => {
+                        (PopupAnchor::TopRight, PopupGravity::BottomRight)
+                    }
+                    Orientation::Vertical(Side::Right) => {
+                        (PopupAnchor::TopLeft, PopupGravity::BottomLeft)
+                    }
+                    Orientation::Horizontal => (PopupAnchor::Top, PopupGravity::Top),
+                };
+                let settings = IcedNewPopupSettings::new(id, size, anchor)
+                    .anchor(corner)
+                    .gravity(grows);
+                let address = item.address.clone();
+                let close = self.close_tray_menu().chain(self.close_menu());
+                let (popup, open) = Message::popup_open(settings);
+                self.tray_menu = Some((popup, id, address));
+                close.chain(open)
+            }
+            Message::TrayMenuItemClick {
+                address,
+                menu_path,
+                id,
+            } => {
+                self.request(backend::Request::TrayMenuItem {
+                    address,
+                    menu_path,
+                    id,
+                });
+                self.close_tray_menu()
             }
             Message::Launcher(asked) => self.toggle_drawer(asked),
             Message::Menu(action) => {
@@ -1324,6 +1445,10 @@ impl Dock {
             backend::Update::Network(switch) => self.network = switch,
             backend::Update::Bluetooth(switch) => self.bluetooth = switch,
             backend::Update::Brightness(level) => self.brightness = level,
+            backend::Update::Tray(items) => {
+                self.tray = items;
+                return self.fit_bars();
+            }
         }
         Task::none()
     }
@@ -1418,6 +1543,9 @@ impl Dock {
         if self.options.is_real(Backend::Brightness) {
             subscriptions.push(services::brightness_subscription().map(Message::Backend));
         }
+        if self.options.is_real(Backend::Tray) {
+            subscriptions.push(backend::tray::subscription().map(Message::Backend));
+        }
         Subscription::batch(subscriptions)
     }
 
@@ -1430,6 +1558,11 @@ impl Dock {
             let mut entries = entries.unwrap_or_default().iter();
             if let Some(entry) = entries.find(|entry| entry.identity.key == *key) {
                 return ui::menu::view(self, entry);
+            }
+        }
+        if let Some((_, _, address)) = self.tray_menu.as_ref().filter(|(menu, ..)| *menu == id) {
+            if let Some(item) = self.tray.iter().find(|item| item.address == *address) {
+                return ui::tray_menu::view(self, item);
             }
         }
         if let Some(drawer) = self.drawer.as_ref().filter(|drawer| drawer.id == id) {

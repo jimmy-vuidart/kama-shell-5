@@ -4,6 +4,7 @@
 pub mod bar;
 pub mod drawer;
 pub mod mixer;
+pub mod tray;
 
 use crate::steam::Game;
 

@@ -2,13 +2,16 @@
 //! the pointer, or a row on the bottom edge that names the icon under it.
 
 use chrono::{DateTime, Datelike, Local, Timelike};
-use iced::widget::{Column, Row, column, container, mouse_area, row, space, stack, text};
-use iced::{Alignment, Element, Length, Padding};
+use iced::widget::{
+    Column, Row, column, container, image, mouse_area, row, space, stack, svg, text,
+};
+use iced::{Alignment, Color, ContentFit, Element, Length, Padding};
 
 use super::icons::{self, Glyph};
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
 use crate::model::bar::{Entry, Indicator};
+use crate::model::tray::TrayItem;
 use crate::model::{Orientation, Side};
 
 pub const DEFAULT_ICON_SIZE: u32 = 24;
@@ -79,7 +82,7 @@ impl Metrics {
     }
 
     /// The height of the bar for a number of favorites and of other entries.
-    pub fn bar_height(&self, pinned: usize, others: usize) -> f32 {
+    pub fn bar_height(&self, pinned: usize, others: usize, tray_items: usize) -> f32 {
         let mut rows = vec![self.slot];
         if pinned > 0 {
             rows.push(SECTION);
@@ -89,25 +92,34 @@ impl Metrics {
             rows.push(SECTION);
             rows.extend(std::iter::repeat_n(self.slot, others));
         }
+        if tray_items > 0 {
+            let (_, tray_height) = crate::model::tray::vertical_size(tray_items);
+            rows.push(tray_height);
+        }
         rows.push(CLOCK);
         let gaps = GAP * (rows.len() - 1) as f32;
         rows.iter().sum::<f32>() + gaps + 2.0 * PADDING
     }
 
     /// The height of the surface that holds the bar.
-    pub fn surface_height(&self, pinned: usize, others: usize) -> u32 {
-        (self.bar_height(pinned, others) + 2.0 * SHADOW).ceil() as u32
+    pub fn surface_height(&self, pinned: usize, others: usize, tray_items: usize) -> u32 {
+        (self.bar_height(pinned, others, tray_items) + 2.0 * SHADOW).ceil() as u32
     }
 
     /// The width of a lying bar for a number of favorites and of other
     /// entries.
-    pub fn lying_width(&self, pinned: usize, others: usize) -> f32 {
+    pub fn lying_width(&self, pinned: usize, others: usize, tray_items: usize) -> f32 {
         let mut items = vec![self.slot];
         for group in [pinned, others] {
             if group > 0 {
                 items.push(DIVIDER);
                 items.extend(std::iter::repeat_n(self.slot, group));
             }
+        }
+        if tray_items > 0 {
+            let (tray_width, _) = crate::model::tray::horizontal_size(tray_items);
+            items.push(DIVIDER);
+            items.push(tray_width);
         }
         items.extend([DIVIDER, CLOCK_WIDTH]);
         let gaps = GAP * (items.len() - 1) as f32;
@@ -124,6 +136,19 @@ impl Metrics {
         PADDING + self.slot + GAP + dividers * (DIVIDER + GAP) + index as f32 * (self.slot + GAP)
     }
 
+    /// How far from the left end of a lying bar the system tray starts.
+    pub fn lying_tray_left(&self, pinned: usize, others: usize) -> f32 {
+        let mut left = PADDING + self.slot + GAP;
+        if pinned > 0 {
+            left += DIVIDER + GAP + pinned as f32 * (self.slot + GAP);
+        }
+        if others > 0 {
+            left += DIVIDER + GAP + others as f32 * (self.slot + GAP);
+        }
+        left += DIVIDER + GAP;
+        left
+    }
+
     /// The size of the surface of a bar, for a number of favorites and of
     /// other entries.
     pub fn surface_size(
@@ -131,11 +156,15 @@ impl Metrics {
         orientation: Orientation,
         pinned: usize,
         others: usize,
+        tray_items: usize,
     ) -> (u32, u32) {
         match orientation {
-            Orientation::Vertical(_) => (self.surface_width, self.surface_height(pinned, others)),
+            Orientation::Vertical(_) => (
+                self.surface_width,
+                self.surface_height(pinned, others, tray_items),
+            ),
             Orientation::Horizontal => {
-                let width = self.lying_width(pinned, others) + 2.0 * SIDE;
+                let width = self.lying_width(pinned, others, tray_items) + 2.0 * SIDE;
                 (
                     width.ceil() as u32,
                     (LABEL_ROOM + self.width + MARGIN) as u32,
@@ -199,6 +228,77 @@ impl Metrics {
         }
     }
 
+    /// Where the tray item `index` is in the surface of its bar (x, y, width,
+    /// height): what its menu opens next to.
+    pub fn tray_rect(
+        &self,
+        orientation: Orientation,
+        index: usize,
+        pinned: usize,
+        others: usize,
+        tray_items: usize,
+        unfolded: bool,
+    ) -> (i32, i32, i32, i32) {
+        match orientation {
+            Orientation::Vertical(side) => {
+                self.upright_tray_rect(side, index, pinned, others, tray_items, unfolded)
+            }
+            Orientation::Horizontal => {
+                let (col, row) = crate::model::tray::horizontal_coord(index);
+                let left = self.lying_tray_left(pinned, others)
+                    + col as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP);
+                let top = LABEL_ROOM
+                    + (self.width
+                        - (2.0 * crate::model::tray::ICON_SIZE + crate::model::tray::GAP))
+                        / 2.0
+                    + row as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP);
+                (
+                    (SIDE + left) as i32,
+                    top as i32,
+                    crate::model::tray::ICON_SIZE as i32,
+                    crate::model::tray::ICON_SIZE as i32,
+                )
+            }
+        }
+    }
+
+    fn upright_tray_rect(
+        &self,
+        side: Side,
+        index: usize,
+        pinned: usize,
+        others: usize,
+        tray_items: usize,
+        _unfolded: bool,
+    ) -> (i32, i32, i32, i32) {
+        let (col, row) = crate::model::tray::vertical_coord(index);
+        let bar_h = self.bar_height(pinned, others, tray_items);
+        let (_, tray_h) = crate::model::tray::vertical_size(tray_items);
+        let tray_bottom = SHADOW + bar_h - PADDING - CLOCK - GAP;
+        let tray_top = tray_bottom - tray_h;
+        let top = tray_top + row as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP);
+        let offset_x =
+            (self.width - (2.0 * crate::model::tray::ICON_SIZE + crate::model::tray::GAP)) / 2.0;
+        let x = match side {
+            Side::Left => {
+                MARGIN
+                    + offset_x
+                    + col as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP)
+            }
+            Side::Right => {
+                let tray_w = 2.0 * crate::model::tray::ICON_SIZE + crate::model::tray::GAP;
+                self.surface_width as f32 - MARGIN - offset_x - tray_w
+                    + col as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP)
+            }
+        };
+        (
+            x as i32,
+            top as i32,
+            crate::model::tray::ICON_SIZE as i32,
+            crate::model::tray::ICON_SIZE as i32,
+        )
+    }
+
     fn upright_rect(
         &self,
         side: Side,
@@ -231,12 +331,12 @@ impl Default for Metrics {
 
 #[cfg(test)]
 pub fn surface_height(pinned: usize, others: usize) -> u32 {
-    Metrics::default().surface_height(pinned, others)
+    Metrics::default().surface_height(pinned, others, 0)
 }
 
 #[cfg(test)]
 pub fn surface_size(orientation: Orientation, pinned: usize, others: usize) -> (u32, u32) {
-    Metrics::default().surface_size(orientation, pinned, others)
+    Metrics::default().surface_size(orientation, pinned, others, 0)
 }
 
 #[cfg(test)]
@@ -340,7 +440,10 @@ pub fn view<'a>(dock: &'a Dock, state: &'a BarState) -> Element<'a, Message> {
         Orientation::Horizontal => {
             let label: Element<'_, Message> = match hovered_entry(dock, state) {
                 Some((index, entry)) => label(dock, state, index, entry, metrics, palette),
-                None => space().into(),
+                None => match hovered_tray(dock, state) {
+                    Some((index, item)) => tray_label(dock, state, index, item, metrics, palette),
+                    None => space().into(),
+                },
             };
             let lying =
                 container(lying(dock, state, true, metrics, palette)).center_x(Length::Fill);
@@ -376,6 +479,59 @@ fn hovered_entry<'a>(dock: &Dock, state: &'a BarState) -> Option<(usize, &'a Ent
         .is_some_and(|(_, bar, _)| *bar == state.id);
     let index = state.hover_entry.filter(|_| !has_menu)?;
     Some((index, state.entries.get(index)?))
+}
+
+fn hovered_tray<'a>(dock: &'a Dock, state: &BarState) -> Option<(usize, &'a TrayItem)> {
+    let has_menu = dock
+        .tray_menu
+        .as_ref()
+        .is_some_and(|(_, bar, _)| *bar == state.id);
+    let index = state.hover_tray.filter(|_| !has_menu)?;
+    Some((index, dock.tray.get(index)?))
+}
+
+fn tray_label<'a>(
+    _dock: &Dock,
+    state: &BarState,
+    index: usize,
+    item: &'a TrayItem,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let name = text(&item.title)
+        .size(13)
+        .font(style::SEMIBOLD)
+        .color(palette.text);
+    let detail = item.tooltip.as_deref().unwrap_or(&item.title);
+    let texts = column![name, text(detail).size(11).color(palette.muted)].spacing(1);
+    let card = container(texts)
+        .padding(Padding::from([6.0, 10.0]))
+        .max_width(2.0 * SIDE - 20.0)
+        .style(move |_| {
+            style::outlined(
+                iced::Color {
+                    a: 1.0,
+                    ..palette.bar
+                },
+                palette.bar_border,
+                10.0,
+            )
+        });
+    let (col, _) = crate::model::tray::horizontal_coord(index);
+    let tray_start = metrics.lying_tray_left(state.pinned(), state.entries.len() - state.pinned());
+    let left = (SIDE
+        + tray_start
+        + col as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP)
+        - 8.0)
+        .max(0.0);
+    container(card)
+        .padding(Padding {
+            left,
+            bottom: 6.0,
+            top: 0.0,
+            right: 0.0,
+        })
+        .into()
 }
 
 /// The name and the state of the entry under the pointer, above its icon.
@@ -450,6 +606,11 @@ fn lying<'a>(
         items = items.push(lying_entry(
             dock, state, index, entry, live, metrics, palette,
         ));
+    }
+    if !dock.tray.is_empty() {
+        items = items
+            .push(divider())
+            .push(lying_tray(dock, state, live, metrics, palette));
     }
     items = items
         .push(divider())
@@ -576,6 +737,160 @@ fn lying_time<'a>(
         .into()
 }
 
+pub fn tray_icon_element<'a, Message: 'a>(
+    dock: &'a Dock,
+    item: &'a TrayItem,
+    size: f32,
+) -> Element<'a, Message> {
+    if let Some(pixmap) = &item.pixmap {
+        return image(image::Handle::from_rgba(
+            pixmap.width,
+            pixmap.height,
+            pixmap.pixels.clone(),
+        ))
+        .width(size)
+        .height(size)
+        .content_fit(ContentFit::Contain)
+        .into();
+    }
+    if let Some(icon_name) = &item.icon_name {
+        if let Some(icon) = dock.icons.get(icon_name) {
+            return match icon {
+                icons::Icon::Vector(handle) => svg(handle.clone()).width(size).height(size).into(),
+                icons::Icon::Raster(handle) => image(handle.clone())
+                    .width(size)
+                    .height(size)
+                    .content_fit(ContentFit::Contain)
+                    .into(),
+            };
+        }
+        let theme = coquille_apps::icon_theme();
+        if let Some(path) = coquille_apps::find_icon(icon_name, &theme) {
+            let is_svg = path.extension().is_some_and(|ext| ext == "svg");
+            if is_svg {
+                return svg(svg::Handle::from_path(path))
+                    .width(size)
+                    .height(size)
+                    .into();
+            } else {
+                return image(image::Handle::from_path(path))
+                    .width(size)
+                    .height(size)
+                    .content_fit(ContentFit::Contain)
+                    .into();
+            }
+        }
+    }
+    let letter = item
+        .title
+        .chars()
+        .next()
+        .or_else(|| item.id.chars().next())
+        .map_or('?', |c| c.to_ascii_uppercase());
+    let label = text(letter.to_string())
+        .size(size * 0.5)
+        .font(style::BOLD)
+        .color(Color::WHITE);
+    let color = icons::tile_color(&item.id);
+    container(label)
+        .center_x(Length::Fixed(size))
+        .center_y(Length::Fixed(size))
+        .style(move |_| style::fill(color, size * 0.26))
+        .into()
+}
+
+fn render_tray_slot<'a>(
+    dock: &'a Dock,
+    state: &BarState,
+    index: usize,
+    item: &'a TrayItem,
+    live: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let hovered = state.hover_tray == Some(index);
+    let tile_bg = if hovered {
+        palette.hover
+    } else {
+        Color::TRANSPARENT
+    };
+    let icon = tray_icon_element(dock, item, crate::model::tray::ICON_SIZE);
+    let slot = container(icon)
+        .center_x(crate::model::tray::ICON_SIZE)
+        .center_y(crate::model::tray::ICON_SIZE)
+        .style(move |_| style::fill(tile_bg, 4.0));
+    if !live {
+        return slot.into();
+    }
+    mouse_area(slot)
+        .on_enter(Message::TrayHover(state.id, Some(index)))
+        .on_exit(Message::TrayHover(state.id, None))
+        .on_press(Message::TrayClick(item.address.clone()))
+        .on_middle_press(Message::TrayMiddle(item.address.clone()))
+        .on_right_press(Message::TrayMenu(state.id, index))
+        .into()
+}
+
+fn lying_tray<'a>(
+    dock: &'a Dock,
+    state: &'a BarState,
+    live: bool,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let count = dock.tray.len();
+    let num_cols = crate::model::tray::horizontal_columns(count);
+    let mut columns: Row<'_, Message> = row![].spacing(crate::model::tray::GAP);
+
+    for c in 0..num_cols {
+        let mut col_slots: Column<'_, Message> = column![].spacing(crate::model::tray::GAP);
+        let idx1 = c * 2;
+        let idx2 = c * 2 + 1;
+        if let Some(item) = dock.tray.get(idx1) {
+            col_slots = col_slots.push(render_tray_slot(dock, state, idx1, item, live, palette));
+        }
+        if let Some(item) = dock.tray.get(idx2) {
+            col_slots = col_slots.push(render_tray_slot(dock, state, idx2, item, live, palette));
+        }
+        columns = columns.push(col_slots);
+    }
+
+    container(columns).center_y(metrics.width).into()
+}
+
+fn upright_tray<'a>(
+    dock: &'a Dock,
+    state: &'a BarState,
+    look: Look,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let Look { side, live, .. } = look;
+    let count = dock.tray.len();
+    let num_rows = crate::model::tray::vertical_rows(count);
+
+    let mut col_items: Column<'_, Message> = column![].spacing(crate::model::tray::GAP);
+    for r in 0..num_rows {
+        let mut row_items: Row<'_, Message> = row![].spacing(crate::model::tray::GAP);
+        let idx1 = r * 2;
+        let idx2 = r * 2 + 1;
+        if let Some(item) = dock.tray.get(idx1) {
+            row_items = row_items.push(render_tray_slot(dock, state, idx1, item, live, palette));
+        }
+        if let Some(item) = dock.tray.get(idx2) {
+            row_items = row_items.push(render_tray_slot(dock, state, idx2, item, live, palette));
+        }
+        col_items = col_items.push(row_items);
+    }
+
+    let offset_x =
+        (metrics.width - (2.0 * crate::model::tray::ICON_SIZE + crate::model::tray::GAP)) / 2.0;
+    let content = from_edge(side, vec![space().width(offset_x).into(), col_items.into()]);
+    container(content)
+        .width(Length::Fill)
+        .align_x(outward(side))
+        .into()
+}
+
 /// The bar standing on the left or the right edge. The drawer shows it too,
 /// folded and still: `live` says whether it reacts to the pointer.
 fn bar<'a>(
@@ -606,11 +921,15 @@ fn bar<'a>(
         rows = rows.push(entry_row(dock, state, index, entry, look, metrics, palette));
     }
     rows = rows.push(space().height(Length::Fill));
+    if !dock.tray.is_empty() {
+        rows = rows.push(upright_tray(dock, state, look, metrics, palette));
+        rows = rows.push(space().height(GAP));
+    }
     rows = rows.push(time(&dock.now, side, labels, palette));
 
     let body = container(rows)
         .width(width)
-        .height(metrics.bar_height(pinned, others))
+        .height(metrics.bar_height(pinned, others, dock.tray.len()))
         .padding(Padding::from([PADDING, 0.0]))
         .clip(true)
         .style(move |_| container::Style {
@@ -1063,5 +1382,54 @@ mod tests {
         // Clamping bounds
         assert_eq!(Metrics::new(5).icon_size, MIN_ICON_SIZE as f32);
         assert_eq!(Metrics::new(128).icon_size, MAX_ICON_SIZE as f32);
+    }
+
+    #[test]
+    fn the_bar_grows_with_tray_items() {
+        let metrics = Metrics::default();
+        let without_tray = metrics.bar_height(1, 0, 0);
+        let with_two = metrics.bar_height(1, 0, 2);
+        let with_four = metrics.bar_height(1, 0, 4);
+
+        // 2 items in vertical dock = 1 row (height 16) + bar GAP (4)
+        assert_eq!(with_two - without_tray, 20.0);
+        // 4 items = 2 rows (additional 16 + tray GAP 3 = 19)
+        assert_eq!(with_four - with_two, 19.0);
+
+        // Horizontal bar widens with tray
+        let lying_without = metrics.lying_width(1, 0, 0);
+        let lying_two = metrics.lying_width(1, 0, 2);
+        let lying_three = metrics.lying_width(1, 0, 3);
+        // 2 items in horizontal dock = 1 column (width 16) + DIVIDER (9) + 2 * bar GAP (8)
+        assert_eq!(lying_two - lying_without, 33.0);
+        // 3 items = 2 columns (additional 16 + tray GAP 3 = 19)
+        assert_eq!(lying_three - lying_two, 19.0);
+    }
+
+    #[test]
+    fn tray_items_rects_are_positioned_correctly() {
+        let metrics = Metrics::default();
+        // Horizontal: 2 rows of items
+        let rect0 = metrics.tray_rect(Orientation::Horizontal, 0, 1, 0, 3, false);
+        let rect1 = metrics.tray_rect(Orientation::Horizontal, 1, 1, 0, 3, false);
+        let rect2 = metrics.tray_rect(Orientation::Horizontal, 2, 1, 0, 3, false);
+
+        // rect0 is col 0, row 0; rect1 is col 0, row 1; rect2 is col 1, row 0
+        assert_eq!(rect0.0, rect1.0); // same x
+        assert_eq!(rect1.1 - rect0.1, 19); // 16 + 3 GAP in y
+        assert_eq!(rect2.0 - rect0.0, 19); // 16 + 3 GAP in x
+        assert_eq!(rect0.1, rect2.1); // same y
+
+        // Vertical: 2 columns of items
+        let left = Orientation::Vertical(Side::Left);
+        let vrect0 = metrics.tray_rect(left, 0, 1, 0, 3, false);
+        let vrect1 = metrics.tray_rect(left, 1, 1, 0, 3, false);
+        let vrect2 = metrics.tray_rect(left, 2, 1, 0, 3, false);
+
+        // vrect0 is col 0, row 0; vrect1 is col 1, row 0; vrect2 is col 0, row 1
+        assert_eq!(vrect0.1, vrect1.1); // same y
+        assert_eq!(vrect1.0 - vrect0.0, 19); // 16 + 3 GAP in x
+        assert_eq!(vrect2.1 - vrect0.1, 19); // 16 + 3 GAP in y
+        assert_eq!(vrect0.0, vrect2.0); // same x
     }
 }
