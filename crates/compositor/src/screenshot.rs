@@ -142,7 +142,10 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
     let (w, h) = (u32::try_from(width)?, u32::try_from(height)?);
     let stride = w as usize * 4;
     let mut pixmap = tiny_skia::Pixmap::new(w, h).context("empty screenshot")?;
-    let rows = pixels.chunks_exact(stride).rev();
+    // In GlesRenderer with Transform::Normal, Wayland y=0 maps to OpenGL y=-1.0,
+    // which glReadPixels reads first (y=0 in the framebuffer). The rows are
+    // therefore already ordered from top to bottom.
+    let rows = pixels.chunks_exact(stride);
     for (dest, src) in pixmap.data_mut().chunks_exact_mut(stride).zip(rows) {
         dest.copy_from_slice(src);
         dest.iter_mut()
