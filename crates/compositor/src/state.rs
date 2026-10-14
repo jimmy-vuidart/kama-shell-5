@@ -26,6 +26,8 @@ use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
+use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
@@ -90,6 +92,8 @@ pub struct State {
     pub shm_state: ShmState,
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
+    pub wlr_data_control_state: WlrDataControlState,
+    pub ext_data_control_state: ExtDataControlState,
     pub dmabuf_state: DmabufState,
     pub popups: PopupManager,
     pub xwayland_shell_state: XWaylandShellState,
@@ -198,6 +202,8 @@ impl State {
         let shm_state = ShmState::new::<Self>(dh, renderer.shm_formats());
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
+        let wlr_data_control_state = WlrDataControlState::new::<Self, _>(dh, None, |_| true);
+        let ext_data_control_state = ExtDataControlState::new::<Self, _>(dh, None, |_| true);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
         // Only XWayland may use it, to pair X11 windows with their surfaces.
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
@@ -266,6 +272,8 @@ impl State {
             shm_state,
             seat_state,
             data_device_state,
+            wlr_data_control_state,
+            ext_data_control_state,
             dmabuf_state,
             popups: PopupManager::default(),
             xwayland_shell_state,

@@ -9,7 +9,7 @@ use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::gles::GlesRenderbuffer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::utils::{Buffer, Physical, Rectangle, Size, Transform};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::render::scene::{self, Layers};
 use crate::state::State;
@@ -53,20 +53,29 @@ fn screenshot_path() -> PathBuf {
 }
 
 /// Saves the pixmap as a PNG file and copies it to the clipboard if possible.
-fn save_and_copy(pixmap: &tiny_skia::Pixmap) -> anyhow::Result<PathBuf> {
+fn save_and_copy(state: &State, pixmap: &tiny_skia::Pixmap) -> anyhow::Result<PathBuf> {
     let path = screenshot_path();
     pixmap
         .save_png(&path)
         .context("cannot save the screenshot image")?;
     info!(path = %path.display(), "screenshot saved");
 
-    // Copy to clipboard if wl-copy is installed.
-    if let Ok(file) = std::fs::File::open(&path) {
-        let _ = std::process::Command::new("wl-copy")
-            .arg("--type")
-            .arg("image/png")
-            .stdin(file)
-            .spawn();
+    // Copy to clipboard via wl-copy if available.
+    match std::fs::File::open(&path) {
+        Ok(file) => {
+            let mut cmd = std::process::Command::new("wl-copy");
+            cmd.arg("--type")
+                .arg("image/png")
+                .env("WAYLAND_DISPLAY", &state.socket_name)
+                .stdin(file);
+            match cmd.spawn() {
+                Ok(child) => info!(pid = child.id(), "wl-copy started for screenshot"),
+                Err(error) => warn!(%error, "cannot start wl-copy"),
+            }
+        }
+        Err(error) => {
+            warn!(%error, path = %path.display(), "cannot open screenshot file for copying");
+        }
     }
     Ok(path)
 }
@@ -149,7 +158,7 @@ pub fn capture_screen(state: &mut State, output_id: Option<OutputId>) -> anyhow:
         .or_else(|| state.outputs.first().map(|s| s.id))
         .context("no screen to capture")?;
     let pixmap = capture_output(state, screen_id)?;
-    save_and_copy(&pixmap)
+    save_and_copy(state, &pixmap)
 }
 
 /// Captures a global region and crops it to the selection.
@@ -177,7 +186,7 @@ pub fn capture_region(state: &mut State, global_rect: Rect) -> anyhow::Result<Pa
     }
 
     let cropped = crop_pixmap(&pixmap, local_x, local_y, crop_w, crop_h)?;
-    save_and_copy(&cropped)
+    save_and_copy(state, &cropped)
 }
 
 fn crop_pixmap(
