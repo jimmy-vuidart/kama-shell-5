@@ -196,6 +196,7 @@ impl State {
         let overlay = self.overlay();
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
+        let freeze = self.active_freeze();
         let full_redraw = std::mem::take(&mut self.full_redraw);
         let Backend::Winit(winit) = &mut self.backend else {
             return;
@@ -240,6 +241,7 @@ impl State {
                         panels: &panels,
                         cursor,
                         wallpapers: &wallpapers,
+                        freeze: &freeze,
                     },
                 );
                 let clear = self.theme.backdrop.premultiplied();

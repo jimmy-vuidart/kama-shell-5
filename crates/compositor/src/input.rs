@@ -236,13 +236,14 @@ impl State {
             |state, modifiers, handle| {
                 if state.screenshot_mode.is_some() {
                     let is_escape = handle.raw_syms().contains(&Keysym::Escape);
-                    if is_escape {
-                        if key_state == KeyState::Pressed {
-                            state.screenshot_mode = None;
-                            state.queue_redraw();
-                        }
-                        return FilterResult::Intercept(None);
+                    if is_escape && key_state == KeyState::Pressed {
+                        state.screenshot_mode = None;
+                        state.screenshot_freeze = None;
+                        state.full_redraw = true;
+                        state.refresh_pointer_focus();
+                        state.queue_redraw();
                     }
+                    return FilterResult::Intercept(None);
                 }
                 let keycode = handle.raw_code().raw();
                 let is_mod = mod_key.is_key(&handle.raw_syms());
@@ -395,7 +396,9 @@ impl State {
             .game_in_play()
             .and_then(|output| self.shell.screen(output))
             .map(|screen| screen.rect);
-        let free = self.pointer_freed.is_some() || self.gesture.is_some();
+        let free = self.pointer_freed.is_some()
+            || self.gesture.is_some()
+            || self.screenshot_mode.is_some();
         let Some(game) = game.filter(|_| !free) else {
             self.sticky_edges = StickyEdges::default();
             return wanted;
@@ -452,7 +455,7 @@ impl State {
     /// How the client under the pointer holds it, if it does. A shell
     /// gesture in progress is never held back.
     fn hold_at(&self, hit: &Hit, location: Point<f64, Logical>) -> Option<Hold> {
-        if self.gesture.is_some() {
+        if self.gesture.is_some() || self.screenshot_mode.is_some() {
             return None;
         }
         let pointer = self.seat.get_pointer()?;
@@ -606,10 +609,30 @@ impl State {
                 current: location,
             });
             self.set_cursor(CursorImageStatus::Named(CursorIcon::Crosshair));
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
             self.queue_redraw();
             return;
         } else if self.screenshot_mode == Some(ScreenshotMode::SelectingRegion) {
             self.set_cursor(CursorImageStatus::Named(CursorIcon::Crosshair));
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
             self.queue_redraw();
             return;
         }
@@ -895,31 +918,125 @@ impl State {
     /// placed, every place it can go, the one under the pointer standing
     /// out.
     pub fn overlay(&self) -> Vec<Shape> {
-        if let Some(ScreenshotMode::DraggingRegion { start, current }) = self.screenshot_mode {
-            let p1 = model_point(start);
-            let p2 = model_point(current);
-            let x = p1.x.min(p2.x);
-            let y = p1.y.min(p2.y);
-            let w = (p1.x - p2.x).abs();
-            let h = (p1.y - p2.y).abs();
-            let rect = Rect::new(x, y, w, h);
-            let accent = self.theme.accent;
-            return vec![
-                Shape {
-                    outline: rect,
-                    area: rect,
-                    color: accent,
-                    radii: [0; 4],
-                    border: 2,
-                },
-                Shape {
-                    outline: rect,
-                    area: rect,
-                    color: Rgba { a: 0x30, ..accent },
-                    radii: [0; 4],
-                    border: 0,
-                },
-            ];
+        if let Some(mode) = self.screenshot_mode {
+            let dim_color = Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0x50,
+            };
+            match mode {
+                ScreenshotMode::SelectingRegion => {
+                    let mut shapes = Vec::new();
+                    for screen in &self.shell.screens {
+                        shapes.push(Shape {
+                            outline: screen.rect,
+                            area: screen.rect,
+                            color: dim_color,
+                            radii: [0; 4],
+                            border: 0,
+                        });
+                    }
+                    return shapes;
+                }
+                ScreenshotMode::DraggingRegion { start, current } => {
+                    let p1 = model_point(start);
+                    let p2 = model_point(current);
+                    let x = p1.x.min(p2.x);
+                    let y = p1.y.min(p2.y);
+                    let w = (p1.x - p2.x).abs();
+                    let h = (p1.y - p2.y).abs();
+                    let sel = Rect::new(x, y, w, h);
+
+                    let mut shapes = Vec::new();
+                    for screen in &self.shell.screens {
+                        let s = screen.rect;
+                        match s.intersection(sel) {
+                            Some(inter) if inter.w > 0 && inter.h > 0 => {
+                                if inter.y > s.y {
+                                    let band = Rect::new(s.x, s.y, s.w, inter.y - s.y);
+                                    shapes.push(Shape {
+                                        outline: band,
+                                        area: band,
+                                        color: dim_color,
+                                        radii: [0; 4],
+                                        border: 0,
+                                    });
+                                }
+                                if s.bottom() > inter.bottom() {
+                                    let band = Rect::new(
+                                        s.x,
+                                        inter.bottom(),
+                                        s.w,
+                                        s.bottom() - inter.bottom(),
+                                    );
+                                    shapes.push(Shape {
+                                        outline: band,
+                                        area: band,
+                                        color: dim_color,
+                                        radii: [0; 4],
+                                        border: 0,
+                                    });
+                                }
+                                if inter.x > s.x {
+                                    let band = Rect::new(s.x, inter.y, inter.x - s.x, inter.h);
+                                    shapes.push(Shape {
+                                        outline: band,
+                                        area: band,
+                                        color: dim_color,
+                                        radii: [0; 4],
+                                        border: 0,
+                                    });
+                                }
+                                if s.right() > inter.right() {
+                                    let band = Rect::new(
+                                        inter.right(),
+                                        inter.y,
+                                        s.right() - inter.right(),
+                                        inter.h,
+                                    );
+                                    shapes.push(Shape {
+                                        outline: band,
+                                        area: band,
+                                        color: dim_color,
+                                        radii: [0; 4],
+                                        border: 0,
+                                    });
+                                }
+                            }
+                            _ => {
+                                shapes.push(Shape {
+                                    outline: s,
+                                    area: s,
+                                    color: dim_color,
+                                    radii: [0; 4],
+                                    border: 0,
+                                });
+                            }
+                        }
+                    }
+
+                    if w > 0 && h > 0 {
+                        let accent = self.theme.accent;
+                        shapes.push(Shape {
+                            outline: sel,
+                            area: sel,
+                            color: accent,
+                            radii: [0; 4],
+                            border: 2,
+                        });
+                        shapes.push(Shape {
+                            outline: sel,
+                            area: sel,
+                            color: Rgba { a: 0x18, ..accent },
+                            radii: [0; 4],
+                            border: 0,
+                        });
+                    }
+
+                    return shapes;
+                }
+            }
         }
         let Some(Gesture::Placing { window }) = self.gesture else {
             return Vec::new();
@@ -960,6 +1077,9 @@ impl State {
             match (state, button) {
                 (ButtonState::Pressed, BTN_RIGHT) => {
                     self.screenshot_mode = None;
+                    self.screenshot_freeze = None;
+                    self.full_redraw = true;
+                    self.refresh_pointer_focus();
                     self.queue_redraw();
                 }
                 (ButtonState::Pressed, BTN_LEFT) => {
@@ -971,8 +1091,6 @@ impl State {
                 }
                 (ButtonState::Released, BTN_LEFT) => {
                     if let ScreenshotMode::DraggingRegion { start, .. } = mode {
-                        self.screenshot_mode = None;
-                        self.queue_redraw();
                         let p1 = model_point(start);
                         let p2 = model_point(location);
                         let x = p1.x.min(p2.x);
@@ -980,10 +1098,20 @@ impl State {
                         let w = (p1.x - p2.x).abs();
                         let h = (p1.y - p2.y).abs();
                         if w >= 4 && h >= 4 {
+                            self.screenshot_mode = None;
+                            let freeze = self.screenshot_freeze.take();
+                            self.full_redraw = true;
+                            self.refresh_pointer_focus();
+                            self.queue_redraw();
                             let rect = Rect::new(x, y, w, h);
-                            if let Err(error) = crate::screenshot::capture_region(self, rect) {
+                            if let Err(error) =
+                                crate::screenshot::save_frozen_region(self, freeze.as_ref(), rect)
+                            {
                                 warn!(%error, "cannot capture region screenshot");
                             }
+                        } else {
+                            self.screenshot_mode = Some(ScreenshotMode::SelectingRegion);
+                            self.queue_redraw();
                         }
                     }
                 }

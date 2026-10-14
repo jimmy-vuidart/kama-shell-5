@@ -164,6 +164,8 @@ pub struct State {
     pub gesture: Option<Gesture>,
     /// An interactive screenshot selection in progress.
     pub screenshot_mode: Option<ScreenshotMode>,
+    /// Pre-captured screen freeze for interactive region screenshot.
+    pub screenshot_freeze: Option<crate::screenshot::ScreenshotFreeze>,
     /// The left button went down for the shell: its release is not for a
     /// client either.
     pub swallowed_press: bool,
@@ -321,6 +323,7 @@ impl State {
             panel_focus: None,
             gesture: None,
             screenshot_mode: None,
+            screenshot_freeze: None,
             swallowed_press: false,
             redraw_needed: true,
             full_redraw: true,
@@ -359,6 +362,31 @@ impl State {
             .filter(|wp| !self.is_anchored(wp.output_id))
             .map(|wp| (wp.buffer.clone(), wp.rect))
             .collect()
+    }
+
+    /// Frozen screen buffers when interactive region screenshot is active.
+    pub fn active_freeze(
+        &self,
+    ) -> Vec<(
+        smithay::backend::renderer::element::memory::MemoryRenderBuffer,
+        Rect,
+    )> {
+        self.screenshot_freeze
+            .as_ref()
+            .map(|freeze| freeze.buffers())
+            .unwrap_or_default()
+    }
+
+    /// Starts interactive region screenshot mode by pre-freezing the screens.
+    pub fn start_region_screenshot(&mut self) {
+        let freeze = crate::screenshot::freeze_screens(self);
+        self.screenshot_freeze = Some(freeze);
+        self.screenshot_mode = Some(ScreenshotMode::SelectingRegion);
+        self.full_redraw = true;
+        self.set_cursor(CursorImageStatus::Named(
+            smithay::input::pointer::CursorIcon::Crosshair,
+        ));
+        self.queue_redraw();
     }
 
     pub fn output(&self, id: OutputId) -> Option<&Output> {

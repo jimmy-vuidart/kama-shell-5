@@ -133,6 +133,8 @@ pub struct Layers<'a> {
     pub cursor: Option<Cursor>,
     /// Screen wallpapers in the global space, shown under every window and panel.
     pub wallpapers: &'a [(MemoryRenderBuffer, Rect)],
+    /// Pre-captured frozen screens for interactive region screenshot.
+    pub freeze: &'a [(MemoryRenderBuffer, Rect)],
 }
 
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
@@ -207,7 +209,84 @@ pub fn build(
         panels,
         cursor,
         wallpapers,
+        freeze,
     } = layers;
+
+    if !freeze.is_empty() {
+        let shift = ModelPoint::new(-view.x, -view.y);
+        let to_view: Point<i32, Logical> = (shift.x, shift.y).into();
+        let near_view = Rect::new(
+            view.x - CURSOR_REACH,
+            view.y - CURSOR_REACH,
+            view.w + 2 * CURSOR_REACH,
+            view.h + 2 * CURSOR_REACH,
+        );
+        let cursor = cursor.filter(|cursor| {
+            let (Cursor::Surface { location, .. } | Cursor::Image { location, .. }) = cursor;
+            near_view.contains(ModelPoint::new(location.x, location.y))
+        });
+
+        let mut elements = Vec::new();
+        match cursor {
+            Some(Cursor::Surface { surface, location }) => {
+                elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+                    renderer,
+                    &surface,
+                    physical(location + to_view),
+                    SCALE,
+                    1.0,
+                    Kind::Cursor,
+                ));
+            }
+            Some(Cursor::Image { buffer, location }) => {
+                match MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    physical(location + to_view).to_f64(),
+                    &buffer,
+                    None,
+                    None,
+                    None,
+                    Kind::Cursor,
+                ) {
+                    Ok(element) => elements.push(SceneElement::Texture(element)),
+                    Err(error) => warn!(?error, "cannot upload the cursor"),
+                }
+            }
+            None => {}
+        }
+
+        for shape in overlay {
+            let shape = Shape {
+                outline: shape.outline.translated(shift),
+                area: shape.area.translated(shift),
+                ..*shape
+            };
+            if overlaps(shape.area, Rect::new(0, 0, view.w, view.h)) {
+                elements.push(SceneElement::Shape(shape_element(&shaders.rounded, shape)));
+            }
+        }
+
+        for (buffer, rect) in freeze {
+            if overlaps(*rect, view) {
+                let corner = ModelPoint::new(rect.x + shift.x, rect.y + shift.y);
+                let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
+                match MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    location,
+                    buffer,
+                    None,
+                    None,
+                    None,
+                    Kind::Unspecified,
+                ) {
+                    Ok(element) => elements.push(SceneElement::Texture(element)),
+                    Err(error) => warn!(?error, "cannot upload the frozen screenshot buffer"),
+                }
+            }
+        }
+
+        return elements;
+    }
     let metrics = *shell.desk.metrics();
     // From the global space to the view.
     let shift = ModelPoint::new(-view.x, -view.y);

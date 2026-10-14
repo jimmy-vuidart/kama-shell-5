@@ -607,6 +607,7 @@ impl State {
         let overlay = self.overlay();
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
+        let freeze = self.active_freeze();
         let Backend::Udev(udev) = &mut self.backend else {
             return;
         };
@@ -629,6 +630,7 @@ impl State {
                 panels: &panels,
                 cursor,
                 wallpapers: &wallpapers,
+                freeze: &freeze,
             },
         );
         let crtc = screen.crtc;
@@ -666,7 +668,7 @@ impl State {
         } else {
             self.theme.backdrop.premultiplied()
         };
-        let scanout = screen.boost.scanout(anchored);
+        let scanout = screen.boost.scanout(anchored) && self.screenshot_mode.is_none();
         // Only the primary plane: the pointer is still drawn by the
         // compositor, so the buffer of the game is shown directly while
         // nothing else is on its screen.

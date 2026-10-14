@@ -306,8 +306,7 @@ impl State {
                     }
                 }
                 coquille_ipc::ScreenshotTarget::Region => {
-                    self.screenshot_mode = Some(crate::input::ScreenshotMode::SelectingRegion);
-                    self.queue_redraw();
+                    self.start_region_screenshot();
                 }
             },
             Command::Quit => {

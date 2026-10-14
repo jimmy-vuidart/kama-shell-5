@@ -6,6 +6,7 @@ use anyhow::Context;
 use coquille_model::{OutputId, Rect};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::backend::renderer::gles::GlesRenderbuffer;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::utils::{Buffer, Physical, Rectangle, Size, Transform};
@@ -113,6 +114,7 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         panels: &panels,
         cursor: None,
         wallpapers: &wallpapers,
+        freeze: &[],
     };
     let elements = scene::build(renderer, &shaders, &mut state.shell, &state.theme, layers);
 
@@ -161,56 +163,126 @@ pub fn capture_screen(state: &mut State, output_id: Option<OutputId>) -> anyhow:
     save_and_copy(state, &pixmap)
 }
 
-/// Captures a global region and crops it to the selection.
-pub fn capture_region(state: &mut State, global_rect: Rect) -> anyhow::Result<PathBuf> {
-    let screen = state
-        .shell
-        .screens
-        .iter()
-        .find(|screen| screen.rect.intersects(global_rect))
-        .or_else(|| state.shell.screens.first())
-        .context("no screen found for region")?;
-    let screen_id = screen.id;
-    let screen_rect = screen.rect;
+/// Pre-captured screen buffer for interactive region selection.
+pub struct ScreenFreeze {
+    pub output_id: OutputId,
+    pub rect: Rect,
+    pub pixmap: tiny_skia::Pixmap,
+    pub buffer: MemoryRenderBuffer,
+}
 
-    let pixmap = capture_output(state, screen_id)?;
+pub struct ScreenshotFreeze {
+    pub screens: Vec<ScreenFreeze>,
+}
 
-    let intersection = screen_rect.intersection(global_rect).unwrap_or(global_rect);
-    let local_x = (intersection.x - screen_rect.x).max(0) as u32;
-    let local_y = (intersection.y - screen_rect.y).max(0) as u32;
-    let crop_w = (intersection.w as u32).min(pixmap.width().saturating_sub(local_x));
-    let crop_h = (intersection.h as u32).min(pixmap.height().saturating_sub(local_y));
+impl ScreenshotFreeze {
+    pub fn buffers(&self) -> Vec<(MemoryRenderBuffer, Rect)> {
+        self.screens
+            .iter()
+            .map(|s| (s.buffer.clone(), s.rect))
+            .collect()
+    }
+}
 
-    if crop_w == 0 || crop_h == 0 {
+/// Pre-captures all screens into offscreen pixmaps and textures.
+pub fn freeze_screens(state: &mut State) -> ScreenshotFreeze {
+    let screen_ids: Vec<_> = state.shell.screens.iter().map(|s| (s.id, s.rect)).collect();
+    let mut screens = Vec::new();
+    for (id, rect) in screen_ids {
+        match capture_output(state, id) {
+            Ok(pixmap) => {
+                let buffer = MemoryRenderBuffer::from_slice(
+                    pixmap.data(),
+                    Fourcc::Abgr8888,
+                    (pixmap.width() as i32, pixmap.height() as i32),
+                    1,
+                    Transform::Normal,
+                    None,
+                );
+                screens.push(ScreenFreeze {
+                    output_id: id,
+                    rect,
+                    pixmap,
+                    buffer,
+                });
+            }
+            Err(error) => {
+                warn!(%error, ?id, "cannot pre-capture screen for region screenshot");
+            }
+        }
+    }
+    ScreenshotFreeze { screens }
+}
+
+/// Crops a global region from the pre-captured screen freeze and saves it.
+pub fn save_frozen_region(
+    state: &State,
+    freeze: Option<&ScreenshotFreeze>,
+    global_rect: Rect,
+) -> anyhow::Result<PathBuf> {
+    let Some(freeze) = freeze else {
+        anyhow::bail!("no pre-captured screen freeze available");
+    };
+    if global_rect.w <= 0 || global_rect.h <= 0 {
         anyhow::bail!("selection region is empty");
     }
 
-    let cropped = crop_pixmap(&pixmap, local_x, local_y, crop_w, crop_h)?;
+    let (w, h) = (global_rect.w as u32, global_rect.h as u32);
+    let mut cropped = tiny_skia::Pixmap::new(w, h).context("cannot allocate cropped pixmap")?;
+    cropped.fill(tiny_skia::Color::BLACK);
+
+    let mut copied_any = false;
+    for screen in &freeze.screens {
+        if let Some(inter) = screen.rect.intersection(global_rect) {
+            if inter.w > 0 && inter.h > 0 {
+                let src_x = (inter.x - screen.rect.x) as u32;
+                let src_y = (inter.y - screen.rect.y) as u32;
+                let dst_x = (inter.x - global_rect.x) as u32;
+                let dst_y = (inter.y - global_rect.y) as u32;
+                let copy_w = (inter.w as u32).min(screen.pixmap.width().saturating_sub(src_x));
+                let copy_h = (inter.h as u32).min(screen.pixmap.height().saturating_sub(src_y));
+                if copy_w > 0 && copy_h > 0 {
+                    copy_rect(
+                        &screen.pixmap,
+                        &mut cropped,
+                        (src_x, src_y),
+                        (dst_x, dst_y),
+                        (copy_w, copy_h),
+                    );
+                    copied_any = true;
+                }
+            }
+        }
+    }
+
+    if !copied_any {
+        anyhow::bail!("selection region did not intersect any screen");
+    }
+
     save_and_copy(state, &cropped)
 }
 
-fn crop_pixmap(
-    pixmap: &tiny_skia::Pixmap,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-) -> anyhow::Result<tiny_skia::Pixmap> {
-    if w == 0 || h == 0 {
-        anyhow::bail!("selection region is empty");
-    }
-    let mut cropped = tiny_skia::Pixmap::new(w, h).context("empty cropped pixmap")?;
-    let src_stride = pixmap.width() as usize * 4;
-    let crop_stride = w as usize * 4;
+fn copy_rect(
+    src: &tiny_skia::Pixmap,
+    dst: &mut tiny_skia::Pixmap,
+    src_pos: (u32, u32),
+    dst_pos: (u32, u32),
+    size: (u32, u32),
+) {
+    let (src_x, src_y) = src_pos;
+    let (dst_x, dst_y) = dst_pos;
+    let (w, h) = size;
+    let src_stride = src.width() as usize * 4;
+    let dst_stride = dst.width() as usize * 4;
+    let copy_stride = w as usize * 4;
 
     for row in 0..h {
-        let src_start = ((y + row) as usize * src_stride) + (x as usize * 4);
-        let src_slice = &pixmap.data()[src_start..src_start + crop_stride];
-        let dest_start = row as usize * crop_stride;
-        let dest_slice = &mut cropped.data_mut()[dest_start..dest_start + crop_stride];
-        dest_slice.copy_from_slice(src_slice);
+        let src_start = ((src_y + row) as usize * src_stride) + (src_x as usize * 4);
+        let dst_start = ((dst_y + row) as usize * dst_stride) + (dst_x as usize * 4);
+        let src_slice = &src.data()[src_start..src_start + copy_stride];
+        let dst_slice = &mut dst.data_mut()[dst_start..dst_start + copy_stride];
+        dst_slice.copy_from_slice(src_slice);
     }
-    Ok(cropped)
 }
 
 #[cfg(test)]
@@ -226,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn crop_pixmap_extracts_the_exact_region() {
+    fn copy_rect_extracts_the_exact_region() {
         let mut original = tiny_skia::Pixmap::new(10, 10).unwrap();
         // Fill pixel at (2, 3) with red
         let index = (3 * 10 + 2) * 4;
@@ -235,7 +307,8 @@ mod tests {
         original.data_mut()[index + 2] = 0; // B
         original.data_mut()[index + 3] = 255; // A
 
-        let cropped = crop_pixmap(&original, 2, 3, 4, 4).unwrap();
+        let mut cropped = tiny_skia::Pixmap::new(4, 4).unwrap();
+        copy_rect(&original, &mut cropped, (2, 3), (0, 0), (4, 4));
         assert_eq!(cropped.width(), 4);
         assert_eq!(cropped.height(), 4);
         // The top-left pixel (0, 0) of cropped must be the red pixel
