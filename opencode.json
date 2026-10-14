@@ -1,0 +1,14 @@
+{
+  "mcp": {
+    "servers": {
+      "codegraph": {
+        "type": "local",
+        "command": [
+          "scripts/codegraph.sh",
+          "serve",
+          "--mcp"
+        ]
+      }
+    }
+  }
+}

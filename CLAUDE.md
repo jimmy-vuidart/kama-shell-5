@@ -163,7 +163,7 @@ scripts/codegraph.sh impact Ratio                                        # ce qu
 scripts/codegraph.sh files                                               # l'arbre des fichiers indexés
 ```
 
-- Les agents qui parlent MCP ont la même chose par l'outil `codegraph_explore` : `.mcp.json` pour Claude Code, `agy mcp list` pour Antigravity. Le serveur suit les fichiers modifiés ; le script, lui, met l'index à jour avant chaque question.
+- Les agents qui parlent MCP ont la même chose par l'outil `codegraph_explore` : `.mcp.json` pour Claude Code, `opencode.json` pour OpenCode, `agy mcp list` pour Antigravity. Le serveur suit les fichiers modifiés ; le script, lui, met l'index à jour avant chaque question.
 - L'index est dans `.codegraph/`, jamais commité, construit au premier appel (moins d'une seconde). Rien ne quitte la machine, télémétrie coupée.
 - Poser les questions **en anglais**, comme les identifiants. Chaque fichier commence par un commentaire `//!` qui dit son rôle : c'est ce que la recherche retrouve.
 - Limites : le graphe s'arrête au dépôt. Une méthode que Smithay appelle (les gestionnaires de `handlers/`, comme `new_toplevel`) y figure sans appelant, et le code de `vendor/` n'y est pas. Pour ce qui vient de Smithay, `cargo doc` et ses exemples.
