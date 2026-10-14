@@ -329,6 +329,10 @@ impl Dock {
         Palette::new(self.snapshot.theme, accent)
     }
 
+    pub fn metrics(&self) -> ui::bar::Metrics {
+        ui::bar::Metrics::new(self.config.icon_size())
+    }
+
     pub fn identify(&self, name: &str) -> Identity {
         identify(&self.catalog, &self.games, name)
     }
@@ -410,7 +414,8 @@ impl Dock {
             };
             let entries = self.entries_for(screen);
             let pinned = entries.iter().filter(|entry| entry.pinned).count();
-            let size = ui::bar::surface_size(orientation, pinned, entries.len() - pinned);
+            let metrics = self.metrics();
+            let size = metrics.surface_size(orientation, pinned, entries.len() - pinned);
             let anchor = match orientation {
                 Orientation::Vertical(Side::Left) => Anchor::Left,
                 Orientation::Vertical(Side::Right) => Anchor::Right,
@@ -420,7 +425,7 @@ impl Dock {
                 size: Some(size),
                 layer: Layer::Top,
                 anchor,
-                exclusive_zone: Some(ui::bar::EXCLUSIVE_ZONE),
+                exclusive_zone: Some(metrics.exclusive_zone),
                 margin: None,
                 keyboard_interactivity: KeyboardInteractivity::None,
                 output_option: output,
@@ -446,17 +451,22 @@ impl Dock {
     /// pointer to what shows.
     fn fit_bars(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
+        let metrics = self.metrics();
         for index in 0..self.bars.len() {
             let bar = &self.bars[index];
             let (id, pinned) = (bar.id, bar.pinned());
-            let size = ui::bar::surface_size(bar.orientation, pinned, bar.entries.len() - pinned);
+            let size = metrics.surface_size(bar.orientation, pinned, bar.entries.len() - pinned);
             let resize = if size == bar.size {
                 Task::none()
             } else {
                 self.bars[index].size = size;
                 Task::done(Message::SizeChange { id, size })
             };
-            tasks.push(resize.chain(self.input_region(id)));
+            let exclusive = Task::done(Message::ExclusiveZoneChange {
+                id,
+                zone_size: metrics.exclusive_zone,
+            });
+            tasks.push(resize.chain(exclusive).chain(self.input_region(id)));
         }
         Task::batch(tasks)
     }
@@ -468,7 +478,9 @@ impl Dock {
             return Task::none();
         };
         let unfolded = bar.hovered || bar.unfold > 0.0;
-        let (x, y, width, height) = ui::bar::input_region(bar.orientation, bar.size, unfolded);
+        let (x, y, width, height) =
+            self.metrics()
+                .input_region(bar.orientation, bar.size, unfolded);
         Task::done(Message::SetInputRegion {
             id,
             callback: ActionCallback::new(move |region| region.add(x, y, width, height)),
@@ -831,7 +843,7 @@ impl Dock {
                         let screen = self
                             .drawer_screen()
                             .map_or(pointer.y, |screen| screen.height);
-                        let foot = screen - ui::bar::EXCLUSIVE_ZONE as f32;
+                        let foot = screen - self.metrics().exclusive_zone as f32;
                         let height = self.drawer_height(Some(foot - pointer.y)) as f32;
                         if let Some(drawer) = &mut self.drawer {
                             drawer.height = height;
@@ -956,7 +968,9 @@ impl Dock {
                 let menu = bar::menu(entry);
                 let size = (ui::menu::WIDTH, ui::menu::height(&menu));
                 let unfolded = bar.unfold > 0.5;
-                let anchor = ui::bar::entry_rect(bar.orientation, index, bar.pinned(), unfolded);
+                let anchor =
+                    self.metrics()
+                        .entry_rect(bar.orientation, index, bar.pinned(), unfolded);
                 // Beside an upright bar, above a lying one.
                 let (corner, grows) = match bar.orientation {
                     Orientation::Vertical(Side::Left) => {

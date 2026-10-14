@@ -18,8 +18,6 @@ use crate::model::mixer;
 use crate::model::{Identity, Orientation, Side};
 use coquille_ipc::ScreenshotTarget;
 
-/// The room of the bar, drawn again inside the drawer.
-const BAR: f32 = 60.0;
 const MIXER: f32 = 292.0;
 /// The strip beside the drawer that is dragged to resize it.
 const EDGE: f32 = 14.0;
@@ -97,7 +95,8 @@ fn panel<'a>(
         Some(state) => super::bar::still(dock, state, palette),
         None => space().into(),
     };
-    let bar = container(bar).width(BAR).center_y(Length::Fill);
+    let bar_room = dock.metrics().exclusive_zone as f32;
+    let bar = container(bar).width(bar_room).center_y(Length::Fill);
 
     let mut content: Column<'_, Message> = column![search(drawer, palette)].spacing(12);
     if drawer.query.trim().is_empty() {
@@ -205,8 +204,9 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
 
 /// The pinned applications, each with the place it opens in.
 fn pinned<'a>(dock: &'a Dock, width: f32, palette: Palette) -> Element<'a, Message> {
+    let bar_room = dock.metrics().exclusive_zone as f32;
     // The room a name has under its icon, whatever the width of the drawer.
-    let tile = (width - BAR - 20.0) / PINNED as f32 - 4.0;
+    let tile = (width - bar_room - 20.0) / PINNED as f32 - 4.0;
     let mut tiles: Row<'_, Message> = row![].spacing(4);
     let mut shown = Vec::new();
     for name in &dock.config.pinned {
@@ -953,12 +953,13 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
 
     let screen = drawer.surface.map_or(1920.0, |surface| surface.width);
     let width = drawer::panel_width(screen) as f32;
+    let bar_room = dock.metrics().exclusive_zone as f32;
 
     let body: Element<'_, Message> = if drawer.query.trim().is_empty() {
         let mut apps: Column<'_, Message> = column![].spacing(10);
         if !dock.config.pinned.is_empty() {
             // Its column takes about half of the panel.
-            apps = apps.push(pinned(dock, width * 0.47 + BAR, palette));
+            apps = apps.push(pinned(dock, width * 0.47 + bar_room, palette));
         }
         apps = apps.push(applications(dock, drawer, palette));
         row![
@@ -1015,7 +1016,7 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     // The bar is drawn again under the panel, as the launcher covers it.
     let bar: Element<'_, Message> = match dock.bar_on(drawer.screen) {
         Some(state) => super::bar::still(dock, state, palette),
-        None => space().height(BAR).into(),
+        None => space().height(bar_room).into(),
     };
     stack![scrim, column![middle.height(Length::Fill), bar]].into()
 }

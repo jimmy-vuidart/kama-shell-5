@@ -63,6 +63,10 @@ right = "DP-1"
 [dock]
 favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
+# Taille des icônes de la barre, en pixels (par défaut 24). La barre et sa
+# zone réservée s'ajustent automatiquement.
+# icon_size = 24
+
 # Quel écran a un dock, et dans quel sens : "vertical" (colonne sur le bord
 # gauche, lanceur en tiroir), "vertical-right" (la même sur le bord droit),
 # "horizontal" (rangée sur le bord bas, lanceur en panneau au-dessus) ou

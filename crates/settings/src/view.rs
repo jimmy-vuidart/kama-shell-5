@@ -499,6 +499,32 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         .align_y(Alignment::Center);
         content = content.push(column![title, card(rows, palette)].spacing(8));
     }
+
+    let icon_sizes = [
+        (20, "Petite (20)"),
+        (24, "Normale (24)"),
+        (28, "Grande (28)"),
+        (32, "Très grande (32)"),
+    ];
+    let icon_size_picker = segmented(
+        &icon_sizes,
+        app.file.dock_icon_size(),
+        |size| Message::Change(Change::DockIconSize(size)),
+        palette,
+    );
+    let dock_settings = vec![setting(
+        "Taille des icônes",
+        "La taille des icônes dans la barre du dock (en pixels).",
+        None,
+        icon_size_picker,
+        palette,
+    )];
+    let dock_title = text("Dock")
+        .size(14)
+        .font(style::SEMIBOLD)
+        .color(palette.text);
+    content = content.push(column![dock_title, card(dock_settings, palette)].spacing(8));
+
     content.into()
 }
 

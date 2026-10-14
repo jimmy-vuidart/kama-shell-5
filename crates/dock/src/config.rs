@@ -30,6 +30,8 @@ pub struct Config {
     pub drawer_width: Option<u32>,
     /// The height the user gave the horizontal launcher.
     pub drawer_height: Option<u32>,
+    /// The icon size of the dock bar.
+    pub icon_size: Option<u32>,
 }
 
 impl Default for Config {
@@ -42,7 +44,14 @@ impl Default for Config {
             pinned: Vec::new(),
             drawer_width: None,
             drawer_height: None,
+            icon_size: None,
         }
+    }
+}
+
+impl Config {
+    pub fn icon_size(&self) -> u32 {
+        self.icon_size.unwrap_or(crate::ui::bar::DEFAULT_ICON_SIZE)
     }
 }
 
@@ -93,6 +102,10 @@ pub fn parse(text: &str) -> Config {
         let said = document.get("dock")?.get("screens")?.get(name)?.as_str()?;
         Some(said.to_owned())
     };
+    let dock_int = |key: &str| {
+        let value = document.get("dock")?.get(key)?.as_integer()?;
+        u32::try_from(value).ok()
+    };
     let favorites = names("dock", "favorites").unwrap_or_default();
     Config {
         theme: match text_of("theme") {
@@ -105,6 +118,7 @@ pub fn parse(text: &str) -> Config {
         pinned: names("drawer", "pinned").unwrap_or_else(|| favorites.clone()),
         drawer_width: length("width"),
         drawer_height: length("height"),
+        icon_size: dock_int("icon_size"),
         favorites,
     }
 }
@@ -114,6 +128,12 @@ pub fn parse(text: &str) -> Config {
 pub fn with_favorites(text: &str, favorites: &[String]) -> Option<String> {
     let names: Array = favorites.iter().map(String::as_str).collect();
     with_value(text, &["dock", "favorites"], Value::Array(names))
+}
+
+/// The file with another icon size for the dock bar.
+#[cfg(test)]
+pub fn with_icon_size(text: &str, size: u32) -> Option<String> {
+    with_value(text, &["dock", "icon_size"], i64::from(size).into())
 }
 
 /// The file with another width for the drawer.
@@ -367,5 +387,18 @@ pinned = ["firefox", "mpv"]
     fn a_broken_file_is_never_rewritten() {
         assert_eq!(with_favorites("theme = \n[dock", &names(&["kitty"])), None);
         assert_eq!(with_theme("= 3", ThemeName::Dark), None);
+    }
+
+    #[test]
+    fn the_icon_size_of_the_dock_is_read_and_written() {
+        assert_eq!(parse("[dock]\nicon_size = 32\n").icon_size, Some(32));
+        assert_eq!(parse("[dock]\nicon_size = 32\n").icon_size(), 32);
+        assert_eq!(parse(FILE).icon_size, None);
+        assert_eq!(parse(FILE).icon_size(), 24);
+
+        let changed = with_icon_size(FILE, 28).unwrap();
+        assert_eq!(parse(&changed).icon_size, Some(28));
+        assert_eq!(parse(&changed).icon_size(), 28);
+        assert!(changed.contains("# Mes applis de tous les jours."));
     }
 }

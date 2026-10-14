@@ -11,21 +11,14 @@ use crate::app::{BarState, Dock, Message};
 use crate::model::bar::{Entry, Indicator};
 use crate::model::{Orientation, Side};
 
-/// The surface is as wide as the unfolded bar, with room for its shadow.
-pub const SURFACE_WIDTH: u32 = 236;
-/// What takes the pointer when the bar is unfolded: the bar, not its shadow.
-pub const UNFOLDED_REACH: u32 = 212;
-/// What the bar keeps for itself along the edge: windows start after it.
-pub const EXCLUSIVE_ZONE: i32 = 60;
+pub const DEFAULT_ICON_SIZE: u32 = 24;
+pub const MIN_ICON_SIZE: u32 = 16;
+pub const MAX_ICON_SIZE: u32 = 64;
+
 /// Between the edge of the screen and the bar.
-const MARGIN: f32 = 8.0;
+pub const MARGIN: f32 = 8.0;
 /// Above and under the bar, for its shadow.
 const SHADOW: f32 = 24.0;
-const WIDTH: f32 = 44.0;
-const UNFOLDED: f32 = 200.0;
-const RADIUS: f32 = 14.0;
-const SLOT: f32 = 36.0;
-const ICON: f32 = 24.0;
 const GAP: f32 = 4.0;
 /// Inside the bar, above the launcher and under the clock.
 const PADDING: f32 = 6.0;
@@ -43,142 +36,226 @@ const SIDE: f32 = 110.0;
 const DIVIDER: f32 = 9.0;
 const CLOCK_WIDTH: f32 = 62.0;
 
-/// The height of the bar for a number of favorites and of other entries.
-fn bar_height(pinned: usize, others: usize) -> f32 {
-    // The launcher, the favorites and the others, each group under its
-    // section when it has entries, the clock; a gap between each.
-    let mut rows = vec![SLOT];
-    if pinned > 0 {
-        rows.push(SECTION);
-        rows.extend(std::iter::repeat_n(SLOT, pinned));
-    }
-    if others > 0 {
-        rows.push(SECTION);
-        rows.extend(std::iter::repeat_n(SLOT, others));
-    }
-    rows.push(CLOCK);
-    let gaps = GAP * (rows.len() - 1) as f32;
-    rows.iter().sum::<f32>() + gaps + 2.0 * PADDING
+/// Layout metrics of the dock bar, derived from the configured icon size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    pub icon_size: f32,
+    pub slot: f32,
+    pub width: f32,
+    pub exclusive_zone: i32,
+    pub unfolded: f32,
+    pub surface_width: u32,
+    pub unfolded_reach: u32,
+    pub radius: f32,
+    pub tile_radius: f32,
+    pub launcher_glyph: f32,
 }
 
-/// The height of the surface that holds the bar.
+impl Metrics {
+    pub fn new(icon_size: u32) -> Self {
+        let icon = icon_size.clamp(MIN_ICON_SIZE, MAX_ICON_SIZE) as f32;
+        let slot = icon + 12.0;
+        let width = slot + 8.0;
+        let exclusive_zone = (width + 2.0 * MARGIN).round() as i32;
+        let unfolded = 200.0_f32.max(width + 100.0);
+        let surface_width = (unfolded + MARGIN + SHADOW + 4.0).ceil() as u32;
+        let unfolded_reach = (unfolded + MARGIN + 4.0).ceil() as u32;
+        let radius = ((width - 16.0) / 2.0).clamp(10.0, 24.0);
+        let tile_radius = (slot * 0.28).round();
+        let launcher_glyph = (icon * (22.0 / 24.0)).round();
+
+        Self {
+            icon_size: icon,
+            slot,
+            width,
+            exclusive_zone,
+            unfolded,
+            surface_width,
+            unfolded_reach,
+            radius,
+            tile_radius,
+            launcher_glyph,
+        }
+    }
+
+    /// The height of the bar for a number of favorites and of other entries.
+    pub fn bar_height(&self, pinned: usize, others: usize) -> f32 {
+        let mut rows = vec![self.slot];
+        if pinned > 0 {
+            rows.push(SECTION);
+            rows.extend(std::iter::repeat_n(self.slot, pinned));
+        }
+        if others > 0 {
+            rows.push(SECTION);
+            rows.extend(std::iter::repeat_n(self.slot, others));
+        }
+        rows.push(CLOCK);
+        let gaps = GAP * (rows.len() - 1) as f32;
+        rows.iter().sum::<f32>() + gaps + 2.0 * PADDING
+    }
+
+    /// The height of the surface that holds the bar.
+    pub fn surface_height(&self, pinned: usize, others: usize) -> u32 {
+        (self.bar_height(pinned, others) + 2.0 * SHADOW).ceil() as u32
+    }
+
+    /// The width of a lying bar for a number of favorites and of other
+    /// entries.
+    pub fn lying_width(&self, pinned: usize, others: usize) -> f32 {
+        let mut items = vec![self.slot];
+        for group in [pinned, others] {
+            if group > 0 {
+                items.push(DIVIDER);
+                items.extend(std::iter::repeat_n(self.slot, group));
+            }
+        }
+        items.extend([DIVIDER, CLOCK_WIDTH]);
+        let gaps = GAP * (items.len() - 1) as f32;
+        items.iter().sum::<f32>() + gaps + 2.0 * PADDING
+    }
+
+    /// How far from the left end of a lying bar the entry `index` starts.
+    pub fn lying_left(&self, index: usize, pinned: usize) -> f32 {
+        let dividers = if index >= pinned && pinned > 0 {
+            2.0
+        } else {
+            1.0
+        };
+        PADDING + self.slot + GAP + dividers * (DIVIDER + GAP) + index as f32 * (self.slot + GAP)
+    }
+
+    /// The size of the surface of a bar, for a number of favorites and of
+    /// other entries.
+    pub fn surface_size(
+        &self,
+        orientation: Orientation,
+        pinned: usize,
+        others: usize,
+    ) -> (u32, u32) {
+        match orientation {
+            Orientation::Vertical(_) => (self.surface_width, self.surface_height(pinned, others)),
+            Orientation::Horizontal => {
+                let width = self.lying_width(pinned, others) + 2.0 * SIDE;
+                (
+                    width.ceil() as u32,
+                    (LABEL_ROOM + self.width + MARGIN) as u32,
+                )
+            }
+        }
+    }
+
+    /// The part of its surface where a bar takes the pointer (x, y, width,
+    /// height): what shows, so that the windows around it stay clickable.
+    pub fn input_region(
+        &self,
+        orientation: Orientation,
+        size: (u32, u32),
+        unfolded: bool,
+    ) -> (i32, i32, i32, i32) {
+        let (width, height) = (size.0 as i32, size.1 as i32);
+        match orientation {
+            Orientation::Vertical(side) => {
+                let reach = if unfolded {
+                    self.unfolded_reach as i32
+                } else {
+                    self.exclusive_zone
+                };
+                let x = match side {
+                    Side::Left => 0,
+                    Side::Right => width - reach,
+                };
+                (x, 0, reach, height)
+            }
+            Orientation::Horizontal => {
+                let side = SIDE as i32;
+                (
+                    side,
+                    LABEL_ROOM as i32,
+                    width - 2 * side,
+                    (self.width + MARGIN) as i32,
+                )
+            }
+        }
+    }
+
+    /// Where the entry `index` is in the surface of its bar (x, y, width,
+    /// height): what its menu opens next to. `unfolded` says an upright bar
+    /// shows at its full width.
+    pub fn entry_rect(
+        &self,
+        orientation: Orientation,
+        index: usize,
+        pinned: usize,
+        unfolded: bool,
+    ) -> (i32, i32, i32, i32) {
+        match orientation {
+            Orientation::Vertical(side) => self.upright_rect(side, index, pinned, unfolded),
+            Orientation::Horizontal => (
+                (SIDE + self.lying_left(index, pinned)) as i32,
+                (LABEL_ROOM - 6.0) as i32,
+                self.slot as i32,
+                (self.width + 6.0) as i32,
+            ),
+        }
+    }
+
+    fn upright_rect(
+        &self,
+        side: Side,
+        index: usize,
+        pinned: usize,
+        unfolded: bool,
+    ) -> (i32, i32, i32, i32) {
+        let mut top = SHADOW + PADDING + self.slot + GAP;
+        top += index as f32 * (self.slot + GAP);
+        let sections = if index >= pinned && pinned > 0 {
+            2.0
+        } else {
+            1.0
+        };
+        top += sections * (SECTION + GAP);
+        let width = if unfolded { self.unfolded } else { self.width };
+        let x = match side {
+            Side::Left => MARGIN,
+            Side::Right => self.surface_width as f32 - MARGIN - width,
+        };
+        (x as i32, top as i32, width as i32, self.slot as i32)
+    }
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new(DEFAULT_ICON_SIZE)
+    }
+}
+
+#[cfg(test)]
 pub fn surface_height(pinned: usize, others: usize) -> u32 {
-    (bar_height(pinned, others) + 2.0 * SHADOW).ceil() as u32
+    Metrics::default().surface_height(pinned, others)
 }
 
-/// The width of a lying bar for a number of favorites and of other
-/// entries.
-fn lying_width(pinned: usize, others: usize) -> f32 {
-    // The launcher, each group behind its hairline, a hairline, the clock;
-    // a gap between each.
-    let mut items = vec![SLOT];
-    for group in [pinned, others] {
-        if group > 0 {
-            items.push(DIVIDER);
-            items.extend(std::iter::repeat_n(SLOT, group));
-        }
-    }
-    items.extend([DIVIDER, CLOCK_WIDTH]);
-    let gaps = GAP * (items.len() - 1) as f32;
-    items.iter().sum::<f32>() + gaps + 2.0 * PADDING
-}
-
-/// How far from the left end of a lying bar the entry `index` starts.
-fn lying_left(index: usize, pinned: usize) -> f32 {
-    // The hairline of its group, and the one of the favorites when it
-    // comes after them.
-    let dividers = if index >= pinned && pinned > 0 {
-        2.0
-    } else {
-        1.0
-    };
-    PADDING + SLOT + GAP + dividers * (DIVIDER + GAP) + index as f32 * (SLOT + GAP)
-}
-
-/// The size of the surface of a bar, for a number of favorites and of
-/// other entries.
+#[cfg(test)]
 pub fn surface_size(orientation: Orientation, pinned: usize, others: usize) -> (u32, u32) {
-    match orientation {
-        Orientation::Vertical(_) => (SURFACE_WIDTH, surface_height(pinned, others)),
-        Orientation::Horizontal => {
-            let width = lying_width(pinned, others) + 2.0 * SIDE;
-            (width.ceil() as u32, (LABEL_ROOM + WIDTH + MARGIN) as u32)
-        }
-    }
+    Metrics::default().surface_size(orientation, pinned, others)
 }
 
-/// The part of its surface where a bar takes the pointer (x, y, width,
-/// height): what shows, so that the windows around it stay clickable.
+#[cfg(test)]
 pub fn input_region(
     orientation: Orientation,
     size: (u32, u32),
     unfolded: bool,
 ) -> (i32, i32, i32, i32) {
-    let (width, height) = (size.0 as i32, size.1 as i32);
-    match orientation {
-        Orientation::Vertical(side) => {
-            let reach = if unfolded {
-                UNFOLDED_REACH as i32
-            } else {
-                EXCLUSIVE_ZONE
-            };
-            let x = match side {
-                Side::Left => 0,
-                Side::Right => width - reach,
-            };
-            (x, 0, reach, height)
-        }
-        Orientation::Horizontal => {
-            let side = SIDE as i32;
-            (
-                side,
-                LABEL_ROOM as i32,
-                width - 2 * side,
-                (WIDTH + MARGIN) as i32,
-            )
-        }
-    }
+    Metrics::default().input_region(orientation, size, unfolded)
 }
 
-/// Where the entry `index` is in the surface of its bar (x, y, width,
-/// height): what its menu opens next to. `unfolded` says an upright bar
-/// shows at its full width.
+#[cfg(test)]
 pub fn entry_rect(
     orientation: Orientation,
     index: usize,
     pinned: usize,
     unfolded: bool,
 ) -> (i32, i32, i32, i32) {
-    match orientation {
-        Orientation::Vertical(side) => upright_rect(side, index, pinned, unfolded),
-        // The whole height of the bar, and a little more: the menu opens
-        // just above it.
-        Orientation::Horizontal => (
-            (SIDE + lying_left(index, pinned)) as i32,
-            (LABEL_ROOM - 6.0) as i32,
-            SLOT as i32,
-            (WIDTH + 6.0) as i32,
-        ),
-    }
-}
-
-fn upright_rect(side: Side, index: usize, pinned: usize, unfolded: bool) -> (i32, i32, i32, i32) {
-    let mut top = SHADOW + PADDING + SLOT + GAP;
-    top += index as f32 * (SLOT + GAP);
-    // The titles of the groups above it: its own, and the one of the
-    // favorites when it comes after them.
-    let sections = if index >= pinned && pinned > 0 {
-        2.0
-    } else {
-        1.0
-    };
-    top += sections * (SECTION + GAP);
-    let width = if unfolded { UNFOLDED } else { WIDTH };
-    let x = match side {
-        Side::Left => MARGIN,
-        Side::Right => SURFACE_WIDTH as f32 - MARGIN - width,
-    };
-    (x as i32, top as i32, width as i32, SLOT as i32)
+    Metrics::default().entry_rect(orientation, index, pinned, unfolded)
 }
 
 /// How an upright bar shows: the edge it stands on, whether its texts have
@@ -249,14 +326,24 @@ pub fn clock<T: Datelike + Timelike>(now: &T) -> (String, String, String, String
 
 pub fn view<'a>(dock: &'a Dock, state: &'a BarState) -> Element<'a, Message> {
     let palette = dock.palette();
+    let metrics = dock.metrics();
     match state.orientation {
-        Orientation::Vertical(side) => bar(dock, state, side, ease(state.unfold), true, palette),
+        Orientation::Vertical(side) => bar(
+            dock,
+            state,
+            side,
+            ease(state.unfold),
+            true,
+            metrics,
+            palette,
+        ),
         Orientation::Horizontal => {
             let label: Element<'_, Message> = match hovered_entry(dock, state) {
-                Some((index, entry)) => label(dock, state, index, entry, palette),
+                Some((index, entry)) => label(dock, state, index, entry, metrics, palette),
                 None => space().into(),
             };
-            let lying = container(lying(dock, state, true, palette)).center_x(Length::Fill);
+            let lying =
+                container(lying(dock, state, true, metrics, palette)).center_x(Length::Fill);
             column![
                 container(label).height(LABEL_ROOM).align_y(Alignment::End),
                 lying,
@@ -269,10 +356,12 @@ pub fn view<'a>(dock: &'a Dock, state: &'a BarState) -> Element<'a, Message> {
 
 /// A bar as the launcher shows it under itself: folded and still.
 pub fn still<'a>(dock: &'a Dock, state: &'a BarState, palette: Palette) -> Element<'a, Message> {
+    let metrics = dock.metrics();
     match state.orientation {
-        Orientation::Vertical(side) => bar(dock, state, side, 0.0, false, palette),
+        Orientation::Vertical(side) => bar(dock, state, side, 0.0, false, metrics, palette),
         Orientation::Horizontal => {
-            let lying = container(lying(dock, state, false, palette)).center_x(Length::Fill);
+            let lying =
+                container(lying(dock, state, false, metrics, palette)).center_x(Length::Fill);
             column![space().height(MARGIN), lying, space().height(MARGIN)].into()
         }
     }
@@ -295,6 +384,7 @@ fn label<'a>(
     state: &BarState,
     index: usize,
     entry: &'a Entry,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let unread = dock.unread_of(entry);
@@ -324,7 +414,7 @@ fn label<'a>(
                 10.0,
             )
         });
-    let left = (SIDE + lying_left(index, state.pinned()) - 8.0).max(0.0);
+    let left = (SIDE + metrics.lying_left(index, state.pinned()) - 8.0).max(0.0);
     container(card)
         .padding(Padding {
             left,
@@ -341,30 +431,36 @@ fn lying<'a>(
     dock: &'a Dock,
     state: &'a BarState,
     live: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let pinned = state.pinned();
     let divider = || {
         let line = container(space().width(1).height(22))
             .style(move |_| style::fill(palette.separator, 0.0));
-        container(line).center_x(DIVIDER).center_y(WIDTH)
+        container(line).center_x(DIVIDER).center_y(metrics.width)
     };
 
-    let mut items: Row<'_, Message> = row![lying_launcher(dock, state, live, palette)].spacing(GAP);
+    let mut items: Row<'_, Message> =
+        row![lying_launcher(dock, state, live, metrics, palette)].spacing(GAP);
     for (index, entry) in state.entries.iter().enumerate() {
         if index == 0 || index == pinned {
             items = items.push(divider());
         }
-        items = items.push(lying_entry(dock, state, index, entry, live, palette));
+        items = items.push(lying_entry(
+            dock, state, index, entry, live, metrics, palette,
+        ));
     }
-    items = items.push(divider()).push(lying_time(&dock.now, palette));
+    items = items
+        .push(divider())
+        .push(lying_time(&dock.now, metrics, palette));
 
     let body = container(items)
-        .height(WIDTH)
+        .height(metrics.width)
         .padding(Padding::from([0.0, PADDING]))
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::outlined(palette.bar, palette.bar_border, RADIUS)
+            ..style::outlined(palette.bar, palette.bar_border, metrics.radius)
         });
     if !live {
         return body.into();
@@ -379,6 +475,7 @@ fn lying_launcher<'a>(
     dock: &Dock,
     state: &BarState,
     live: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let open = dock.drawer.is_some();
@@ -387,11 +484,11 @@ fn lying_launcher<'a>(
     } else {
         (palette.accent, iced::Color::TRANSPARENT)
     };
-    let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
-        .center_x(SLOT)
-        .center_y(SLOT)
-        .style(move |_| style::fill(background, 10.0));
-    let area = mouse_area(container(icon).center_y(WIDTH));
+    let icon = container(icons::glyph(Glyph::Launcher, metrics.launcher_glyph, color))
+        .center_x(metrics.slot)
+        .center_y(metrics.slot)
+        .style(move |_| style::fill(background, metrics.tile_radius));
+    let area = mouse_area(container(icon).center_y(metrics.width));
     if live || open {
         area.on_press(Message::Launcher(Some(state.screen))).into()
     } else {
@@ -406,6 +503,7 @@ fn lying_entry<'a>(
     index: usize,
     entry: &'a Entry,
     live: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let hovered = live && state.hover_entry == Some(index);
@@ -426,24 +524,25 @@ fn lying_entry<'a>(
     } else {
         iced::Color::TRANSPARENT
     };
-    let icon = container(icons::app(&dock.icons, &entry.identity, ICON))
-        .center_x(SLOT)
-        .center_y(SLOT)
-        .style(move |_| style::fill(tile, 10.0));
+    let icon = container(icons::app(&dock.icons, &entry.identity, metrics.icon_size))
+        .center_x(metrics.slot)
+        .center_y(metrics.slot)
+        .style(move |_| style::fill(tile, metrics.tile_radius));
     let icon: Element<'_, Message> = if unread > 0 {
         let count = container(badge(unread, 14.0))
-            .width(SLOT)
-            .height(SLOT)
+            .width(metrics.slot)
+            .height(metrics.slot)
             .align_x(Alignment::End)
             .align_y(Alignment::Start);
         stack![icon, count].into()
     } else {
         icon.into()
     };
+    let mark_height = (metrics.width - metrics.slot - 2.0).max(0.0);
     let slot = column![
         space().height(2),
         icon,
-        container(mark).center_x(SLOT).height(WIDTH - SLOT - 2.0)
+        container(mark).center_x(metrics.slot).height(mark_height)
     ];
     if !live {
         return slot.into();
@@ -458,7 +557,11 @@ fn lying_entry<'a>(
         .into()
 }
 
-fn lying_time<'a>(now: &DateTime<Local>, palette: Palette) -> Element<'a, Message> {
+fn lying_time<'a>(
+    now: &DateTime<Local>,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
     let (hours, minutes, short, _) = clock(now);
     let time = text(format!("{hours}:{minutes}"))
         .size(14)
@@ -469,7 +572,7 @@ fn lying_time<'a>(now: &DateTime<Local>, palette: Palette) -> Element<'a, Messag
         .width(CLOCK_WIDTH)
         .padding(Padding::from([0.0, 6.0]))
         .align_x(Alignment::End)
-        .center_y(WIDTH)
+        .center_y(metrics.width)
         .into()
 }
 
@@ -481,16 +584,18 @@ fn bar<'a>(
     side: Side,
     unfold: f32,
     live: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let width = WIDTH + (UNFOLDED - WIDTH) * unfold;
+    let width = metrics.width + (metrics.unfolded - metrics.width) * unfold;
     // Texts come once there is room for them.
     let labels = unfold > 0.4;
     let pinned = state.pinned();
     let others = state.entries.len() - pinned;
     let look = Look { side, labels, live };
 
-    let mut rows: Column<'_, Message> = column![launcher(dock, state, look, palette)].spacing(GAP);
+    let mut rows: Column<'_, Message> =
+        column![launcher(dock, state, look, metrics, palette)].spacing(GAP);
     for (index, entry) in state.entries.iter().enumerate() {
         if index == 0 && pinned > 0 {
             rows = rows.push(section("FAVORIS", side, labels, palette));
@@ -498,19 +603,19 @@ fn bar<'a>(
         if index == pinned {
             rows = rows.push(section("OUVERTES", side, labels, palette));
         }
-        rows = rows.push(entry_row(dock, state, index, entry, look, palette));
+        rows = rows.push(entry_row(dock, state, index, entry, look, metrics, palette));
     }
     rows = rows.push(space().height(Length::Fill));
     rows = rows.push(time(&dock.now, side, labels, palette));
 
     let body = container(rows)
         .width(width)
-        .height(bar_height(pinned, others))
+        .height(metrics.bar_height(pinned, others))
         .padding(Padding::from([PADDING, 0.0]))
         .clip(true)
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::outlined(palette.bar, palette.bar_border, RADIUS)
+            ..style::outlined(palette.bar, palette.bar_border, metrics.radius)
         });
     let body: Element<'_, Message> = if live {
         mouse_area(body)
@@ -542,6 +647,7 @@ fn launcher<'a>(
     dock: &Dock,
     state: &BarState,
     look: Look,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let Look { side, labels, live } = look;
@@ -556,10 +662,10 @@ fn launcher<'a>(
     } else {
         iced::Color::TRANSPARENT
     };
-    let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
-        .center_x(SLOT)
-        .center_y(SLOT)
-        .style(move |_| style::fill(background, 10.0));
+    let icon = container(icons::glyph(Glyph::Launcher, metrics.launcher_glyph, color))
+        .center_x(metrics.slot)
+        .center_y(metrics.slot)
+        .style(move |_| style::fill(background, metrics.tile_radius));
     let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon.into()];
     if labels {
         let label = text("Lanceur")
@@ -569,7 +675,7 @@ fn launcher<'a>(
         content.extend([space().width(8).into(), label.into()]);
     }
     let content = container(from_edge(side, content))
-        .height(SLOT)
+        .height(metrics.slot)
         .width(Length::Fill)
         .align_x(outward(side));
     let area = mouse_area(content);
@@ -615,6 +721,7 @@ fn entry_row<'a>(
     index: usize,
     entry: &'a Entry,
     look: Look,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let Look { side, labels, live } = look;
@@ -634,7 +741,7 @@ fn entry_row<'a>(
     // Against its icon.
     let mark = container(mark)
         .width(MARK)
-        .center_y(SLOT)
+        .center_y(metrics.slot)
         .align_x(match side {
             Side::Left => Alignment::End,
             Side::Right => Alignment::Start,
@@ -645,15 +752,15 @@ fn entry_row<'a>(
     } else {
         iced::Color::TRANSPARENT
     };
-    let icon = container(icons::app(&dock.icons, &entry.identity, ICON))
-        .center_x(SLOT)
-        .center_y(SLOT)
-        .style(move |_| style::fill(tile, 10.0));
+    let icon = container(icons::app(&dock.icons, &entry.identity, metrics.icon_size))
+        .center_x(metrics.slot)
+        .center_y(metrics.slot)
+        .style(move |_| style::fill(tile, metrics.tile_radius));
     // Folded, the count of unread messages sits on the corner of the icon.
     let icon: Element<'_, Message> = if unread > 0 && !labels {
         let count = container(badge(unread, 14.0))
-            .width(SLOT)
-            .height(SLOT)
+            .width(metrics.slot)
+            .height(metrics.slot)
             .align_x(Alignment::End)
             .align_y(Alignment::Start);
         stack![icon, count].into()
@@ -692,10 +799,10 @@ fn entry_row<'a>(
         iced::Color::TRANSPARENT
     };
     let row = container(from_edge(side, content))
-        .height(SLOT)
+        .height(metrics.slot)
         .width(Length::Fill)
         .align_x(outward(side))
-        .style(move |_| style::fill(background, 10.0));
+        .style(move |_| style::fill(background, metrics.tile_radius));
     let row = container(row).padding(Padding::from([0.0, if labels { 4.0 } else { 0.0 }]));
     if !live {
         return row.into();
@@ -768,6 +875,11 @@ mod tests {
     use chrono::NaiveDate;
 
     use super::*;
+
+    const WIDTH: f32 = 44.0;
+    const SLOT: f32 = 36.0;
+    const SURFACE_WIDTH: u32 = 236;
+    const UNFOLDED_REACH: u32 = 212;
 
     #[test]
     fn the_clock_speaks_french() {
@@ -924,5 +1036,32 @@ mod tests {
         assert!(ease(0.0).abs() < f32::EPSILON);
         assert!((ease(1.0) - 1.0).abs() < f32::EPSILON);
         assert!(ease(0.1) < 0.1 && ease(0.9) > 0.9);
+    }
+
+    #[test]
+    fn the_metrics_scale_with_icon_size() {
+        let default = Metrics::default();
+        assert_eq!(default.icon_size, 24.0);
+        assert_eq!(default.slot, 36.0);
+        assert_eq!(default.width, 44.0);
+        assert_eq!(default.exclusive_zone, 60);
+        assert_eq!(default.surface_width, 236);
+        assert_eq!(default.unfolded_reach, 212);
+
+        let large = Metrics::new(32);
+        assert_eq!(large.icon_size, 32.0);
+        assert_eq!(large.slot, 44.0);
+        assert_eq!(large.width, 52.0);
+        assert_eq!(large.exclusive_zone, 68);
+
+        let small = Metrics::new(16);
+        assert_eq!(small.icon_size, 16.0);
+        assert_eq!(small.slot, 28.0);
+        assert_eq!(small.width, 36.0);
+        assert_eq!(small.exclusive_zone, 52);
+
+        // Clamping bounds
+        assert_eq!(Metrics::new(5).icon_size, MIN_ICON_SIZE as f32);
+        assert_eq!(Metrics::new(128).icon_size, MAX_ICON_SIZE as f32);
     }
 }

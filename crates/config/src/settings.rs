@@ -161,6 +161,7 @@ pub struct Settings {
     pub direct_scanout: Option<bool>,
     pub vrr: Option<bool>,
     pub docks: PerScreen<Option<DockPlace>>,
+    pub dock_icon_size: Option<u32>,
     pub mouse_accel_speed: Option<f64>,
     pub mouse_accel_profile: Option<MouseAccelProfile>,
     pub mouse_natural_scroll: Option<bool>,
@@ -172,6 +173,7 @@ pub struct Settings {
 
 impl Settings {
     pub const DEFAULT_STICKY_EDGES_MS: u64 = 300;
+    pub const DEFAULT_DOCK_ICON_SIZE: u32 = 24;
 
     /// Reads the file. One that is not valid TOML says nothing.
     pub fn parse(text: &str) -> Self {
@@ -216,6 +218,9 @@ impl Settings {
                 let said = text_of(&["dock", "screens", role_name(role)])?;
                 DockPlace::named(&said)
             }),
+            dock_icon_size: item(&["dock", "icon_size"])
+                .and_then(Item::as_integer)
+                .and_then(|size| u32::try_from(size).ok()),
             mouse_accel_speed: float_of(&["mouse", "accel_speed"]),
             mouse_accel_profile: text_of(&["mouse", "accel_profile"])
                 .as_deref()
@@ -253,6 +258,10 @@ impl Settings {
 
     pub fn dock(&self, role: OutputRole) -> DockPlace {
         self.docks.get(role).unwrap_or(DockPlace::usual(role))
+    }
+
+    pub fn dock_icon_size(&self) -> u32 {
+        self.dock_icon_size.unwrap_or(Self::DEFAULT_DOCK_ICON_SIZE)
     }
 
     pub fn wallpaper(&self, role: OutputRole) -> Option<&str> {
@@ -311,6 +320,7 @@ pub enum Change {
     DirectScanout(bool),
     Vrr(bool),
     Dock(OutputRole, DockPlace),
+    DockIconSize(u32),
     MouseAccelSpeed(f64),
     MouseAccelProfile(MouseAccelProfile),
     MouseNaturalScroll(bool),
@@ -368,6 +378,10 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
         Change::Dock(role, place) => {
             let path = ["dock", "screens", role_name(*role)];
             with_value(text, &path, place.name().into())
+        }
+        Change::DockIconSize(size) => {
+            let path = ["dock", "icon_size"];
+            with_value(text, &path, i64::from(*size).into())
         }
         Change::MouseAccelSpeed(speed) => {
             let speed = (speed * 100.0).round() / 100.0;
@@ -561,6 +575,7 @@ mod tests {
                 center: Some(DockPlace::VerticalRight),
                 right: Some(DockPlace::Horizontal),
             },
+            dock_icon_size: None,
             mouse_accel_speed: Some(0.5),
             mouse_accel_profile: Some(MouseAccelProfile::Flat),
             mouse_natural_scroll: Some(true),
@@ -687,5 +702,21 @@ mod tests {
         let text = apply(&text, &Change::Wallpaper(OutputRole::Right, None)).unwrap();
         let settings = Settings::parse(&text);
         assert_eq!(settings.wallpapers.right, None);
+    }
+
+    #[test]
+    fn dock_icon_size_can_be_parsed_and_changed() {
+        assert_eq!(Settings::parse("").dock_icon_size(), 24);
+        assert_eq!(Settings::parse("").dock_icon_size, None);
+
+        let text = "[dock]\nicon_size = 32\n";
+        let settings = Settings::parse(text);
+        assert_eq!(settings.dock_icon_size, Some(32));
+        assert_eq!(settings.dock_icon_size(), 32);
+
+        let changed = apply(text, &Change::DockIconSize(28)).unwrap();
+        let settings = Settings::parse(&changed);
+        assert_eq!(settings.dock_icon_size, Some(28));
+        assert_eq!(settings.dock_icon_size(), 28);
     }
 }
