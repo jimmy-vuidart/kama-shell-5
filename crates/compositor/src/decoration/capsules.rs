@@ -3,11 +3,9 @@
 
 use coquille_model::{Point, Rect, Size};
 
-/// Space between the edge of the group and its capsules: the ring of the
-/// active one, drawn around it, leaves 1 px of it.
+/// Space between the edge of the group and its capsules.
 const GROUP_PADDING: i32 = 3;
-/// Between two capsules: the ring of one never touches the next.
-const CAPSULE_GAP: i32 = 4;
+const CAPSULE_GAP: i32 = 2;
 const PADDING: i32 = 10;
 const ICON_SIZE: i32 = 14;
 const ICON_GAP: i32 = 6;
@@ -198,9 +196,9 @@ mod tests {
     fn capsules_follow_each_other_with_a_small_gap() {
         let layout = GroupLayout::new(BAND, &[60, 40]);
 
-        assert_eq!(layout.rect, Rect::new(341, 0, 266, 32));
-        assert_eq!(layout.capsules[0].rect, Rect::new(344, 3, 138, 26));
-        assert_eq!(layout.capsules[1].rect, Rect::new(486, 3, 118, 26));
+        assert_eq!(layout.rect, Rect::new(342, 0, 264, 32));
+        assert_eq!(layout.capsules[0].rect, Rect::new(345, 3, 138, 26));
+        assert_eq!(layout.capsules[1].rect, Rect::new(485, 3, 118, 26));
     }
 
     #[test]
@@ -225,7 +223,7 @@ mod tests {
 
         let layout = GroupLayout::new(band, &[40, 160, 160]);
 
-        assert_eq!(widths(&layout), [118, 184, 184]);
+        assert_eq!(widths(&layout), [118, 186, 186]);
         assert_eq!(layout.rect, Rect::new(0, 0, 500, 32));
     }
 
@@ -245,8 +243,8 @@ mod tests {
 
     #[test]
     fn a_capsule_too_narrow_for_them_has_no_buttons() {
-        let roomy = GroupLayout::new(Size::new(306, 32), &[160; 4]);
-        let tight = GroupLayout::new(Size::new(302, 32), &[160; 4]);
+        let roomy = GroupLayout::new(Size::new(300, 32), &[160; 4]);
+        let tight = GroupLayout::new(Size::new(296, 32), &[160; 4]);
 
         assert_eq!(widths(&roomy), [72; 4]);
         assert!(roomy.capsules.iter().all(|cell| cell.buttons.len() == 2));

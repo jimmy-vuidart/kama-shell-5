@@ -3,10 +3,9 @@
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 use iced::widget::{Column, Row, column, container, mouse_area, row, space, stack, text};
-use iced::{Alignment, Background, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 
-use super::icons;
-use super::metal;
+use super::icons::{self, Glyph};
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
 use crate::model::bar::{Entry, Indicator};
@@ -302,7 +301,7 @@ fn label<'a>(
     let (detail, color) = if unread > 0 {
         (
             format!("{} · {unread} non lus", entry.subtitle),
-            palette.accent.text,
+            palette.accent,
         )
     } else {
         (entry.subtitle.clone(), palette.muted)
@@ -347,7 +346,7 @@ fn lying<'a>(
     let pinned = state.pinned();
     let divider = || {
         let line = container(space().width(1).height(22))
-            .style(move |_| style::fill(palette.bar_separator, 0.0));
+            .style(move |_| style::fill(palette.separator, 0.0));
         container(line).center_x(DIVIDER).center_y(WIDTH)
     };
 
@@ -360,16 +359,13 @@ fn lying<'a>(
     }
     items = items.push(divider()).push(lying_time(&dock.now, palette));
 
-    // As wide as what it holds: the bar sits 1 px inside its frame, and
-    // its items, centered, stay where they were.
-    let inside = container(items)
-        .height(Length::Fill)
-        .padding(Padding::from([0.0, PADDING - 1.0]))
-        .style(move |_| style::fill(palette.bar, RADIUS - 1.0));
-    let body = container(inside)
+    let body = container(items)
         .height(WIDTH)
-        .padding(1)
-        .style(move |_| metal::frame(&hairline(WIDTH, palette), RADIUS, palette.shadow()));
+        .padding(Padding::from([0.0, PADDING]))
+        .style(move |_| container::Style {
+            shadow: palette.shadow(),
+            ..style::outlined(palette.bar, palette.bar_border, RADIUS)
+        });
     if !live {
         return body.into();
     }
@@ -386,7 +382,15 @@ fn lying_launcher<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let open = dock.drawer.is_some();
-    let icon = launcher_mark(open, palette);
+    let (color, background) = if open {
+        (palette.on_accent(), palette.accent)
+    } else {
+        (palette.accent, iced::Color::TRANSPARENT)
+    };
+    let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
+        .center_x(SLOT)
+        .center_y(SLOT)
+        .style(move |_| style::fill(background, 10.0));
     let area = mouse_area(container(icon).center_y(WIDTH));
     if live || open {
         area.on_press(Message::Launcher(Some(state.screen))).into()
@@ -409,9 +413,8 @@ fn lying_entry<'a>(
     let unread = dock.unread_of(entry);
 
     let mark: Element<'_, Message> = match entry.indicator {
-        // Lying down, the mark is a bar of gold.
         Indicator::Here => container(space().width(12).height(3))
-            .style(move |_| style::fill(metal::ramp(&palette.accent.bar()), 1.5))
+            .style(move |_| style::fill(palette.accent, 1.5))
             .into(),
         Indicator::Elsewhere => container(space().width(4).height(3))
             .style(move |_| style::fill(palette.muted, 1.5))
@@ -460,7 +463,7 @@ fn lying_time<'a>(now: &DateTime<Local>, palette: Palette) -> Element<'a, Messag
     let time = text(format!("{hours}:{minutes}"))
         .size(14)
         .font(style::BOLD)
-        .color(palette.accent.text);
+        .color(palette.text);
     let date = text(short).size(10).color(palette.muted);
     container(column![time, date].align_x(Alignment::End))
         .width(CLOCK_WIDTH)
@@ -500,16 +503,15 @@ fn bar<'a>(
     rows = rows.push(space().height(Length::Fill));
     rows = rows.push(time(&dock.now, side, labels, palette));
 
-    let height = bar_height(pinned, others);
-    let inside = container(rows)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(Padding::from([PADDING, 0.0]))
-        .clip(true);
-    let frame = hairline(height, palette);
-    let body = metal::framed(inside, palette.bar, frame, RADIUS, palette.shadow())
+    let body = container(rows)
         .width(width)
-        .height(height);
+        .height(bar_height(pinned, others))
+        .padding(Padding::from([PADDING, 0.0]))
+        .clip(true)
+        .style(move |_| container::Style {
+            shadow: palette.shadow(),
+            ..style::outlined(palette.bar, palette.bar_border, RADIUS)
+        });
     let body: Element<'_, Message> = if live {
         mouse_area(body)
             .on_enter(Message::BarHover(state.id, true))
@@ -535,40 +537,6 @@ fn bar<'a>(
         .into()
 }
 
-/// The hairline of gold around a bar `height` pixels high, brighter along
-/// its top edge.
-fn hairline(height: f32, palette: Palette) -> [metal::Stop; 4] {
-    palette.accent.hairline(0.5, 0.7, height)
-}
-
-/// The symbol of the launcher: four squares of gold, the lower two a
-/// little dimmer. While the drawer is open they are in ink, on an ingot.
-fn launcher_mark<'a>(open: bool, palette: Palette) -> Element<'a, Message> {
-    let square = move |opacity: f32| {
-        let background = if open {
-            Background::Color(style::alpha(palette.on_accent(), opacity))
-        } else {
-            metal::faded(&palette.accent.thin_piece(), opacity)
-        };
-        container(space().width(9).height(9)).style(move |_| style::fill(background, 2.5))
-    };
-    let line = |opacity: f32| row![square(opacity), square(opacity)].spacing(3);
-    let squares = container(column![line(1.0), line(0.78)].spacing(3)).center(Length::Fill);
-    let (inside, background): (Element<'_, Message>, Background) = if open {
-        (
-            metal::flanked(squares, 10.0).into(),
-            metal::ingot(&palette.accent, SLOT, false),
-        )
-    } else {
-        (squares.into(), iced::Color::TRANSPARENT.into())
-    };
-    container(inside)
-        .width(SLOT)
-        .height(SLOT)
-        .style(move |_| style::fill(background, 10.0))
-        .into()
-}
-
 /// The button of the drawer, at the top of the bar.
 fn launcher<'a>(
     dock: &Dock,
@@ -578,8 +546,21 @@ fn launcher<'a>(
 ) -> Element<'a, Message> {
     let Look { side, labels, live } = look;
     let open = dock.drawer.is_some();
-    let icon = launcher_mark(open, palette);
-    let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon];
+    let color = if open {
+        palette.on_accent()
+    } else {
+        palette.accent
+    };
+    let background = if open {
+        palette.accent
+    } else {
+        iced::Color::TRANSPARENT
+    };
+    let icon = container(icons::glyph(Glyph::Launcher, 22.0, color))
+        .center_x(SLOT)
+        .center_y(SLOT)
+        .style(move |_| style::fill(background, 10.0));
+    let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon.into()];
     if labels {
         let label = text("Lanceur")
             .size(14)
@@ -610,7 +591,7 @@ fn section(
         let title = text(title)
             .size(10)
             .font(style::SEMIBOLD)
-            .color(palette.accent.text);
+            .color(palette.muted);
         return container(title)
             .height(SECTION)
             .width(Length::Fill)
@@ -620,7 +601,7 @@ fn section(
             .into();
     }
     let line = container(space().width(Length::Fill).height(1))
-        .style(move |_| style::fill(palette.bar_separator, 0.0));
+        .style(move |_| style::fill(palette.separator, 0.0));
     container(line)
         .height(SECTION)
         .padding(Padding::from([0.0, 9.0]))
@@ -643,7 +624,7 @@ fn entry_row<'a>(
 
     let mark: Element<'_, Message> = match entry.indicator {
         Indicator::Here => container(space().width(3).height(12))
-            .style(move |_| style::fill(metal::ramp(&palette.accent.thin_piece()), 1.5))
+            .style(move |_| style::fill(palette.accent, 1.5))
             .into(),
         Indicator::Elsewhere => container(space().width(3).height(4))
             .style(move |_| style::fill(palette.muted, 1.5))
@@ -689,7 +670,7 @@ fn entry_row<'a>(
         let (detail, color) = if unread > 0 {
             (
                 format!("{} · {unread} non lus", entry.subtitle),
-                palette.accent.text,
+                palette.accent,
             )
         } else {
             (entry.subtitle.clone(), palette.muted)
@@ -759,7 +740,7 @@ fn time<'a>(
         let time = text(format!("{hours}:{minutes}"))
             .size(20)
             .font(style::BOLD)
-            .color(palette.accent.text);
+            .color(palette.text);
         let date = text(long).size(12).color(palette.muted);
         let line = from_edge(side, vec![time.into(), date.into()]).spacing(10);
         return container(line)
@@ -770,12 +751,7 @@ fn time<'a>(
             .center_y(CLOCK)
             .into();
     }
-    let digits = |value: String| {
-        text(value)
-            .size(14)
-            .font(style::BOLD)
-            .color(palette.accent.text)
-    };
+    let digits = |value: String| text(value).size(14).font(style::BOLD).color(palette.text);
     let date = text(short).size(10).color(palette.muted);
     let stacked = column![digits(hours), digits(minutes), space().height(2), date]
         .align_x(Alignment::Center)

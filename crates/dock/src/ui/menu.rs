@@ -2,10 +2,9 @@
 
 use coquille_model::OutputRole;
 use iced::widget::{Column, button, column, container, row, space, text};
-use iced::{Alignment, Background, Color, Element, Length, Padding};
+use iced::{Alignment, Color, Element, Length, Padding};
 
 use super::icons::{self, Glyph};
-use super::metal;
 use super::style::{self, Palette};
 use crate::app::{Dock, Message};
 use crate::model::bar::{self, Entry, Menu, MenuAction};
@@ -120,11 +119,10 @@ fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Eleme
     };
     let mini = |role: OutputRole| {
         let lit = role == screen;
-        // The screen the menu speaks of is a thin piece of gold.
-        let color: Background = if lit {
-            metal::ramp(&palette.accent.thin_piece())
+        let color = if lit {
+            palette.accent
         } else {
-            style::alpha(palette.muted, 0.45).into()
+            style::alpha(palette.muted, 0.45)
         };
         let (width, height) = if role == OutputRole::Center {
             (13, 12)
@@ -149,13 +147,13 @@ fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Eleme
         .center_y(Length::Fill);
 
     let idle = if current {
-        style::alpha(palette.accent.gold, 0.16)
+        style::alpha(palette.accent, 0.16)
     } else {
         palette.hover
     };
-    let hover = style::alpha(palette.accent.gold, 0.26);
+    let hover = style::alpha(palette.accent, 0.26);
     let outline = if current {
-        palette.accent.gold
+        palette.accent
     } else {
         Color::TRANSPARENT
     };

@@ -102,16 +102,13 @@ touchée. `Mod+Page suiv./préc.` change toujours d'onglet.
 
 ## Apparence
 
-- Groupe : rectangle arrondi de 32 px de haut (rayon 16), fond `capsule_box`
-  du thème (celui du dock, à 88 % en sombre et 90 % en clair), cerné d'un
-  filet d'or plus clair sur l'arête haute, 3 px de marge intérieure.
+- Groupe : rectangle arrondi de 32 px de haut (rayon 16), fond `titlebar` du
+  thème à 85 % d'opacité, 3 px de marge intérieure.
 - Capsule : 26 px de haut (rayon 13), icône de 14 px, nom en 13 px comme les
-  barres de titre, 4 px entre deux capsules.
+  barres de titre, 2 px entre deux capsules.
 - Capsule affichée : fond `button_hover`, texte `text` ; les autres sans
   fond, texte `text_muted` ; réduite : texte `disabled`, icône à 45 %.
-- Anneau d'accent de 2 px autour de la capsule affichée de la fenêtre active :
-  une « pièce fine » d'or, dessinée dans la marge du groupe, dont il reste
-  1 px (voir `docs/gold/`).
+- Anneau d'accent de 2 px autour de la capsule affichée de la fenêtre active.
 - Boutons : 20 px, survol `button_hover`, et `close_hover` pour fermer.
 - Thèmes clair et sombre, police Figtree, comme le reste des décorations.
 

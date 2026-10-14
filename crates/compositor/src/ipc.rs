@@ -19,7 +19,7 @@ use tracing::{debug, info, warn};
 
 use crate::backend::Backend;
 use crate::state::State;
-use crate::theme::{Theme, ThemeKind};
+use crate::theme::{Rgba, Theme, ThemeKind};
 
 pub struct Ipc {
     pub path: PathBuf,
@@ -253,6 +253,7 @@ impl State {
         });
         Snapshot {
             theme: self.theme.kind.into(),
+            accent: self.theme.accent.hex(),
             simulated: matches!(self.backend, Backend::Winit(_)),
             screens: screens.collect(),
             windows: windows.collect(),
@@ -336,13 +337,25 @@ impl State {
         }
     }
 
-    /// Switches between the light and the dark theme.
+    /// Switches between the light and the dark theme, keeping the accent
+    /// the user chose.
     pub fn set_theme(&mut self, kind: ThemeKind) {
-        if self.theme.kind == kind {
+        self.restyle(kind, self.accent);
+    }
+
+    /// Gives the chrome a theme and an accent; `None` is the accent of the
+    /// theme.
+    pub fn restyle(&mut self, kind: ThemeKind, accent: Option<Rgba>) {
+        if self.theme.kind == kind && self.accent == accent {
             return;
         }
-        info!(?kind, "theme changed");
-        self.theme = Theme::new(kind);
+        info!(?kind, accent = ?accent.map(Rgba::hex), "theme changed");
+        self.accent = accent;
+        let theme = Theme::new(kind);
+        self.theme = match accent {
+            Some(accent) => theme.with_accent(accent),
+            None => theme,
+        };
         self.full_redraw = true;
         self.shell_changed();
         self.queue_redraw();

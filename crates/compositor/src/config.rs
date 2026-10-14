@@ -6,7 +6,7 @@ use serde::Deserialize;
 use tracing::{info, warn};
 
 use crate::outputs::RoleConfig;
-use crate::theme::ThemeKind;
+use crate::theme::{Rgba, ThemeKind};
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -16,10 +16,8 @@ pub struct Config {
     pub keyboard: KeyboardConfig,
     pub mouse: MouseConfig,
     pub theme: Option<ThemeKind>,
-    /// No longer a setting: the accent is the gold of the shell. A file
-    /// written before that may still have the line, which is no reason to
-    /// reject the whole file.
-    pub accent: Option<Ignored>,
+    /// The accent color, as `#rrggbb`; by default, the one of the theme.
+    pub accent: Option<String>,
     /// Sections of the dock, which reads the same file: not for the
     /// compositor, but no reason to reject the whole file either.
     pub dock: Ignored,
@@ -34,16 +32,17 @@ pub struct Config {
 }
 
 impl Config {
-    /// The settings the file still has although they mean nothing any more.
-    pub fn retired(&self) -> impl Iterator<Item = &'static str> {
-        self.accent.map(|_| "accent").into_iter()
-    }
-
-    /// Says in the log which lines of the file are ignored.
-    fn warn_of_retired(&self, path: &Path) {
-        for setting in self.retired() {
-            warn!(path = %path.display(), setting, "no longer a setting: the line is ignored");
+    /// The accent the user chose, when it is a color.
+    pub fn accent(&self) -> Option<Rgba> {
+        let text = self.accent.as_deref()?;
+        let accent = Rgba::parse(text);
+        if accent.is_none() {
+            warn!(
+                accent = text,
+                "not a color (#rrggbb): using the accent of the theme"
+            );
         }
+        accent
     }
 }
 
@@ -167,7 +166,6 @@ pub fn load(path: Option<&Path>) -> Config {
     match parse(&text) {
         Ok(config) => {
             info!(path = %path.display(), "configuration loaded");
-            config.warn_of_retired(&path);
             config
         }
         Err(error) => {
@@ -189,10 +187,7 @@ pub fn reload(path: Option<&Path>) -> Option<Config> {
         }
     };
     match parse(&text) {
-        Ok(config) => {
-            config.warn_of_retired(&path);
-            Some(config)
-        }
+        Ok(config) => Some(config),
         Err(error) => {
             warn!(path = %path.display(), %error, "invalid configuration: nothing changes");
             None
@@ -232,31 +227,10 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_still_has_an_accent_is_read_without_it() {
-        let text = "theme = \"dark\"\naccent = \"#7aa7ff\"\nterminal = \"foot\"\n";
+    fn the_accent_is_read() {
+        let config = parse("accent = \"#7aa7ff\"").unwrap();
 
-        let config = parse(text).unwrap();
-
-        assert_eq!(config.theme, Some(ThemeKind::Dark));
-        assert_eq!(config.terminal.as_deref(), Some("foot"));
-        assert_eq!(config.retired().collect::<Vec<_>>(), ["accent"]);
-        // Whatever the line says: nothing reads it.
-        assert!(parse("accent = 3").is_ok());
-        assert_eq!(parse("theme = \"dark\"").unwrap().retired().count(), 0);
-    }
-
-    #[test]
-    fn a_file_that_still_has_an_accent_starts_and_reloads_the_compositor() {
-        let path =
-            std::env::temp_dir().join(format!("coquille-accent-{}.toml", std::process::id()));
-        std::fs::write(&path, "theme = \"dark\"\naccent = \"#2f6fed\"\n").unwrap();
-
-        let started = load(Some(&path));
-        let reloaded = reload(Some(&path));
-        std::fs::remove_file(&path).unwrap();
-
-        assert_eq!(started.theme, Some(ThemeKind::Dark));
-        assert_eq!(reloaded, Some(started));
+        assert_eq!(config.accent.as_deref(), Some("#7aa7ff"));
     }
 
     #[test]
@@ -365,6 +339,7 @@ mod tests {
         let config = parse(&switched_on.join("\n")).unwrap();
 
         assert_eq!(config.theme, Some(ThemeKind::Light));
+        assert_eq!(config.accent.as_deref(), Some("#2f6fed"));
         assert_eq!(config.terminal.as_deref(), Some("kitty"));
         assert_eq!(config.xwayland, Some(true));
         assert_eq!(config.keyboard.layout.as_deref(), Some("fr"));
@@ -397,6 +372,7 @@ mod tests {
 
         let changes = [
             Change::Theme(ThemeName::Dark),
+            Change::Accent(Some("#ff8800".into())),
             Change::Terminal(Some("foot".into())),
             Change::Xwayland(false),
             Change::Outputs(PerScreen {
@@ -429,6 +405,7 @@ mod tests {
         let config = parse(&text).unwrap();
 
         assert_eq!(config.theme, Some(ThemeKind::Dark));
+        assert_eq!(config.accent(), Some(Rgba::rgb(0xff_88_00)));
         assert_eq!(config.terminal.as_deref(), Some("foot"));
         assert_eq!(config.xwayland, Some(false));
         assert_eq!(config.outputs.left.as_deref(), Some("DP-1"));
@@ -443,6 +420,12 @@ mod tests {
         assert_eq!(config.wallpaper.path.as_deref(), Some("/path/to/wall.png"));
         assert_eq!(config.wallpaper.left.as_deref(), Some("/path/to/left.png"));
         assert_eq!(config.wallpaper.mode(), WallpaperMode::Fit);
+    }
+
+    #[test]
+    fn an_accent_that_is_not_a_color_is_ignored() {
+        assert_eq!(parse("accent = \"blue\"").unwrap().accent(), None);
+        assert_eq!(parse("").unwrap().accent(), None);
     }
 
     #[test]

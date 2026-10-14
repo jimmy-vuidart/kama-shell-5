@@ -149,6 +149,8 @@ impl WallpaperMode {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     pub theme: Option<ThemeName>,
+    /// `#rrggbb`.
+    pub accent: Option<String>,
     pub terminal: Option<String>,
     pub xwayland: Option<bool>,
     /// The connector of each screen.
@@ -199,6 +201,7 @@ impl Settings {
                 Some("light") => Some(ThemeName::Light),
                 _ => None,
             },
+            accent: text_of(&["accent"]).filter(|accent| is_color(accent)),
             terminal: name_of(&["terminal"]),
             xwayland: switch(&["xwayland"]),
             outputs: PerScreen::from_roles(|role| name_of(&["outputs", role_name(role)])),
@@ -281,10 +284,18 @@ impl Settings {
     }
 }
 
+/// Whether a text is a color as the file writes them: `#rrggbb`.
+pub(crate) fn is_color(text: &str) -> bool {
+    let digits = text.strip_prefix('#').unwrap_or_default();
+    digits.len() == 6 && digits.bytes().all(|digit| digit.is_ascii_hexdigit())
+}
+
 /// Something the user changed on the settings screen.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
     Theme(ThemeName),
+    /// `None` goes back to the accent of the theme.
+    Accent(Option<String>),
     /// `None` goes back to the first terminal found.
     Terminal(Option<String>),
     Xwayland(bool),
@@ -323,6 +334,14 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
                 ThemeName::Dark => "dark",
             };
             with_value(text, &["theme"], name.into())
+        }
+        Change::Accent(accent) => {
+            let accent = accent.clone().filter(|accent| is_color(accent));
+            text_or_nothing(
+                text,
+                &["accent"],
+                &accent.map(|accent| accent.to_lowercase()),
+            )
         }
         Change::Terminal(terminal) => text_or_nothing(text, &["terminal"], terminal),
         Change::Xwayland(on) => with_value(text, &["xwayland"], (*on).into()),
@@ -423,8 +442,9 @@ mod tests {
     #[test]
     fn every_setting_is_read() {
         let settings = Settings::parse(
-            r#"
+            r##"
             theme = "dark"
+            accent = "#FF8800"
             terminal = "foot"
             xwayland = false
 
@@ -451,10 +471,11 @@ mod tests {
             accel_profile = "flat"
             natural_scroll = true
             left_handed = true
-            "#,
+            "##,
         );
 
         assert_eq!(settings.theme, Some(ThemeName::Dark));
+        assert_eq!(settings.accent.as_deref(), Some("#FF8800"));
         assert_eq!(settings.terminal.as_deref(), Some("foot"));
         assert!(!settings.xwayland());
         assert_eq!(settings.outputs, screens("HDMI-A-1", "DP-2", ""));
@@ -473,7 +494,7 @@ mod tests {
     #[test]
     fn what_means_nothing_is_not_set() {
         let settings = Settings::parse(
-            "theme = 3\nxwayland = \"no\"\n[game]\nsticky_edges_ms = -5\n\
+            "theme = 3\naccent = \"blue\"\nxwayland = \"no\"\n[game]\nsticky_edges_ms = -5\n\
              [keyboard]\nvariant = \"\"\n[dock.screens]\nleft = \"diagonal\"\n\
              [mouse]\naccel_profile = \"diagonal\"\n",
         );
@@ -497,6 +518,7 @@ mod tests {
     fn every_change_is_read_back_from_the_sample_file() {
         let changes = [
             Change::Theme(ThemeName::Dark),
+            Change::Accent(Some("#ff8800".into())),
             Change::Terminal(Some("foot".into())),
             Change::Xwayland(false),
             Change::Outputs(screens("DP-1", "DP-2", "HDMI-A-1")),
@@ -525,6 +547,7 @@ mod tests {
 
         let expected = Settings {
             theme: Some(ThemeName::Dark),
+            accent: Some("#ff8800".into()),
             terminal: Some("foot".into()),
             xwayland: Some(false),
             outputs: screens("DP-1", "DP-2", "HDMI-A-1"),
@@ -575,9 +598,10 @@ mod tests {
 
     #[test]
     fn going_back_to_a_default_removes_the_line() {
-        let text = "terminal = \"foot\"\n\n[keyboard]\nlayout = \"fr\"\nvariant = \"bepo\"\n";
+        let text = "accent = \"#ff8800\"\nterminal = \"foot\"\n\n[keyboard]\nlayout = \"fr\"\nvariant = \"bepo\"\n";
 
-        let text = apply(text, &Change::Terminal(None)).unwrap();
+        let text = apply(text, &Change::Accent(None)).unwrap();
+        let text = apply(&text, &Change::Terminal(None)).unwrap();
         let keyboard = Change::Keyboard {
             layout: None,
             variant: Some("bepo".into()),
@@ -585,6 +609,18 @@ mod tests {
         let text = apply(&text, &keyboard).unwrap();
 
         assert_eq!(Settings::parse(&text), Settings::default());
+    }
+
+    #[test]
+    fn an_accent_that_is_not_a_color_is_never_written() {
+        let text = apply(
+            "accent = \"#ff8800\"\n",
+            &Change::Accent(Some("orange".into())),
+        );
+
+        assert_eq!(Settings::parse(&text.unwrap()).accent, None);
+        let text = apply("", &Change::Accent(Some("#FF8800".into()))).unwrap();
+        assert_eq!(text, "accent = \"#ff8800\"\n");
     }
 
     #[test]

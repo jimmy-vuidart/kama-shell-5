@@ -1,7 +1,7 @@
 //! Reading the configuration file again while the compositor runs, when the
 //! settings screen asks for it.
 //!
-//! What takes effect at once: theme, terminal, keyboard layout,
+//! What takes effect at once: theme, accent, terminal, keyboard layout,
 //! sticky edges, and what game mode may do on the hardware. The role of
 //! each screen and XWayland are decided when the compositor starts.
 
@@ -23,7 +23,7 @@ impl State {
 
         // A file that names no theme leaves the one in use.
         let kind = config.theme.unwrap_or(self.theme.kind);
-        self.set_theme(kind);
+        self.restyle(kind, config.accent());
         self.terminal = config.terminal.clone().unwrap_or_else(default_terminal);
         self.sticky_edges_ms = config.game.sticky_edges_ms();
         if !self.keyboard_pinned {

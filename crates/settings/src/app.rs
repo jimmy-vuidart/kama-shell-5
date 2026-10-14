@@ -8,7 +8,7 @@ use coquille_config::{Change, Settings, apply, assign};
 use coquille_ipc::{Command, Event, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use coquille_ui::compositor;
-use coquille_ui::style::Palette;
+use coquille_ui::style::{Palette, parse_color};
 use iced::{Element, Subscription, Task};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{info, warn};
@@ -30,6 +30,8 @@ pub enum Message {
     Page(Page),
     /// A setting changed: it is written, and applied where it can be.
     Change(Change),
+    /// The accent, as it is being typed.
+    AccentText(String),
     /// The slider of the sticky edges moves, then is let go.
     Sticky(u32),
     StickyReleased,
@@ -55,6 +57,8 @@ pub struct App {
     pub layouts: Layouts,
     /// The terminals found on the system.
     pub terminals: Vec<&'static str>,
+    /// The accent as typed, which may not be a color yet.
+    pub accent_text: String,
     /// Where the slider of the sticky edges stands: the delay they have, or
     /// will have when switched on again.
     pub sticky: u32,
@@ -67,6 +71,7 @@ impl App {
         let file = read(&options);
         let app = Self {
             page: options.page,
+            accent_text: file.accent.clone().unwrap_or_default(),
             sticky: match file.sticky_edges_ms() {
                 0 => model::sticky_on_slider(Settings::DEFAULT_STICKY_EDGES_MS),
                 delay => model::sticky_on_slider(delay),
@@ -91,7 +96,9 @@ impl App {
     }
 
     pub fn palette(&self) -> Palette {
-        Palette::new(self.theme())
+        let live = self.snapshot.as_ref().map(|snapshot| &snapshot.accent);
+        let accent = live.or(self.file.accent.as_ref());
+        Palette::new(self.theme(), accent.and_then(|accent| parse_color(accent)))
     }
 
     /// Whether changes take effect at once: only inside coquille.
@@ -102,7 +109,10 @@ impl App {
     /// Reads the file again: the dock writes to it too.
     fn read_file(&mut self) {
         let file = read(&self.options);
-        // What is being dragged is only replaced by news.
+        // What is being typed or dragged is only replaced by news.
+        if file.accent != self.file.accent {
+            self.accent_text = file.accent.clone().unwrap_or_default();
+        }
         if file.sticky_edges_ms != self.file.sticky_edges_ms && file.sticky_edges_ms() > 0 {
             self.sticky = model::sticky_on_slider(file.sticky_edges_ms());
         }
@@ -140,6 +150,13 @@ impl App {
             Message::Compositor(update) => self.compositor(update),
             Message::Page(page) => self.page = page,
             Message::Change(change) => self.change(change),
+            Message::AccentText(text) => {
+                let color = parse_color(&text).is_some();
+                self.accent_text.clone_from(&text);
+                if color {
+                    self.change(Change::Accent(Some(text)));
+                }
+            }
             Message::Sticky(delay) => self.sticky = delay,
             Message::StickyReleased => self.change(Change::StickyEdges(self.sticky.into())),
             Message::MouseSpeed(speed) => self.mouse_speed = speed,

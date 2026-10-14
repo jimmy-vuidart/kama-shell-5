@@ -6,8 +6,7 @@ use smithay::backend::renderer::gles::{
 
 #[derive(Clone)]
 pub struct Shaders {
-    /// Rounded rectangle, filled or ring, in one color or in a ramp from
-    /// top to bottom: accent ring, window background.
+    /// Rounded rectangle, filled or ring: accent ring, window background.
     pub rounded: GlesPixelProgram,
     /// Draws a surface clipped to a rounded rectangle.
     pub clip: GlesTexProgram,
@@ -21,17 +20,6 @@ impl Shaders {
                 UniformName::new("shape_size", UniformType::_2f),
                 UniformName::new("shape_offset", UniformType::_2f),
                 UniformName::new("color", UniformType::_4f),
-                UniformName::new("ramp", UniformType::_1f),
-                UniformName::new("stop_0", UniformType::_4f),
-                UniformName::new("stop_1", UniformType::_4f),
-                UniformName::new("stop_2", UniformType::_4f),
-                UniformName::new("stop_3", UniformType::_4f),
-                UniformName::new("stop_4", UniformType::_4f),
-                UniformName::new("stop_5", UniformType::_4f),
-                UniformName::new("stop_6", UniformType::_4f),
-                UniformName::new("stop_7", UniformType::_4f),
-                UniformName::new("stops_upper", UniformType::_4f),
-                UniformName::new("stops_lower", UniformType::_4f),
                 UniformName::new("radius", UniformType::_4f),
                 UniformName::new("border", UniformType::_1f),
             ],

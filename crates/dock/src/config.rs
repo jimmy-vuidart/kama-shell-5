@@ -18,6 +18,8 @@ use crate::model::{Orientation, Side};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub theme: Option<ThemeName>,
+    /// `#rrggbb`.
+    pub accent: Option<String>,
     /// The applications of the bar, in order.
     pub favorites: Vec<String>,
     /// The screens that have a dock, and which way each lies.
@@ -34,6 +36,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: None,
+            accent: None,
             favorites: Vec::new(),
             docks: docks(|_| None),
             pinned: Vec::new(),
@@ -97,6 +100,7 @@ pub fn parse(text: &str) -> Config {
             Some("light") => Some(ThemeName::Light),
             _ => None,
         },
+        accent: text_of("accent").map(str::to_owned),
         docks: docks(screen),
         pinned: names("drawer", "pinned").unwrap_or_else(|| favorites.clone()),
         drawer_width: length("width"),
@@ -159,6 +163,7 @@ pinned = ["firefox", "mpv"]
         let config = parse(FILE);
 
         assert_eq!(config.theme, Some(ThemeName::Dark));
+        assert_eq!(config.accent.as_deref(), Some("#7aa7ff"));
         assert_eq!(config.favorites, ["firefox", "discord"]);
         assert_eq!(config.pinned, ["firefox", "mpv"]);
     }

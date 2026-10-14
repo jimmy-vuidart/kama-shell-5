@@ -69,7 +69,7 @@ encore tourné sur le backend matériel. Détail de ce qui n'a pas été exercé
 | Voir les fenêtres ouvertes | toutes, des trois écrans (favoris puis « OUVERTES »), avec leur écran |
 | Heure, réseau, son | dock et centre de contrôle |
 | Bascule « ne pas déranger » | centre de contrôle, sans effet |
-| Thème, sens du dock, clavier, mode jeu | écran « Paramètres » |
+| Thème, accent, sens du dock, clavier, mode jeu | écran « Paramètres » |
 | Changer la disposition d'un écran | **toujours rien à la souris** (`Super+1` à `5`) |
 | « Tout envoyer vers l'écran… » | **toujours rien** |
 | Afficher les notifications | **toujours rien** (concept conservé) |

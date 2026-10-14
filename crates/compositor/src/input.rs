@@ -903,21 +903,19 @@ impl State {
             let w = (p1.x - p2.x).abs();
             let h = (p1.y - p2.y).abs();
             let rect = Rect::new(x, y, w, h);
-            let gold = self.theme.accent.gold;
+            let accent = self.theme.accent;
             return vec![
                 Shape {
                     outline: rect,
                     area: rect,
-                    color: gold,
-                    ramp: None,
+                    color: accent,
                     radii: [0; 4],
                     border: 2,
                 },
                 Shape {
                     outline: rect,
                     area: rect,
-                    color: Rgba { a: 0x30, ..gold },
-                    ramp: None,
+                    color: Rgba { a: 0x30, ..accent },
                     radii: [0; 4],
                     border: 0,
                 },
@@ -928,8 +926,8 @@ impl State {
         };
         let point = model_point(self.pointer_location());
         let radius = self.shell.desk.metrics().corner_radius;
-        let gold = self.theme.accent.gold;
-        let tint = |alpha: u8| Rgba { a: alpha, ..gold };
+        let accent = self.theme.accent;
+        let tint = |alpha: u8| Rgba { a: alpha, ..accent };
 
         let mut shapes = Vec::new();
         for (rect, ..) in self.shell.drop_zones(window) {
@@ -939,8 +937,6 @@ impl State {
                 outline,
                 area: outline,
                 color: tint(if aimed { 0xff } else { 0x8c }),
-                // Not in the mockups: the gold stays flat here.
-                ramp: None,
                 radii: [radius; 4],
                 border: 2,
             };

@@ -3,5 +3,4 @@
 
 pub mod compositor;
 pub mod glyph;
-pub mod metal;
 pub mod style;

@@ -10,6 +10,10 @@
 # sombre » du centre de contrôle réécrit cette ligne.
 # theme = "light"
 
+# Couleur d'accent (anneau de la fenêtre active, dock), en #rrggbb ; par
+# défaut celle du thème : #2f6fed en clair, #7aa7ff en sombre.
+# accent = "#2f6fed"
+
 # Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
 # kitty, alacritty et foot.
 # terminal = "kitty"

@@ -348,6 +348,7 @@ impl Shell {
                     .filter(|hit| hit.slot == view.group.slot)
                     .map(|hit| (hit.index, hit.button)),
                 theme: theme.kind,
+                accent: theme.accent,
             };
             if view.spec.as_ref() == Some(&spec) {
                 continue;
@@ -392,6 +393,7 @@ impl Shell {
                     .map(|(_, button)| button),
                 buttons: managed.buttons(),
                 theme: theme.kind,
+                accent: theme.accent,
                 corner_radius,
             };
             if managed.chrome.spec.as_ref() == Some(&spec) {
