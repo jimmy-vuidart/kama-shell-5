@@ -38,6 +38,9 @@ pub enum Message {
     /// The mouse speed slider moves, then is let go.
     MouseSpeed(i32),
     MouseSpeedReleased,
+    /// The dock icon size slider moves, then is let go.
+    DockIconSize(u32),
+    DockIconSizeReleased,
     Connector(OutputRole, Choice),
     Layout(Choice),
     Variant(Choice),
@@ -64,6 +67,8 @@ pub struct App {
     pub sticky: u32,
     /// Where the mouse speed slider stands (-100..=100).
     pub mouse_speed: i32,
+    /// Where the dock icon size slider stands (16..=64).
+    pub dock_icon_size: u32,
 }
 
 impl App {
@@ -77,6 +82,7 @@ impl App {
                 delay => model::sticky_on_slider(delay),
             },
             mouse_speed: model::speed_to_slider(file.mouse_accel_speed()),
+            dock_icon_size: model::dock_icon_size_on_slider(file.dock_icon_size()),
             file,
             error: None,
             snapshot: None,
@@ -118,6 +124,9 @@ impl App {
         }
         if file.mouse_accel_speed != self.file.mouse_accel_speed {
             self.mouse_speed = model::speed_to_slider(file.mouse_accel_speed());
+        }
+        if file.dock_icon_size != self.file.dock_icon_size {
+            self.dock_icon_size = model::dock_icon_size_on_slider(file.dock_icon_size());
         }
         self.file = file;
     }
@@ -164,6 +173,10 @@ impl App {
                 self.change(Change::MouseAccelSpeed(model::slider_to_speed(
                     self.mouse_speed,
                 )));
+            }
+            Message::DockIconSize(size) => self.dock_icon_size = size,
+            Message::DockIconSizeReleased => {
+                self.change(Change::DockIconSize(self.dock_icon_size));
             }
             Message::Connector(role, choice) => {
                 let Some(connector) = choice.value else {

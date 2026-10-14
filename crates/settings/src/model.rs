@@ -349,6 +349,20 @@ pub fn slider_to_speed(slider: i32) -> f64 {
     (clamped as f64) / 100.0
 }
 
+/// The dock icon sizes the slider offers, in pixels.
+pub const DOCK_ICON_SIZE_RANGE: std::ops::RangeInclusive<u32> = 16..=64;
+pub const DOCK_ICON_SIZE_STEP: u32 = 4;
+
+/// What the slider of dock icon size shows for a size in the config.
+pub fn dock_icon_size_on_slider(size: u32) -> u32 {
+    let clamped = size.clamp(*DOCK_ICON_SIZE_RANGE.start(), *DOCK_ICON_SIZE_RANGE.end());
+    let start = *DOCK_ICON_SIZE_RANGE.start();
+    let rounded = ((clamped - start + DOCK_ICON_SIZE_STEP / 2) / DOCK_ICON_SIZE_STEP)
+        * DOCK_ICON_SIZE_STEP
+        + start;
+    rounded.clamp(*DOCK_ICON_SIZE_RANGE.start(), *DOCK_ICON_SIZE_RANGE.end())
+}
+
 #[cfg(test)]
 mod tests {
     use coquille_ipc::Screen;
@@ -540,6 +554,17 @@ mod tests {
         assert_eq!(slider_to_speed(-75), -0.75);
         assert_eq!(slider_to_speed(120), 1.0);
         assert_eq!(slider_to_speed(-150), -1.0);
+    }
+
+    #[test]
+    fn dock_icon_size_slider_snaps_and_clamps() {
+        assert_eq!(dock_icon_size_on_slider(24), 24);
+        assert_eq!(dock_icon_size_on_slider(16), 16);
+        assert_eq!(dock_icon_size_on_slider(64), 64);
+        assert_eq!(dock_icon_size_on_slider(10), 16);
+        assert_eq!(dock_icon_size_on_slider(70), 64);
+        assert_eq!(dock_icon_size_on_slider(25), 24);
+        assert_eq!(dock_icon_size_on_slider(27), 28);
     }
 
     #[test]

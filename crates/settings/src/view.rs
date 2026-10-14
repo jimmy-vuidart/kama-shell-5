@@ -500,23 +500,30 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         content = content.push(column![title, card(rows, palette)].spacing(8));
     }
 
-    let icon_sizes = [
-        (20, "Petite (20)"),
-        (24, "Normale (24)"),
-        (28, "Grande (28)"),
-        (32, "Très grande (32)"),
-    ];
-    let icon_size_picker = segmented(
-        &icon_sizes,
-        app.file.dock_icon_size(),
-        |size| Message::Change(Change::DockIconSize(size)),
-        palette,
-    );
+    let icon_size = row![
+        slider(
+            model::DOCK_ICON_SIZE_RANGE,
+            app.dock_icon_size,
+            Message::DockIconSize,
+        )
+        .step(model::DOCK_ICON_SIZE_STEP)
+        .on_release(Message::DockIconSizeReleased)
+        .width(200)
+        .style(move |_, _| slider_style(palette)),
+        text(format!("{} px", app.dock_icon_size))
+            .size(13)
+            .font(style::MEDIUM)
+            .color(palette.text)
+            .width(52)
+            .align_x(Alignment::End),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
     let dock_settings = vec![setting(
         "Taille des icônes",
         "La taille des icônes dans la barre du dock (en pixels).",
         None,
-        icon_size_picker,
+        icon_size,
         palette,
     )];
     let dock_title = text("Dock")
