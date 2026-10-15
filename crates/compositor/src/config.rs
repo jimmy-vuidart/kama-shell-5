@@ -28,6 +28,7 @@ pub struct Config {
     /// Whether X11 applications can run, through XWayland; they can unless
     /// this says otherwise.
     pub xwayland: Option<bool>,
+    pub glass: GlassConfig,
     pub game: GameConfig,
     pub wallpaper: WallpaperConfig,
 }
@@ -136,6 +137,30 @@ pub struct WallpaperConfig {
 impl WallpaperConfig {
     pub fn mode(&self) -> WallpaperMode {
         self.mode.unwrap_or_default()
+    }
+}
+
+/// Liquid glass rendering configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GlassConfig {
+    pub blur: bool,
+    pub strength: u8,
+}
+
+impl Default for GlassConfig {
+    fn default() -> Self {
+        Self {
+            blur: true,
+            strength: 3,
+        }
+    }
+}
+
+impl GlassConfig {
+    /// Strength clamped to 1..=5.
+    pub fn strength(&self) -> u8 {
+        self.strength.clamp(1, 5)
     }
 }
 
@@ -441,5 +466,30 @@ mod tests {
     fn an_unknown_setting_is_an_error() {
         assert!(parse("themes = \"dark\"").is_err());
         assert!(parse("[outputs]\nmiddle = \"DP-2\"").is_err());
+    }
+
+    #[test]
+    fn glass_settings_are_read_with_defaults_and_clamping() {
+        let empty = parse("").unwrap();
+        assert_eq!(empty.glass, GlassConfig::default());
+        assert!(empty.glass.blur);
+        assert_eq!(empty.glass.strength(), 3);
+
+        let custom = parse(
+            r#"
+            [glass]
+            blur = false
+            strength = 2
+            "#,
+        )
+        .unwrap();
+        assert!(!custom.glass.blur);
+        assert_eq!(custom.glass.strength(), 2);
+
+        let low = parse("[glass]\nstrength = 0").unwrap();
+        assert_eq!(low.glass.strength(), 1);
+
+        let high = parse("[glass]\nstrength = 99").unwrap();
+        assert_eq!(high.glass.strength(), 5);
     }
 }

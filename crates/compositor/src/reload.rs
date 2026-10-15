@@ -34,6 +34,7 @@ impl State {
             udev.set_game(&config.game);
             udev.set_mouse(&config.mouse);
         }
+        self.glass = config.glass;
         self.wallpaper_config = config.wallpaper.clone();
         self.refresh_wallpapers();
         self.full_redraw = true;

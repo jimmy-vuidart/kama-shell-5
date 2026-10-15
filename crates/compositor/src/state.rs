@@ -38,7 +38,7 @@ use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
 
 use crate::backend::Backend;
-use crate::config::WallpaperConfig;
+use crate::config::{GlassConfig, WallpaperConfig};
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
@@ -70,6 +70,7 @@ pub struct Options {
     pub state_dir: Option<PathBuf>,
     /// How long the pointer is held at the edge of a game's screen.
     pub sticky_edges_ms: u64,
+    pub glass: GlassConfig,
     pub wallpaper: WallpaperConfig,
 }
 
@@ -178,6 +179,7 @@ pub struct State {
     pub redraw_needed: bool,
     /// The next frame must be drawn whole, whatever the damage.
     pub full_redraw: bool,
+    pub glass: GlassConfig,
     pub wallpaper_config: WallpaperConfig,
     pub wallpaper_manager: WallpaperManager,
     pub wallpapers: Vec<ScreenWallpaper>,
@@ -327,6 +329,7 @@ impl State {
             swallowed_press: false,
             redraw_needed: true,
             full_redraw: true,
+            glass: options.glass,
             wallpaper_config: options.wallpaper,
             wallpaper_manager: WallpaperManager::new(),
             wallpapers: Vec::new(),

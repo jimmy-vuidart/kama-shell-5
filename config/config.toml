@@ -109,3 +109,10 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # [audio.nicks]
 # "alsa_output.usb-Generic_USB_Audio-00.HiFi__Headphones__sink" = "Casque"
 
+# Rendu du verre liquide : flou d'arrière-plan sous les surfaces du shell.
+# `blur = false` désactive le flou (les surfaces restent translucides).
+# `strength` règle la force du flou de 1 à 5 (défaut : 3).
+# [glass]
+# blur = true
+# strength = 3
+
