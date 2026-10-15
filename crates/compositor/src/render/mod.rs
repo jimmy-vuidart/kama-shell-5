@@ -5,5 +5,7 @@ pub mod clipped;
 pub mod glass;
 pub mod scene;
 pub mod shaders;
+pub mod shadow;
 
 pub use glass::GlassCache;
+pub use shadow::ShadowCache;

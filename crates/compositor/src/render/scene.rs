@@ -24,6 +24,7 @@ use tracing::warn;
 use super::clipped::ClippedSurface;
 use super::glass::{GlassCache, GlassElement, Mask};
 use super::shaders::Shaders;
+use super::shadow::{Shadow, ShadowCache};
 use crate::config::GlassConfig;
 use crate::decoration::paint::TitlebarSpec;
 use crate::panels::Panel;
@@ -111,6 +112,7 @@ pub struct Chrome {
     below: ShapeCache,
     pub glass: GlassCache,
     pub titlebar_glass: GlassCache,
+    pub shadow: ShadowCache,
 }
 
 /// What is drawn at the pointer.
@@ -148,6 +150,7 @@ pub struct Layers<'a> {
     pub panel_glass: &'a mut HashMap<WlSurface, GlassCache>,
     pub bar_glass: &'a mut GlassCache,
     pub drop_glass: &'a mut HashMap<usize, GlassCache>,
+    pub bar_shadow: &'a mut ShadowCache,
 }
 
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
@@ -294,6 +297,7 @@ pub fn build(
         panel_glass,
         bar_glass,
         drop_glass,
+        bar_shadow,
     } = layers;
     let output_size = Size::from((view.w, view.h));
 
@@ -549,6 +553,39 @@ pub fn build(
                 managed.chrome.below.element(&shaders.rounded, shape),
             ));
         }
+
+        let has_x11_shadows = managed.window.x11_surface().is_some_and(|s| {
+            let e = s.frame_extents();
+            e.left > 0 || e.right > 0 || e.top > 0 || e.bottom > 0
+        });
+        let has_csd_shadows =
+            geometry.titlebar.is_none() && managed.window.geometry().loc != (0, 0).into();
+        let draws_own_shadow = has_x11_shadows || has_csd_shadows;
+
+        if decorated && !draws_own_shadow {
+            let (blur, dy) = if geometry.floating {
+                if geometry.focused {
+                    (28.0, 8)
+                } else {
+                    (22.0, 6)
+                }
+            } else {
+                (12.0, 2)
+            };
+            let frame = managed.frame().translated(shift);
+            let shadow = Shadow {
+                shape: frame,
+                offset: ModelPoint::new(0, dy),
+                blur,
+                color: theme.shadow,
+                radii: [radius as f32; 4],
+            };
+            if overlaps(shadow.area(), Rect::new(0, 0, view.w, view.h)) {
+                windows.push(SceneElement::Shape(
+                    managed.chrome.shadow.element(&shaders.shadow, shadow),
+                ));
+            }
+        }
     }
 
     // What is not on this view is left out altogether: a screen that shows
@@ -626,6 +663,19 @@ pub fn build(
                         Mask::Rounded { radii: [14.0; 4] },
                         glass.strength,
                     )));
+                }
+                let place_rect = Rect::new(corner.x, corner.y, place.w, place.h);
+                let shadow = Shadow {
+                    shape: place_rect,
+                    offset: ModelPoint::new(0, 4),
+                    blur: 18.0,
+                    color: theme.shadow,
+                    radii: [14.0; 4],
+                };
+                if overlaps(shadow.area(), Rect::new(0, 0, view.w, view.h)) {
+                    elements.push(SceneElement::Shape(
+                        bar_shadow.element(&shaders.shadow, shadow),
+                    ));
                 }
             }
             Err(error) => warn!(?error, "cannot upload the placement bar"),

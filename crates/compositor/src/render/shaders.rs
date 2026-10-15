@@ -23,6 +23,8 @@ pub struct Shaders {
     /// Glass effect shader (masking, saturation, dithering).
     #[allow(dead_code)]
     pub glass: GlesTexProgram,
+    /// Gaussian soft shadow for rounded rectangles.
+    pub shadow: GlesPixelProgram,
     /// Raw GL program for Dual Kawase downsampling.
     #[allow(dead_code)]
     pub blur_down: BlurProgram,
@@ -168,6 +170,16 @@ impl Shaders {
                 UniformName::new("saturation", UniformType::_1f),
             ],
         )?;
+        let shadow = renderer.compile_custom_pixel_shader(
+            include_str!("shaders/shadow.frag"),
+            &[
+                UniformName::new("shape_size", UniformType::_2f),
+                UniformName::new("shape_offset", UniformType::_2f),
+                UniformName::new("color", UniformType::_4f),
+                UniformName::new("radius", UniformType::_4f),
+                UniformName::new("blur", UniformType::_1f),
+            ],
+        )?;
 
         let (blur_down, blur_up) = renderer.with_context(|gl| unsafe {
             let vert = compile_shader(gl, ffi::VERTEX_SHADER, BLUR_VERT)?;
@@ -181,6 +193,7 @@ impl Shaders {
             rounded,
             clip,
             glass,
+            shadow,
             blur_down,
             blur_up,
         })
