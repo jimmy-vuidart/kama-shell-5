@@ -33,6 +33,7 @@ use smithay::reexports::drm::control::{ModeTypeFlags, connector, crtc};
 use smithay::reexports::input::Libinput;
 use smithay::reexports::rustix;
 use smithay::reexports::rustix::fs::OFlags;
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::DeviceFd;
 use smithay::wayland::drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd};
 use smithay_drm_extras::display_info;
@@ -618,6 +619,7 @@ impl State {
             return;
         };
 
+        self.panel_glass.retain(|surface, _| surface.is_alive());
         let elements = scene::build(
             &mut udev.renderer,
             &udev.shaders,
@@ -631,6 +633,8 @@ impl State {
                 cursor,
                 wallpapers: &wallpapers,
                 freeze: &freeze,
+                glass: &self.glass,
+                panel_glass: &mut self.panel_glass,
             },
         );
         let crtc = screen.crtc;

@@ -1,5 +1,6 @@
 //! The compositor state and its Wayland globals.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
@@ -18,6 +19,7 @@ use smithay::output::Output;
 use smithay::reexports::calloop::{LoopHandle, LoopSignal};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_states};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
@@ -47,6 +49,7 @@ use crate::input::{Gesture, ScreenshotMode};
 use crate::ipc::Ipc;
 use crate::keyboard_layout::KeyboardLayout;
 use crate::placement::Bar;
+use crate::render::glass::GlassCache;
 use crate::render::scene::Cursor;
 use crate::shell::{CapsuleHit, ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
@@ -180,6 +183,7 @@ pub struct State {
     /// The next frame must be drawn whole, whatever the damage.
     pub full_redraw: bool,
     pub glass: GlassConfig,
+    pub panel_glass: HashMap<WlSurface, GlassCache>,
     pub wallpaper_config: WallpaperConfig,
     pub wallpaper_manager: WallpaperManager,
     pub wallpapers: Vec<ScreenWallpaper>,
@@ -330,6 +334,7 @@ impl State {
             redraw_needed: true,
             full_redraw: true,
             glass: options.glass,
+            panel_glass: HashMap::new(),
             wallpaper_config: options.wallpaper,
             wallpaper_manager: WallpaperManager::new(),
             wallpapers: Vec::new(),

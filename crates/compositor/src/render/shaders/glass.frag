@@ -62,19 +62,32 @@ void main() {
     color.rgb = boosted;
 
     float coverage = 1.0;
+    vec3 frag = vec3(gl_FragCoord.xy, 1.0);
+    vec2 local = vec2(dot(clip_row_x, frag), dot(clip_row_y, frag));
+    vec2 half_size = shape_size * 0.5;
+    vec2 p = local - half_size;
+
     if (mask_mode == 0) {
         // Rounded rectangle SDF
-        vec3 frag = vec3(gl_FragCoord.xy, 1.0);
-        vec2 half_size = shape_size * 0.5;
-        vec2 p = vec2(dot(clip_row_x, frag), dot(clip_row_y, frag)) - half_size;
         float r = corner_radius(p);
         vec2 q = abs(p) - half_size + r;
         float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
         coverage = 1.0 - smoothstep(-0.5, 0.5, dist);
     } else {
-        // Alpha mask
-        float a = texture2D(mask_tex, v_coords).a;
-        coverage = smoothstep(0.2, 0.4, a);
+        // Alpha mask from client surface texture
+        vec2 mask_uv = local / shape_size;
+        if (mask_uv.x < 0.0 || mask_uv.x > 1.0 || mask_uv.y < 0.0 || mask_uv.y > 1.0) {
+            coverage = 0.0;
+        } else {
+            float a = texture2D(mask_tex, mask_uv).a;
+            coverage = smoothstep(0.2, 0.4, a);
+            if (radii != vec4(0.0)) {
+                float r = corner_radius(p);
+                vec2 q = abs(p) - half_size + r;
+                float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+                coverage *= 1.0 - smoothstep(-0.5, 0.5, dist);
+            }
+        }
     }
 
     color = color * coverage * alpha;

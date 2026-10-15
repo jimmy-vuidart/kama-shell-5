@@ -1,24 +1,30 @@
 //! Turning the shell state into render elements, front to back.
 
+use std::collections::HashMap;
+
 use coquille_model::{Point as ModelPoint, Rect};
 use smithay::backend::renderer::{
     element::{
-        Kind,
+        Element, Kind,
         memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
         render_elements,
-        surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+        surface::{
+            WaylandSurfaceRenderElement, WaylandSurfaceTexture, render_elements_from_surface_tree,
+        },
     },
     gles::{GlesPixelProgram, GlesRenderer, Uniform, element::PixelShaderElement},
 };
 use smithay::desktop::PopupManager;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Size};
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::warn;
 
 use super::clipped::ClippedSurface;
+use super::glass::{GlassCache, GlassElement, Mask};
 use super::shaders::Shaders;
+use crate::config::GlassConfig;
 use crate::decoration::paint::TitlebarSpec;
 use crate::panels::Panel;
 use crate::shell::Shell;
@@ -36,6 +42,7 @@ render_elements! {
     Clipped=ClippedSurface,
     Texture=MemoryRenderBufferRenderElement<GlesRenderer>,
     Shape=PixelShaderElement,
+    Glass=GlassElement,
 }
 
 /// A rounded rectangle drawn by the `rounded` shader, or a part of one.
@@ -102,6 +109,7 @@ pub struct Chrome {
     beside: ShapeCache,
     /// Window background where the client is shorter than its area.
     below: ShapeCache,
+    pub glass: GlassCache,
 }
 
 /// What is drawn at the pointer.
@@ -135,6 +143,8 @@ pub struct Layers<'a> {
     pub wallpapers: &'a [(MemoryRenderBuffer, Rect)],
     /// Pre-captured frozen screens for interactive region screenshot.
     pub freeze: &'a [(MemoryRenderBuffer, Rect)],
+    pub glass: &'a GlassConfig,
+    pub panel_glass: &'a mut HashMap<WlSurface, GlassCache>,
 }
 
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
@@ -151,8 +161,13 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 
 /// The surfaces of the panels on some layers, with their menus, topmost
 /// first.
+#[allow(clippy::too_many_arguments)]
 fn panel_elements(
     renderer: &mut GlesRenderer,
+    shaders: &Shaders,
+    glass: &GlassConfig,
+    panel_glass: &mut HashMap<WlSurface, GlassCache>,
+    output_size: Size<i32, Physical>,
     panels: &[Panel],
     layers: &[Layer],
     view: Rect,
@@ -168,25 +183,87 @@ fn panel_elements(
         }
         let surface = panel.surface.wl_surface();
         let origin = panel.origin + to_view;
+        let is_coquille = panel.surface.namespace().starts_with("coquille-");
+
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
+            let popup_surface = popup.wl_surface();
             let location = physical(origin + offset - popup.geometry().loc);
-            elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+            let rendered =
+                render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<GlesRenderer>>(
+                    renderer,
+                    popup_surface,
+                    location,
+                    SCALE,
+                    1.0,
+                    Kind::Unspecified,
+                );
+            for el in rendered {
+                let glass_elem = if is_coquille && glass.blur {
+                    if let WaylandSurfaceTexture::Texture(tex) = el.texture() {
+                        let cache = panel_glass.entry(popup_surface.clone()).or_default();
+                        let mask = Mask::Alpha {
+                            texture: tex.clone(),
+                            src: el.src(),
+                            dst: el.geometry(SCALE.into()),
+                            radii: [0.0; 4],
+                        };
+                        Some(SceneElement::Glass(cache.element(
+                            shaders,
+                            el.geometry(SCALE.into()),
+                            output_size,
+                            mask,
+                            glass.strength,
+                        )))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                elements.push(SceneElement::Surface(el));
+                if let Some(glass) = glass_elem {
+                    elements.push(glass);
+                }
+            }
+        }
+
+        let rendered =
+            render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<GlesRenderer>>(
                 renderer,
-                popup.wl_surface(),
-                location,
+                surface,
+                physical(origin),
                 SCALE,
                 1.0,
                 Kind::Unspecified,
-            ));
+            );
+        for el in rendered {
+            let glass_elem = if is_coquille && glass.blur {
+                if let WaylandSurfaceTexture::Texture(tex) = el.texture() {
+                    let cache = panel_glass.entry(surface.clone()).or_default();
+                    let mask = Mask::Alpha {
+                        texture: tex.clone(),
+                        src: el.src(),
+                        dst: el.geometry(SCALE.into()),
+                        radii: [0.0; 4],
+                    };
+                    Some(SceneElement::Glass(cache.element(
+                        shaders,
+                        el.geometry(SCALE.into()),
+                        output_size,
+                        mask,
+                        glass.strength,
+                    )))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            elements.push(SceneElement::Surface(el));
+            if let Some(glass) = glass_elem {
+                elements.push(glass);
+            }
         }
-        elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
-            renderer,
-            surface,
-            physical(origin),
-            SCALE,
-            1.0,
-            Kind::Unspecified,
-        ));
     }
     elements
 }
@@ -210,7 +287,10 @@ pub fn build(
         cursor,
         wallpapers,
         freeze,
+        glass,
+        panel_glass,
     } = layers;
+    let output_size = Size::from((view.w, view.h));
 
     if !freeze.is_empty() {
         let shift = ModelPoint::new(-view.x, -view.y);
@@ -376,19 +456,49 @@ pub fn build(
             1.0,
             Kind::Unspecified,
         );
+        let is_settings = managed.app_id == "coquille-settings";
+        let client_rect = rectangle(client).to_physical_precise_round(SCALE);
+        let radii = [top as f32, top as f32, radius as f32, radius as f32];
+
+        let glass_elem = if is_settings && glass.blur {
+            surfaces.first().and_then(|surf_el| {
+                if let WaylandSurfaceTexture::Texture(tex) = surf_el.texture() {
+                    let mask = Mask::Alpha {
+                        texture: tex.clone(),
+                        src: surf_el.src(),
+                        dst: client_rect,
+                        radii,
+                    };
+                    Some(SceneElement::Glass(managed.chrome.glass.element(
+                        shaders,
+                        client_rect,
+                        output_size,
+                        mask,
+                        glass.strength,
+                    )))
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
         if decorated {
-            let clip = rectangle(client).to_physical_precise_round(SCALE);
-            let radii = [top as f32, top as f32, radius as f32, radius as f32];
             windows.extend(surfaces.into_iter().map(|inner| {
                 SceneElement::Clipped(ClippedSurface::new(
                     inner,
                     shaders.clip.clone(),
-                    clip,
+                    client_rect,
                     radii,
                 ))
             }));
         } else {
             windows.extend(surfaces.into_iter().map(SceneElement::Surface));
+        }
+
+        if let Some(glass) = glass_elem {
+            windows.push(glass);
         }
 
         // The client may draw less than its area (fixed-size dialogs, or no
@@ -464,7 +574,16 @@ pub fn build(
         }
         None => {}
     }
-    elements.extend(panel_elements(renderer, panels, &[Layer::Overlay], view));
+    elements.extend(panel_elements(
+        renderer,
+        shaders,
+        glass,
+        panel_glass,
+        output_size,
+        panels,
+        &[Layer::Overlay],
+        view,
+    ));
     if let Some((buffer, place)) = panel.filter(|(_, place)| overlaps(*place, view)) {
         let corner = ModelPoint::new(place.x + shift.x, place.y + shift.y);
         let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
@@ -514,7 +633,16 @@ pub fn build(
         ));
     }
     elements.extend(popups);
-    elements.extend(panel_elements(renderer, panels, &[Layer::Top], view));
+    elements.extend(panel_elements(
+        renderer,
+        shaders,
+        glass,
+        panel_glass,
+        output_size,
+        panels,
+        &[Layer::Top],
+        view,
+    ));
     elements.extend(windows);
     // The capsules never cover a tidied window: under all of them is under
     // the floating ones too.
@@ -539,7 +667,16 @@ pub fn build(
         }
     }
     let under = [Layer::Bottom, Layer::Background];
-    elements.extend(panel_elements(renderer, panels, &under, view));
+    elements.extend(panel_elements(
+        renderer,
+        shaders,
+        glass,
+        panel_glass,
+        output_size,
+        panels,
+        &under,
+        view,
+    ));
     for (buffer, rect) in wallpapers {
         if overlaps(*rect, view) {
             let corner = ModelPoint::new(rect.x + shift.x, rect.y + shift.y);

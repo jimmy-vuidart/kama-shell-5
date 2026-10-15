@@ -115,6 +115,8 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         cursor: None,
         wallpapers: &wallpapers,
         freeze: &[],
+        glass: &state.glass,
+        panel_glass: &mut state.panel_glass,
     };
     let elements = scene::build(renderer, &shaders, &mut state.shell, &state.theme, layers);
 

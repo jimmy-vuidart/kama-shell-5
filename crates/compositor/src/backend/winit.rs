@@ -15,6 +15,7 @@ use smithay::desktop::space::SpaceElement;
 use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::input::pointer::CursorImageStatus;
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::winit::cursor::Cursor as HostCursor;
 use smithay::reexports::winit::dpi::LogicalSize;
 use smithay::reexports::winit::monitor::Fullscreen;
@@ -228,6 +229,7 @@ impl State {
 
         let damage = match winit.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
+                self.panel_glass.retain(|surface, _| surface.is_alive());
                 let view = Rect::new(0, 0, size.w, size.h);
                 let elements = scene::build(
                     renderer,
@@ -242,6 +244,8 @@ impl State {
                         cursor,
                         wallpapers: &wallpapers,
                         freeze: &freeze,
+                        glass: &self.glass,
+                        panel_glass: &mut self.panel_glass,
                     },
                 );
                 let clear = self.theme.backdrop.premultiplied();

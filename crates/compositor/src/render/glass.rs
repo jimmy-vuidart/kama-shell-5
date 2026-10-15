@@ -24,11 +24,12 @@ use super::shaders::Shaders;
 pub enum Mask {
     /// Rounded rectangle with specified corner radii (top-left, top-right, bottom-right, bottom-left).
     Rounded { radii: [f32; 4] },
-    /// Alpha channel mask from a surface texture.
+    /// Alpha channel mask from a surface texture, with optional corner radii.
     Alpha {
         texture: GlesTexture,
         src: Rectangle<f64, BufferCoord>,
         dst: Rectangle<i32, Physical>,
+        radii: [f32; 4],
     },
 }
 
@@ -41,13 +42,15 @@ impl PartialEq for Mask {
                     texture: t1,
                     src: s1,
                     dst: d1,
+                    radii: r1,
                 },
                 Mask::Alpha {
                     texture: t2,
                     src: s2,
                     dst: d2,
+                    radii: r2,
                 },
-            ) => t1.tex_id() == t2.tex_id() && s1 == s2 && d1 == d2,
+            ) => t1.tex_id() == t2.tex_id() && s1 == s2 && d1 == d2 && r1 == r2,
             _ => false,
         }
     }
@@ -646,7 +649,7 @@ impl RenderElement<GlesRenderer> for GlassElement {
 
         let (mask_mode, radii, mask_tex_id) = match &self.mask {
             Mask::Rounded { radii } => (0i32, *radii, None),
-            Mask::Alpha { texture, .. } => (1i32, [0.0; 4], Some(texture.tex_id())),
+            Mask::Alpha { texture, radii, .. } => (1i32, *radii, Some(texture.tex_id())),
         };
 
         let uniforms = vec![
