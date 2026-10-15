@@ -41,7 +41,7 @@ en garde la trace), et sa ligne retirée de ce tableau.
 | 14 | [Une fenêtre refusée par `manage` n'est jamais configurée](14-echec-de-manage.md) | bug | tests |
 | 15 | [Les habitudes n'ont ni version ni copie de secours](15-habitudes-version.md) | robustesse | tests |
 | 16 | [Le canal du shell n'a pas de version](16-version-du-canal.md) | dette | tests |
-| 17 | [La couleur de repli d'une appli diffère entre le dock et la capsule](17-couleur-de-repli.md) | bug | imbriqué |
+| 17 | [La couleur de repli d'une appli diffère entre le dock et la capsule](17-couleur-de-repli.md) | bug, réglé au passage par [glass/01](glass/01-jetons.md) | imbriqué |
 | 18 | [Le dock lance trop de processus](18-processus-du-dock.md) | performance | imbriqué |
 | 19 | [Une appli installée en cours de session n'a ni nom ni icône](19-catalogue-a-chaud.md) | bug | imbriqué |
 
@@ -50,10 +50,17 @@ en garde la trace), et sa ligne retirée de ce tableau.
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
 | 20 | [Sortir la cadence des images en logique pure](20-cadence-en-logique-pure.md) | dette | tests |
-| 21 | [Une crate de jetons d'apparence sans iced](21-crate-de-jetons.md) | dette | tests, imbriqué |
+| 21 | [Une crate de jetons d'apparence sans iced](21-crate-de-jetons.md) | dette, réalisé par [glass/01](glass/01-jetons.md) | tests, imbriqué |
 | 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) | évolution | matériel |
 | 23 | [Verrouillage de la session](23-verrouillage-de-session.md) | évolution | imbriqué |
 | 24 | [Protocole `wp_presentation`](24-presentation-time.md) | évolution | matériel |
+
+## Refonte « verre liquide »
+
+Les huit tickets de la refonte visuelle (verre translucide et flouté, sans
+changer aucune disposition) sont dans [`glass/`](glass/README.md), avec leurs
+images de référence, leurs dépendances et l'ordre où les confier à des
+agents.
 
 ## Ordre conseillé
 
