@@ -110,7 +110,6 @@ Tout ticket qui choisit une couleur translucide respecte cette règle.
 | N° | Ticket | Dépend de | Fichiers principaux |
 |---|---|---|---|
 | 03 | [Ombres douces](03-ombres.md) | 01 | `render/shadow.rs`, `render/shaders/shadow.frag`, `render/scene.rs` |
-| 04 | [Décorations du compositeur en verre](04-decorations-en-verre.md) | 01, 02 | `decoration/paint.rs`, `render/scene.rs`, `input.rs` |
 | 06 | [Dock en verre](06-dock-en-verre.md) | 01 (05 pour voir le flou) | `crates/dock/src/ui/*` |
 | 07 | [Paramètres en verre](07-parametres-en-verre.md) | 01 (05 pour voir le flou) | `crates/settings/src/*` |
 | 08 | [Documentation et captures](08-documentation-et-captures.md) | tous | `CLAUDE.md`, `docs/maquettes/dock.md` |

@@ -1057,8 +1057,13 @@ impl State {
                 radii: [radius; 4],
                 border: 2,
             };
-            // Topmost first: the outline, then its fill.
+            // Topmost first: the outline, then its rim, then its fill.
             shapes.push(zone);
+            shapes.push(Shape {
+                color: self.theme.rim,
+                border: 1,
+                ..zone
+            });
             shapes.push(Shape {
                 color: tint(if aimed { 0x4d } else { 0x1a }),
                 border: 0,

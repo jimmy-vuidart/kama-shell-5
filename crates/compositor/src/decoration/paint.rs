@@ -27,8 +27,6 @@ const BADGE_RADIUS: f32 = 5.0;
 const ICON_STROKE: f32 = 1.4;
 /// Width of the accent ring around the capsule of the active window.
 const RING_WIDTH: f32 = 2.0;
-/// Opacity of the highlight under the button of a capsule.
-const BUTTON_VEIL: u8 = 0x24;
 
 /// Everything a title bar's look depends on: repaint only when it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,7 +143,10 @@ impl Painter {
 
         let radius = spec.corner_radius as f32;
         let background = rounded_rect(0.0, 0.0, width, height, [radius, radius, 0.0, 0.0])?;
-        fill(&mut pixmap, &background, theme.titlebar);
+        fill(&mut pixmap, &background, theme.glass);
+        if let Some(rim) = titlebar_rim(width, height, radius) {
+            outline(&mut pixmap, &rim, theme.rim, 1.0);
+        }
         if let Some(line) = rounded_rect(0.0, height - 1.0, width, 1.0, [0.0; 4]) {
             fill(&mut pixmap, &line, theme.separator);
         }
@@ -165,7 +166,7 @@ impl Painter {
             let hovered = spec.hovered == Some(*button);
             let highlight = match (button, hovered) {
                 (TitlebarButton::Close, true) => Some(theme.close_hover),
-                (_, true) => Some(theme.button_hover),
+                (_, true) => Some(theme.hover),
                 (_, false) => None,
             };
             let pill = rounded_rect(
@@ -229,8 +230,6 @@ impl Painter {
     /// Paints the capsules of a slot: a rounded box, and in it one capsule
     /// per window. Returns `None` when there is nothing to show.
     pub fn capsule_group(&mut self, spec: &GroupSpec) -> Option<PaintedGroup> {
-        /// How much of the backdrop shows through the box.
-        const BOX_OPACITY: u8 = 217;
         let theme = Theme::new(spec.theme).with_accent(spec.accent);
         let label_widths: Vec<i32> = spec
             .capsules
@@ -243,12 +242,11 @@ impl Painter {
         }
         let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
 
-        let frame = Rgba {
-            a: BOX_OPACITY,
-            ..theme.titlebar
-        };
         if let Some(frame_path) = pill(layout.rect, 0.0) {
-            fill(&mut pixmap, &frame_path, frame);
+            fill(&mut pixmap, &frame_path, theme.glass);
+        }
+        if let Some(rim_path) = pill(layout.rect, 0.5) {
+            outline(&mut pixmap, &rim_path, theme.rim, 1.0);
         }
         for (index, (capsule, cell)) in spec.capsules.iter().zip(&layout.capsules).enumerate() {
             let hovered = spec.hovered.filter(|(under, _)| *under == index);
@@ -277,8 +275,8 @@ impl Painter {
         theme: &Theme,
     ) {
         let background = match (capsule.shown, hovered) {
-            (true, _) => Some(theme.button_hover),
-            (false, true) => Some(theme.separator),
+            (true, _) => Some(theme.glass_strong),
+            (false, true) => Some(theme.hover),
             (false, false) => None,
         };
         if let (Some(background), Some(path)) = (background, pill(cell.rect, 0.0)) {
@@ -325,11 +323,7 @@ impl Painter {
             let under = hovered_button == Some(*button);
             let highlight = match (button, under) {
                 (CapsuleButton::Close, true) => Some(theme.close_hover),
-                // A veil of the text color: it shows on any capsule.
-                (CapsuleButton::Minimize, true) => Some(Rgba {
-                    a: BUTTON_VEIL,
-                    ..theme.text
-                }),
+                (CapsuleButton::Minimize, true) => Some(theme.hover),
                 (_, false) => None,
             };
             if let (Some(highlight), Some(path)) = (highlight, pill(*place, 0.0)) {
@@ -365,15 +359,13 @@ impl Painter {
         let width = 2 * PADDING + widths.iter().sum::<i32>() + gaps;
         let mut pixmap = Pixmap::new(width.try_into().ok()?, HEIGHT as u32)?;
 
-        // A hairline around the bar keeps it apart from what is behind.
         let (w, h) = (width as f32, HEIGHT as f32);
-        fill(
-            &mut pixmap,
-            &rounded_rect(0.0, 0.0, w, h, [14.0; 4])?,
-            theme.separator,
-        );
-        let inside = rounded_rect(1.0, 1.0, w - 2.0, h - 2.0, [13.0; 4])?;
-        fill(&mut pixmap, &inside, theme.titlebar);
+        if let Some(bg) = rounded_rect(0.0, 0.0, w, h, [14.0; 4]) {
+            fill(&mut pixmap, &bg, theme.glass_strong);
+        }
+        if let Some(rim) = rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, [13.5; 4]) {
+            outline(&mut pixmap, &rim, theme.rim, 1.0);
+        }
 
         let mut buttons = Vec::new();
         let mut x = PADDING;
@@ -382,7 +374,7 @@ impl Painter {
             // The first choice is the default one: it stands out.
             let (background, ink) = match (index, spec.hovered == Some(index)) {
                 (0, _) => (Some(theme.accent), Rgba::WHITE),
-                (_, true) => (Some(theme.button_hover), theme.text),
+                (_, true) => (Some(theme.hover), theme.text),
                 (_, false) => (None, theme.text),
             };
             let pill = rounded_rect(
@@ -604,6 +596,26 @@ fn rounded_rect(x: f32, y: f32, w: f32, h: f32, radii: [f32; 4]) -> Option<Path>
     path.cubic_to(x, y + tl - tl * KAPPA, x + tl - tl * KAPPA, y, x + tl, y);
     path.close();
     path.finish()
+}
+
+/// An open path tracing the top edge of a titlebar and its rounded corners.
+fn titlebar_rim(w: f32, _h: f32, radius: f32) -> Option<Path> {
+    const KAPPA: f32 = 0.552_284_8;
+    let r = radius.clamp(0.0, w / 2.0);
+    let mut builder = PathBuilder::new();
+    let y = 0.5;
+    builder.move_to(0.5, r);
+    builder.cubic_to(0.5, r - r * KAPPA, r - r * KAPPA, y, r, y);
+    builder.line_to(w - 0.5 - r, y);
+    builder.cubic_to(
+        w - 0.5 - r + r * KAPPA,
+        y,
+        w - 0.5,
+        r - r * KAPPA,
+        w - 0.5,
+        r,
+    );
+    builder.finish()
 }
 
 /// The line icon of a title bar button, centered in its cell.

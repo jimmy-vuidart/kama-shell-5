@@ -246,6 +246,8 @@ impl State {
                         freeze: &freeze,
                         glass: &self.glass,
                         panel_glass: &mut self.panel_glass,
+                        bar_glass: &mut self.bar_glass,
+                        drop_glass: &mut self.drop_glass,
                     },
                 );
                 let clear = self.theme.backdrop.premultiplied();

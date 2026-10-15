@@ -110,6 +110,7 @@ pub struct Chrome {
     /// Window background where the client is shorter than its area.
     below: ShapeCache,
     pub glass: GlassCache,
+    pub titlebar_glass: GlassCache,
 }
 
 /// What is drawn at the pointer.
@@ -145,6 +146,8 @@ pub struct Layers<'a> {
     pub freeze: &'a [(MemoryRenderBuffer, Rect)],
     pub glass: &'a GlassConfig,
     pub panel_glass: &'a mut HashMap<WlSurface, GlassCache>,
+    pub bar_glass: &'a mut GlassCache,
+    pub drop_glass: &'a mut HashMap<usize, GlassCache>,
 }
 
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
@@ -289,6 +292,8 @@ pub fn build(
         freeze,
         glass,
         panel_glass,
+        bar_glass,
+        drop_glass,
     } = layers;
     let output_size = Size::from((view.w, view.h));
 
@@ -442,7 +447,20 @@ pub fn build(
                 None,
                 Kind::Unspecified,
             ) {
-                Ok(element) => windows.push(SceneElement::Texture(element)),
+                Ok(element) => {
+                    windows.push(SceneElement::Texture(element));
+                    if glass.blur {
+                        let bar_rect = rectangle(bar).to_physical_precise_round(SCALE);
+                        let radii = [radius as f32, radius as f32, 0.0, 0.0];
+                        windows.push(SceneElement::Glass(managed.chrome.titlebar_glass.element(
+                            shaders,
+                            bar_rect,
+                            output_size,
+                            Mask::Rounded { radii },
+                            glass.strength,
+                        )));
+                    }
+                }
                 Err(error) => warn!(?error, "cannot upload a title bar"),
             }
         }
@@ -596,11 +614,25 @@ pub fn build(
             None,
             Kind::Unspecified,
         ) {
-            Ok(element) => elements.push(SceneElement::Texture(element)),
+            Ok(element) => {
+                elements.push(SceneElement::Texture(element));
+                if glass.blur {
+                    let place_rect = Rect::new(corner.x, corner.y, place.w, place.h);
+                    let shape = rectangle(place_rect).to_physical_precise_round(SCALE);
+                    elements.push(SceneElement::Glass(bar_glass.element(
+                        shaders,
+                        shape,
+                        output_size,
+                        Mask::Rounded { radii: [14.0; 4] },
+                        glass.strength,
+                    )));
+                }
+            }
             Err(error) => warn!(?error, "cannot upload the placement bar"),
         }
     }
     // Shell hints (drop zones) sit above every window, in the global space.
+    let mut drop_index = 0usize;
     for shape in overlay {
         let shape = Shape {
             outline: shape.outline.translated(shift),
@@ -609,6 +641,19 @@ pub fn build(
         };
         if overlaps(shape.area, Rect::new(0, 0, view.w, view.h)) {
             elements.push(SceneElement::Shape(shape_element(&shaders.rounded, shape)));
+            if shape.border == 0 && glass.blur {
+                let cache = drop_glass.entry(drop_index).or_default();
+                let rect = rectangle(shape.outline).to_physical_precise_round(SCALE);
+                let radii = shape.radii.map(|r| r as f32);
+                elements.push(SceneElement::Glass(cache.element(
+                    shaders,
+                    rect,
+                    output_size,
+                    Mask::Rounded { radii },
+                    glass.strength,
+                )));
+                drop_index += 1;
+            }
         }
     }
     // X11 menus, tooltips and dropdowns: where they ask to be, above every
@@ -646,7 +691,7 @@ pub fn build(
     elements.extend(windows);
     // The capsules never cover a tidied window: under all of them is under
     // the floating ones too.
-    for group in &shell.capsules {
+    for group in &mut shell.capsules {
         let band = group.band();
         let Some(buffer) = group.buffer.as_ref().filter(|_| overlaps(band, view)) else {
             continue;
@@ -662,7 +707,24 @@ pub fn build(
             None,
             Kind::Unspecified,
         ) {
-            Ok(element) => elements.push(SceneElement::Texture(element)),
+            Ok(element) => {
+                elements.push(SceneElement::Texture(element));
+                if glass.blur {
+                    let box_rect = group
+                        .layout
+                        .rect
+                        .translated(ModelPoint::new(corner.x, corner.y));
+                    let shape = rectangle(box_rect).to_physical_precise_round(SCALE);
+                    let radius = box_rect.h as f32 / 2.0;
+                    elements.push(SceneElement::Glass(group.glass.element(
+                        shaders,
+                        shape,
+                        output_size,
+                        Mask::Rounded { radii: [radius; 4] },
+                        glass.strength,
+                    )));
+                }
+            }
             Err(error) => warn!(?error, "cannot upload the capsules of a slot"),
         }
     }
@@ -695,5 +757,10 @@ pub fn build(
             }
         }
     }
+    let glass_count = elements
+        .iter()
+        .filter(|e| matches!(e, SceneElement::Glass(_)))
+        .count();
+    tracing::debug!(?view, glass_count, "built scene elements");
     elements
 }

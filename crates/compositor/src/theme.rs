@@ -35,8 +35,11 @@ pub struct Theme {
     /// Icons of buttons that do nothing yet.
     pub disabled: Rgba,
     pub accent: Rgba,
+    /// Button hover background.
     pub button_hover: Rgba,
     pub close_hover: Rgba,
+    /// Hover overlay on glass.
+    pub hover: Rgba,
     /// Translucent glass for chrome surfaces.
     pub glass: Rgba,
     /// Strong glass for menus, tooltips, mixer.
@@ -68,6 +71,7 @@ impl Theme {
             accent: tokens.accent,
             button_hover: tokens.button_hover,
             close_hover: tokens.close_hover,
+            hover: tokens.hover,
             glass: tokens.glass,
             glass_strong: tokens.glass_strong,
             rim: tokens.rim,
