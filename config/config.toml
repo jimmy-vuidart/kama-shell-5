@@ -99,3 +99,13 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # center = "/chemin/vers/centre.png"
 # right = "/chemin/vers/droite.png"
 # mode = "fill"
+
+# Périphériques audio de sortie : sélecteur rapide du lanceur et surnoms.
+# [audio]
+# Périphériques masqués du sélecteur rapide
+# hidden = ["alsa_output.pci-0000_01_00.1.hdmi-stereo-extra1"]
+
+# Surnoms donnés aux périphériques de sortie
+# [audio.nicks]
+# "alsa_output.usb-Generic_USB_Audio-00.HiFi__Headphones__sink" = "Casque"
+

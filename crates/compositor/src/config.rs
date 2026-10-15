@@ -22,6 +22,7 @@ pub struct Config {
     /// compositor, but no reason to reject the whole file either.
     pub dock: Ignored,
     pub drawer: Ignored,
+    pub audio: Ignored,
     /// Command of the terminal opened by the shortcut.
     pub terminal: Option<String>,
     /// Whether X11 applications can run, through XWayland; they can unless
@@ -396,6 +397,14 @@ mod tests {
             Change::WallpaperPath(Some("/path/to/wall.png".into())),
             Change::Wallpaper(OutputRole::Left, Some("/path/to/left.png".into())),
             Change::WallpaperMode(coquille_config::WallpaperMode::Fit),
+            Change::AudioNick {
+                device: "alsa_output.headphones".into(),
+                nick: Some("Casque".into()),
+            },
+            Change::AudioVisibility {
+                device: "alsa_output.hdmi".into(),
+                visible: false,
+            },
         ];
         let mut text = SAMPLE.to_owned();
         for change in &changes {

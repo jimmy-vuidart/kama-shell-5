@@ -2,6 +2,8 @@
 //! is missing or means nothing is simply not set), and how each is written
 //! back.
 
+use std::collections::BTreeMap;
+
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
 use toml_edit::{DocumentMut, Item, Value};
@@ -169,6 +171,8 @@ pub struct Settings {
     pub wallpaper_path: Option<String>,
     pub wallpapers: PerScreen<Option<String>>,
     pub wallpaper_mode: Option<WallpaperMode>,
+    pub audio_hidden: Vec<String>,
+    pub audio_nicks: BTreeMap<String, String>,
 }
 
 impl Settings {
@@ -197,6 +201,25 @@ impl Settings {
                     .or_else(|| item.as_integer().map(|i| i as f64))
             })
         };
+        let audio_hidden = item(&["audio", "hidden"])
+            .and_then(Item::as_array)
+            .map(|array| {
+                array
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let audio_nicks = item(&["audio", "nicks"])
+            .and_then(Item::as_table)
+            .map(|table| {
+                table
+                    .iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.to_owned(), s.to_owned())))
+                    .collect()
+            })
+            .unwrap_or_default();
         Self {
             theme: match text_of(&["theme"]).as_deref() {
                 Some("dark") => Some(ThemeName::Dark),
@@ -232,6 +255,8 @@ impl Settings {
             wallpaper_mode: text_of(&["wallpaper", "mode"])
                 .as_deref()
                 .and_then(WallpaperMode::named),
+            audio_hidden,
+            audio_nicks,
         }
     }
 
@@ -291,6 +316,18 @@ impl Settings {
     pub fn mouse_left_handed(&self) -> bool {
         self.mouse_left_handed.unwrap_or(false)
     }
+
+    pub fn is_audio_sink_visible(&self, name: &str) -> bool {
+        !self.audio_hidden.iter().any(|h| h == name)
+    }
+
+    pub fn audio_sink_nick<'a>(&'a self, name: &str) -> Option<&'a str> {
+        self.audio_nicks.get(name).map(String::as_str)
+    }
+
+    pub fn audio_sink_display_name<'a>(&'a self, name: &str, fallback: &'a str) -> &'a str {
+        self.audio_sink_nick(name).unwrap_or(fallback)
+    }
 }
 
 /// Whether a text is a color as the file writes them: `#rrggbb`.
@@ -328,6 +365,14 @@ pub enum Change {
     WallpaperPath(Option<String>),
     Wallpaper(OutputRole, Option<String>),
     WallpaperMode(WallpaperMode),
+    AudioNick {
+        device: String,
+        nick: Option<String>,
+    },
+    AudioVisibility {
+        device: String,
+        visible: bool,
+    },
 }
 
 /// The file with a change made. `None` when the file is not valid TOML: it
@@ -400,6 +445,26 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
             text_or_nothing(text, &path_key, path)
         }
         Change::WallpaperMode(mode) => with_value(text, &["wallpaper", "mode"], mode.name().into()),
+        Change::AudioNick { device, nick } => {
+            let nick = nick.as_deref().map(str::trim).filter(|n| !n.is_empty());
+            match nick {
+                Some(nick) => with_value(text, &["audio", "nicks", device], Value::from(nick)),
+                None => without(text, &["audio", "nicks", device]),
+            }
+        }
+        Change::AudioVisibility { device, visible } => {
+            let current = Settings::parse(text).audio_hidden;
+            let mut updated: Vec<String> = current.into_iter().filter(|d| d != device).collect();
+            if !*visible {
+                updated.push(device.clone());
+            }
+            if updated.is_empty() {
+                without(text, &["audio", "hidden"])
+            } else {
+                let array: toml_edit::Array = updated.iter().map(String::as_str).collect();
+                with_value(text, &["audio", "hidden"], Value::Array(array))
+            }
+        }
     }
 }
 
@@ -552,6 +617,14 @@ mod tests {
             Change::MouseLeftHanded(true),
             Change::WallpaperPath(Some("/home/user/wallpaper.png".into())),
             Change::WallpaperMode(WallpaperMode::Fit),
+            Change::AudioNick {
+                device: "alsa_output.headphones".into(),
+                nick: Some("Mon Casque".into()),
+            },
+            Change::AudioVisibility {
+                device: "alsa_output.hdmi".into(),
+                visible: false,
+            },
         ];
 
         let mut text = SAMPLE.to_owned();
@@ -583,6 +656,8 @@ mod tests {
             wallpaper_path: Some("/home/user/wallpaper.png".into()),
             wallpapers: PerScreen::default(),
             wallpaper_mode: Some(WallpaperMode::Fit),
+            audio_hidden: vec!["alsa_output.hdmi".into()],
+            audio_nicks: BTreeMap::from([("alsa_output.headphones".into(), "Mon Casque".into())]),
         };
         assert_eq!(Settings::parse(&text), expected);
         // The favorites of the dock, which no change is about, are still there.
@@ -718,5 +793,78 @@ mod tests {
         let settings = Settings::parse(&changed);
         assert_eq!(settings.dock_icon_size, Some(28));
         assert_eq!(settings.dock_icon_size(), 28);
+    }
+
+    #[test]
+    fn audio_settings_can_be_parsed_and_changed() {
+        let text = r#"
+        [audio]
+        hidden = ["alsa_output.hdmi"]
+
+        [audio.nicks]
+        "alsa_output.usb-headset" = "Casque"
+        "#;
+        let settings = Settings::parse(text);
+        assert!(!settings.is_audio_sink_visible("alsa_output.hdmi"));
+        assert!(settings.is_audio_sink_visible("alsa_output.usb-headset"));
+        assert_eq!(
+            settings.audio_sink_nick("alsa_output.usb-headset"),
+            Some("Casque")
+        );
+        assert_eq!(
+            settings.audio_sink_display_name("alsa_output.usb-headset", "USB Headset"),
+            "Casque"
+        );
+        assert_eq!(
+            settings.audio_sink_display_name("alsa_output.hdmi", "HDMI Screen"),
+            "HDMI Screen"
+        );
+
+        let text = apply(
+            text,
+            &Change::AudioNick {
+                device: "alsa_output.hdmi".into(),
+                nick: Some("Écran TV".into()),
+            },
+        )
+        .unwrap();
+        let settings = Settings::parse(&text);
+        assert_eq!(
+            settings.audio_sink_nick("alsa_output.hdmi"),
+            Some("Écran TV")
+        );
+
+        let text = apply(
+            &text,
+            &Change::AudioNick {
+                device: "alsa_output.hdmi".into(),
+                nick: None,
+            },
+        )
+        .unwrap();
+        let settings = Settings::parse(&text);
+        assert_eq!(settings.audio_sink_nick("alsa_output.hdmi"), None);
+
+        let text = apply(
+            &text,
+            &Change::AudioVisibility {
+                device: "alsa_output.hdmi".into(),
+                visible: true,
+            },
+        )
+        .unwrap();
+        let settings = Settings::parse(&text);
+        assert!(settings.is_audio_sink_visible("alsa_output.hdmi"));
+
+        let text = apply(
+            &text,
+            &Change::AudioVisibility {
+                device: "alsa_output.speaker".into(),
+                visible: false,
+            },
+        )
+        .unwrap();
+        let settings = Settings::parse(&text);
+        assert!(!settings.is_audio_sink_visible("alsa_output.speaker"));
     }
 }

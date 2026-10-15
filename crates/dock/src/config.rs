@@ -3,6 +3,7 @@
 //! size of the launcher). The `coquille-config` crate does the writing,
 //! which leaves the rest of the file as it was, comments included.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use coquille_config::{Array, Change, Value, apply, with_value};
@@ -32,6 +33,8 @@ pub struct Config {
     pub drawer_height: Option<u32>,
     /// The icon size of the dock bar.
     pub icon_size: Option<u32>,
+    pub audio_hidden: Vec<String>,
+    pub audio_nicks: BTreeMap<String, String>,
 }
 
 impl Default for Config {
@@ -45,6 +48,8 @@ impl Default for Config {
             drawer_width: None,
             drawer_height: None,
             icon_size: None,
+            audio_hidden: Vec::new(),
+            audio_nicks: BTreeMap::new(),
         }
     }
 }
@@ -52,6 +57,14 @@ impl Default for Config {
 impl Config {
     pub fn icon_size(&self) -> u32 {
         self.icon_size.unwrap_or(crate::ui::bar::DEFAULT_ICON_SIZE)
+    }
+
+    pub fn is_audio_sink_visible(&self, name: &str) -> bool {
+        !self.audio_hidden.iter().any(|h| h == name)
+    }
+
+    pub fn audio_sink_nick<'a>(&'a self, name: &str) -> Option<&'a str> {
+        self.audio_nicks.get(name).map(String::as_str)
     }
 }
 
@@ -107,6 +120,19 @@ pub fn parse(text: &str) -> Config {
         u32::try_from(value).ok()
     };
     let favorites = names("dock", "favorites").unwrap_or_default();
+    let audio_hidden = names("audio", "hidden").unwrap_or_default();
+    let audio_nicks = document
+        .get("audio")
+        .and_then(Item::as_table)
+        .and_then(|table| table.get("nicks"))
+        .and_then(Item::as_table)
+        .map(|table| {
+            table
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.to_owned(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
     Config {
         theme: match text_of("theme") {
             Some("dark") => Some(ThemeName::Dark),
@@ -120,6 +146,8 @@ pub fn parse(text: &str) -> Config {
         drawer_height: length("height"),
         icon_size: dock_int("icon_size"),
         favorites,
+        audio_hidden,
+        audio_nicks,
     }
 }
 

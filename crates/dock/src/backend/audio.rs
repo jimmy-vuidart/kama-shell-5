@@ -20,7 +20,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
 
-use super::{Audio, Backend, Request, Update};
+use super::{Audio, AudioSink, Backend, Request, Update};
 use crate::model::mixer::Stream;
 
 /// The loudest a PulseAudio volume goes without amplification.
@@ -95,6 +95,23 @@ pub fn parse_default(json: &str) -> Option<String> {
     info["default_sink_name"].as_str().map(str::to_owned)
 }
 
+/// The available output sinks in `pactl -f json list sinks`.
+pub fn parse_sinks(json: &str) -> Vec<AudioSink> {
+    let sinks: Vec<Value> = serde_json::from_str(json).unwrap_or_default();
+    sinks
+        .into_iter()
+        .filter_map(|sink| {
+            let name = sink["name"].as_str()?.to_owned();
+            let described = sink["description"]
+                .as_str()
+                .filter(|text| !text.is_empty() && *text != "(null)");
+            let nick = sink["properties"]["node.nick"].as_str();
+            let description = described.or(nick).unwrap_or(&name).to_owned();
+            Some(AudioSink { name, description })
+        })
+        .collect()
+}
+
 /// How loud a piece of sound is: the peak of its samples (16 bits, little
 /// endian), from 0 to 1.
 pub fn peak(samples: &[u8]) -> f32 {
@@ -127,14 +144,17 @@ async fn pactl(arguments: &[&str]) -> Option<String> {
 /// Reads the whole state of the audio server.
 async fn read() -> Option<Audio> {
     let default = parse_default(&pactl(&["-f", "json", "info"]).await?)?;
-    let sinks = pactl(&["-f", "json", "list", "sinks"]).await?;
-    let (output, volume, muted) = parse_output(&sinks, &default)?;
+    let sinks_json = pactl(&["-f", "json", "list", "sinks"]).await?;
+    let (output, volume, muted) = parse_output(&sinks_json, &default)?;
+    let sinks = parse_sinks(&sinks_json);
     let inputs = pactl(&["-f", "json", "list", "sink-inputs"]).await?;
     Some(Audio {
         output,
+        output_name: default,
         volume,
         muted,
         streams: parse_streams(&inputs),
+        sinks,
     })
 }
 
@@ -146,6 +166,9 @@ async fn apply(request: Request) {
         }
         Request::Mute(muted) => {
             pactl(&["set-sink-mute", "@DEFAULT_SINK@", flag(muted)]).await;
+        }
+        Request::SelectOutput(name) => {
+            pactl(&["set-default-sink", &name]).await;
         }
         Request::StreamVolume(ids, volume) => {
             for id in ids {
@@ -390,5 +413,15 @@ mod tests {
         assert_eq!(percent(0.554), "55%");
         assert_eq!(percent(1.7), "100%");
         assert_eq!(percent(-1.0), "0%");
+    }
+
+    #[test]
+    fn all_sinks_are_parsed_with_their_names_and_descriptions() {
+        let sinks = parse_sinks(SINKS);
+        assert_eq!(sinks.len(), 2);
+        assert_eq!(sinks[0].name, "usb-card");
+        assert_eq!(sinks[0].description, "Razer USB Sound Card");
+        assert_eq!(sinks[1].name, "hdmi");
+        assert_eq!(sinks[1].description, "Écran Dell");
     }
 }

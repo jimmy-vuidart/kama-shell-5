@@ -15,15 +15,17 @@ pub enum Page {
     #[default]
     Appearance,
     Screens,
+    Audio,
     Game,
     Mouse,
     System,
 }
 
 impl Page {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Appearance,
         Self::Screens,
+        Self::Audio,
         Self::Game,
         Self::Mouse,
         Self::System,
@@ -33,6 +35,7 @@ impl Page {
         match self {
             Self::Appearance => "Apparence",
             Self::Screens => "Écrans et dock",
+            Self::Audio => "Son",
             Self::Game => "Mode jeu",
             Self::Mouse => "Souris",
             Self::System => "Système",
@@ -44,6 +47,9 @@ impl Page {
         match self {
             Self::Appearance => "Le thème, la couleur d'accent et le fond d'écran.",
             Self::Screens => "Quel écran est lequel, et où se tient le dock.",
+            Self::Audio => {
+                "Les périphériques de sortie, leurs surnoms et leur présence dans le lanceur."
+            }
             Self::Game => "Ce qui se passe sur l'écran d'un jeu en plein écran.",
             Self::Mouse => "La vitesse du pointeur, le profil d'accélération et le défilement.",
             Self::System => "Le clavier, le terminal et les applications X11.",
@@ -363,6 +369,65 @@ pub fn dock_icon_size_on_slider(size: u32) -> u32 {
     rounded.clamp(*DOCK_ICON_SIZE_RANGE.start(), *DOCK_ICON_SIZE_RANGE.end())
 }
 
+/// An audio output device known to PipeWire/PulseAudio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDeviceCard {
+    pub name: String,
+    pub description: String,
+    pub nick: Option<String>,
+    pub visible: bool,
+    pub active: bool,
+}
+
+/// Parses the output of `pactl -f json list sinks` and matches it with the current settings.
+pub fn parse_audio_sinks(
+    json: &str,
+    default_sink: Option<&str>,
+    settings: &Settings,
+) -> Vec<AudioDeviceCard> {
+    let sinks: Vec<serde_json::Value> = serde_json::from_str(json).unwrap_or_default();
+    sinks
+        .into_iter()
+        .filter_map(|sink| {
+            let name = sink["name"].as_str()?.to_owned();
+            let described = sink["description"]
+                .as_str()
+                .filter(|text| !text.is_empty() && *text != "(null)");
+            let nick_prop = sink["properties"]["node.nick"].as_str();
+            let description = described.or(nick_prop).unwrap_or(&name).to_owned();
+            let nick = settings.audio_sink_nick(&name).map(str::to_owned);
+            let visible = settings.is_audio_sink_visible(&name);
+            let active = default_sink.is_some_and(|def| def == name);
+            Some(AudioDeviceCard {
+                name,
+                description,
+                nick,
+                visible,
+                active,
+            })
+        })
+        .collect()
+}
+
+/// Loads the audio sinks currently available on the system using `pactl`.
+pub fn load_audio_sinks(settings: &Settings) -> Vec<AudioDeviceCard> {
+    let default_sink = std::process::Command::new("pactl")
+        .args(["-f", "json", "info"])
+        .output()
+        .ok()
+        .and_then(|out| {
+            let info: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+            info["default_sink_name"].as_str().map(str::to_owned)
+        });
+    let sinks_json = std::process::Command::new("pactl")
+        .args(["-f", "json", "list", "sinks"])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .unwrap_or_default();
+    parse_audio_sinks(&sinks_json, default_sink.as_deref(), settings)
+}
+
 #[cfg(test)]
 mod tests {
     use coquille_ipc::Screen;
@@ -573,5 +638,52 @@ mod tests {
             assert!(!page.name().is_empty());
             assert!(!page.summary().is_empty());
         }
+    }
+
+    #[test]
+    fn audio_sinks_are_parsed_and_configured() {
+        let json = r#"[
+            {
+                "name": "alsa_output.pci-0000_01_00.1.hdmi-stereo",
+                "description": "HDA NVidia Digital Stereo (HDMI)",
+                "properties": { "node.nick": "HDMI Audio" }
+            },
+            {
+                "name": "alsa_output.usb-SteelSeries_Arctis_Nova_Pro-00.analog-stereo",
+                "description": "SteelSeries Arctis Nova Pro Wireless",
+                "properties": { "node.nick": "Arctis Nova Pro" }
+            }
+        ]"#;
+
+        let config = r#"
+[audio]
+hidden = ["alsa_output.pci-0000_01_00.1.hdmi-stereo"]
+
+[audio.nicks]
+"alsa_output.usb-SteelSeries_Arctis_Nova_Pro-00.analog-stereo" = "Casque gaming"
+"#;
+        let settings = Settings::parse(config);
+        let sinks = parse_audio_sinks(
+            json,
+            Some("alsa_output.usb-SteelSeries_Arctis_Nova_Pro-00.analog-stereo"),
+            &settings,
+        );
+
+        assert_eq!(sinks.len(), 2);
+
+        assert_eq!(sinks[0].name, "alsa_output.pci-0000_01_00.1.hdmi-stereo");
+        assert_eq!(sinks[0].description, "HDA NVidia Digital Stereo (HDMI)");
+        assert_eq!(sinks[0].nick, None);
+        assert!(!sinks[0].visible);
+        assert!(!sinks[0].active);
+
+        assert_eq!(
+            sinks[1].name,
+            "alsa_output.usb-SteelSeries_Arctis_Nova_Pro-00.analog-stereo"
+        );
+        assert_eq!(sinks[1].description, "SteelSeries Arctis Nova Pro Wireless");
+        assert_eq!(sinks[1].nick.as_deref(), Some("Casque gaming"));
+        assert!(sinks[1].visible);
+        assert!(sinks[1].active);
     }
 }

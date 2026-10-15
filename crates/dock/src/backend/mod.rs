@@ -56,14 +56,24 @@ pub struct Switch {
     pub available: bool,
 }
 
+/// An audio output device reported by the audio server.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AudioSink {
+    pub name: String,
+    pub description: String,
+}
+
 /// The output the sound goes to, and what plays on it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Audio {
     /// The name of the output device, as the user knows it.
     pub output: String,
+    /// The technical name of the output device.
+    pub output_name: String,
     pub volume: f32,
     pub muted: bool,
     pub streams: Vec<Stream>,
+    pub sinks: Vec<AudioSink>,
 }
 
 /// What a backend tells the dock.
@@ -87,6 +97,7 @@ pub enum Update {
 pub enum Request {
     Volume(f32),
     Mute(bool),
+    SelectOutput(String),
     StreamVolume(Vec<u32>, f32),
     StreamMute(Vec<u32>, bool),
     /// Whether to tell how loud each stream is: only while the mixer shows.
@@ -117,6 +128,7 @@ impl Request {
         match self {
             Self::Volume(_)
             | Self::Mute(_)
+            | Self::SelectOutput(_)
             | Self::StreamVolume(..)
             | Self::StreamMute(..)
             | Self::Levels(_) => Backend::Audio,

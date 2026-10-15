@@ -196,6 +196,7 @@ pub enum Message {
     Toggle(Toggle),
     Volume(f32),
     VolumeMute,
+    SelectOutput(String),
     Brightness(f32),
     StreamVolume(String, f32),
     StreamMute(String),
@@ -209,6 +210,19 @@ pub enum Message {
     Settings,
     /// The whole Steam library.
     Library,
+}
+
+/// An audio output sink choice displayed in the launcher selector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputChoice {
+    pub name: String,
+    pub label: String,
+}
+
+impl std::fmt::Display for OutputChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
 }
 
 pub struct Dock {
@@ -584,6 +598,12 @@ impl Dock {
         match request {
             Request::Volume(volume) => self.audio.volume = volume,
             Request::Mute(muted) => self.audio.muted = muted,
+            Request::SelectOutput(ref name) => {
+                self.audio.output_name = name.clone();
+                if let Some(sink) = self.audio.sinks.iter().find(|s| &s.name == name) {
+                    self.audio.output = sink.description.clone();
+                }
+            }
             Request::StreamVolume(ids, volume) => {
                 for stream in streams.iter_mut().filter(|stream| ids.contains(&stream.id)) {
                     stream.volume = volume;
@@ -607,6 +627,53 @@ impl Dock {
     /// The lines of the mixer.
     pub fn mixer_lines(&self) -> Vec<mixer::Line> {
         mixer::lines(&self.audio.streams, &|name| self.identify(name))
+    }
+
+    /// The audio output choices visible in the launcher selector.
+    pub fn visible_sinks(&self) -> Vec<OutputChoice> {
+        let mut choices: Vec<OutputChoice> = self
+            .audio
+            .sinks
+            .iter()
+            .filter(|sink| self.config.is_audio_sink_visible(&sink.name))
+            .map(|sink| {
+                let label = self
+                    .config
+                    .audio_sink_nick(&sink.name)
+                    .unwrap_or(&sink.description)
+                    .to_owned();
+                OutputChoice {
+                    name: sink.name.clone(),
+                    label,
+                }
+            })
+            .collect();
+        if choices.is_empty()
+            && (!self.audio.output_name.is_empty() || !self.audio.output.is_empty())
+        {
+            let label = self
+                .config
+                .audio_sink_nick(&self.audio.output_name)
+                .unwrap_or(&self.audio.output)
+                .to_owned();
+            choices.push(OutputChoice {
+                name: self.audio.output_name.clone(),
+                label,
+            });
+        }
+        choices
+    }
+
+    /// The currently active output choice.
+    pub fn current_output_choice(&self) -> Option<OutputChoice> {
+        let visible = self.visible_sinks();
+        if let Some(found) = visible.iter().find(|c| {
+            (!self.audio.output_name.is_empty() && c.name == self.audio.output_name)
+                || c.label == self.audio.output
+        }) {
+            return Some(found.clone());
+        }
+        visible.into_iter().next()
     }
 
     fn save_volumes(&self) {
@@ -1256,6 +1323,10 @@ impl Dock {
             }
             Message::VolumeMute => {
                 self.request(Request::Mute(!self.audio.muted));
+                Task::none()
+            }
+            Message::SelectOutput(name) => {
+                self.request(Request::SelectOutput(name));
                 Task::none()
             }
             Message::Brightness(level) => {

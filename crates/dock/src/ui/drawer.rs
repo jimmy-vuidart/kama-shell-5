@@ -4,14 +4,14 @@
 
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    Column, Row, button, column, container, image, mouse_area, opaque, progress_bar, row, slider,
-    space, stack, text, text_input,
+    Column, Row, button, column, container, image, mouse_area, opaque, pick_list, progress_bar,
+    row, slider, space, stack, text, text_input,
 };
 use iced::{Alignment, Border, Color, ContentFit, Element, Length, Padding, border, mouse};
 
 use super::icons::{self, Glyph};
 use super::style::{self, Palette};
-use crate::app::{Dock, Drawer, Message, SEARCH, Target, Toggle};
+use crate::app::{Dock, Drawer, Message, OutputChoice, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
 use crate::model::drawer::{self, PAGE};
 use crate::model::mixer;
@@ -704,20 +704,44 @@ fn control_center<'a>(
         .padding(0)
         .on_press(Message::VolumeMute)
         .style(style::flat(palette.hover, 8.0));
-    let per_app_color = palette.on_accent();
-    let per_app = button(
-        text("Par appli ›")
-            .size(12)
-            .font(style::SEMIBOLD)
-            .color(per_app_color),
-    )
-    .padding(Padding::from([6.0, 10.0]))
-    .on_press(Message::ToggleMixer)
-    .style(style::tinted(
-        palette.accent,
-        style::mix(palette.accent, palette.text, 0.1),
-        8.0,
-    ));
+    let (mixer_idle, mixer_fg) = if drawer.mixer {
+        (palette.accent, palette.on_accent())
+    } else {
+        (palette.card, palette.text)
+    };
+    let mixer_toggle: Element<'_, Message> = if narrow {
+        button(
+            row![
+                icons::glyph(Glyph::Sliders, 14.0, mixer_fg),
+                text("Mixeur ›")
+                    .size(12)
+                    .font(style::SEMIBOLD)
+                    .color(mixer_fg)
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+        )
+        .padding(Padding::from([6.0, 10.0]))
+        .on_press(Message::ToggleMixer)
+        .style(style::tinted(
+            mixer_idle,
+            style::mix(mixer_idle, palette.text, 0.08),
+            8.0,
+        ))
+        .into()
+    } else {
+        button(container(icons::glyph(Glyph::Sliders, 16.0, mixer_fg)).center(Length::Fill))
+            .width(30)
+            .height(30)
+            .padding(0)
+            .on_press(Message::ToggleMixer)
+            .style(style::tinted(
+                mixer_idle,
+                style::mix(mixer_idle, palette.text, 0.08),
+                8.0,
+            ))
+            .into()
+    };
     let screens = dock.snapshot.screens.len();
     let screens_label = match (dock.brightness, screens) {
         (None, _) => "indisponible".to_owned(),
@@ -739,9 +763,10 @@ fn control_center<'a>(
     let volume = row![
         mute,
         level(dock.audio.volume, palette, Message::Volume),
-        per_app
+        output_picker(dock, palette),
+        mixer_toggle
     ]
-    .spacing(10)
+    .spacing(8)
     .align_y(Alignment::Center);
     let light = row![
         container(icons::glyph(Glyph::Sun, 18.0, palette.text)).center_x(30),
@@ -1021,36 +1046,47 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     stack![scrim, column![middle.height(Length::Fill), bar]].into()
 }
 
+fn output_picker<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+    let choices = dock.visible_sinks();
+    let current = dock.current_output_choice();
+    pick_list(choices, current, |choice: OutputChoice| {
+        Message::SelectOutput(choice.name)
+    })
+    .padding(Padding::from([5.0, 8.0]))
+    .text_size(12)
+    .font(style::MEDIUM)
+    .style(move |_, status| {
+        let border_color = match status {
+            pick_list::Status::Active => palette.separator,
+            pick_list::Status::Hovered | pick_list::Status::Opened { .. } => palette.accent,
+        };
+        pick_list::Style {
+            text_color: palette.text,
+            placeholder_color: palette.muted,
+            handle_color: palette.muted,
+            background: palette.card.into(),
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+        }
+    })
+    .into()
+}
+
 /// The mixer: the general volume, then one line per application playing.
 fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
-    let output = if dock.audio.output.is_empty() {
-        "Sortie audio".to_owned()
-    } else {
-        dock.audio.output.clone()
-    };
-    let output = row![
-        icons::glyph(Glyph::Headphones, 14.0, palette.text),
-        container(
-            text(output)
-                .size(12)
-                .font(style::MEDIUM)
-                .color(palette.text)
-                .wrapping(Wrapping::None)
-        )
-        .max_width(96)
-        .height(16)
-        .clip(true)
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center);
-    let output = container(output)
-        .padding(Padding::from([6.0, 10.0]))
-        .style(move |_| style::fill(palette.block, 8.0));
     let title = text("Volume par application")
         .size(14)
         .font(style::SEMIBOLD)
         .color(palette.text);
-    let header = row![title, space().width(Length::Fill), output].align_y(Alignment::Center);
+    let header = row![
+        title,
+        space().width(Length::Fill),
+        output_picker(dock, palette)
+    ]
+    .align_y(Alignment::Center);
 
     let percent = (dock.audio.volume * 100.0).round() as u32;
     let general = row![

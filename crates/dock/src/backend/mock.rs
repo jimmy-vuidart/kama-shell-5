@@ -4,7 +4,7 @@
 use coquille_ipc::{Habit, Screen, Snapshot, ThemeName, Window};
 use coquille_model::{LayoutKind, OutputRole};
 
-use super::{Audio, Switch};
+use super::{Audio, AudioSink, Switch};
 use crate::model::mixer::Stream;
 
 /// Three screens, a game at the center, the messenger in use on the left.
@@ -130,7 +130,8 @@ pub fn audio(favorites: &[String]) -> Audio {
             .unwrap_or_else(|| fallback.to_owned())
     };
     Audio {
-        output: "Casque".to_owned(),
+        output: "Casque USB".to_owned(),
+        output_name: "mock-headphones".to_owned(),
         volume: 0.55,
         muted: false,
         streams: vec![
@@ -139,6 +140,20 @@ pub fn audio(favorites: &[String]) -> Audio {
             stream(3, &name(0, "firefox"), "", 0.4, false, true),
             stream(4, "musique", "", 0.0, true, false),
             stream(5, "sons-systeme", "Notifications", 0.25, false, false),
+        ],
+        sinks: vec![
+            AudioSink {
+                name: "mock-headphones".to_owned(),
+                description: "Casque USB".to_owned(),
+            },
+            AudioSink {
+                name: "mock-speakers".to_owned(),
+                description: "Enceintes stéréo".to_owned(),
+            },
+            AudioSink {
+                name: "mock-hdmi".to_owned(),
+                description: "Écran Dell AW3418DW".to_owned(),
+            },
         ],
     }
 }

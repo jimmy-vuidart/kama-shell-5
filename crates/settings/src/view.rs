@@ -68,6 +68,7 @@ fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, M
     let icon = match page {
         Page::Appearance => Glyph::Brush,
         Page::Screens => Glyph::Screens,
+        Page::Audio => Glyph::Volume,
         Page::Game => Glyph::Gamepad,
         Page::Mouse => Glyph::Mouse,
         Page::System => Glyph::Keyboard,
@@ -119,6 +120,7 @@ fn page<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     let settings = match app.page {
         Page::Appearance => appearance(app, palette),
         Page::Screens => screens(app, palette),
+        Page::Audio => audio(app, palette),
         Page::Game => game(app, palette),
         Page::Mouse => mouse(app, palette),
         Page::System => system(app, palette),
@@ -578,6 +580,172 @@ fn drawing<'a>(
         .padding(Padding::from([18.0, 16.0]))
         .style(move |_| style::outlined(palette.card, palette.separator, 10.0))
         .into()
+}
+
+fn audio<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
+    let mut content: Column<'_, Message> = column![].spacing(18);
+
+    if app.audio_sinks.is_empty() {
+        let empty = card(
+            vec![
+                words(
+                    "Aucun périphérique de sortie audio détecté",
+                    "Vérifiez que PipeWire ou le serveur audio est actif.",
+                    palette,
+                )
+                .into(),
+            ],
+            palette,
+        );
+        content = content.push(empty);
+        return content.into();
+    }
+
+    for sink in &app.audio_sinks {
+        let is_headphones = sink.description.to_lowercase().contains("headphone")
+            || sink.description.to_lowercase().contains("casque");
+        let icon = if is_headphones {
+            Glyph::Headphones
+        } else {
+            Glyph::Volume
+        };
+
+        let display_name = sink.nick.as_deref().unwrap_or(&sink.description);
+
+        let mut title_items: Row<'_, Message> = row![
+            glyph(
+                icon,
+                16.0,
+                if sink.active {
+                    palette.accent
+                } else {
+                    palette.muted
+                }
+            ),
+            text(display_name)
+                .size(14)
+                .font(style::SEMIBOLD)
+                .color(palette.text),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        if sink.active {
+            let active_pill = container(
+                text("Actif")
+                    .size(11)
+                    .font(style::SEMIBOLD)
+                    .color(palette.on_accent()),
+            )
+            .padding(Padding::from([2.0, 7.0]))
+            .style(move |_| style::fill(palette.accent, 6.0));
+
+            title_items = title_items.push(active_pill);
+        }
+
+        let subtitle: Element<'a, Message> = match &sink.nick {
+            Some(_) => text(format!("{} — {}", sink.description, sink.name))
+                .size(11)
+                .color(palette.muted)
+                .into(),
+            None => text(&sink.name).size(11).color(palette.muted).into(),
+        };
+
+        let title_block = column![title_items, row![space().width(24), subtitle]].spacing(2);
+
+        let visibility = setting(
+            "Visible dans le sélecteur rapide",
+            "Affiche ce périphérique dans la liste du volume du lanceur.",
+            None,
+            switch(
+                sink.visible,
+                {
+                    let device = sink.name.clone();
+                    move |on| Message::AudioVisibility(device.clone(), on)
+                },
+                palette,
+            ),
+            palette,
+        );
+
+        let current_input = app
+            .audio_nick_inputs
+            .get(&sink.name)
+            .map(String::as_str)
+            .unwrap_or("");
+        let saved_nick = sink.nick.as_deref().unwrap_or("");
+        let is_dirty = current_input != saved_nick;
+
+        let field = text_input("Ex : Casque, Enceintes…", current_input)
+            .on_input({
+                let device = sink.name.clone();
+                move |text| Message::AudioNickChanged(device.clone(), text)
+            })
+            .on_submit(Message::AudioNickSubmit(sink.name.clone()))
+            .size(13)
+            .font(style::MEDIUM)
+            .width(200)
+            .padding(Padding::from([7.0, 10.0]))
+            .style(move |_, status| {
+                let line = match status {
+                    text_input::Status::Focused { .. } => palette.accent,
+                    _ => palette.separator,
+                };
+                text_input::Style {
+                    background: palette.block.into(),
+                    border: Border {
+                        color: line,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    icon: palette.muted,
+                    placeholder: palette.muted,
+                    value: palette.text,
+                    selection: style::alpha(palette.accent, 0.35),
+                }
+            });
+
+        let mut control = row![field].spacing(8).align_y(Alignment::Center);
+        if is_dirty {
+            let save_btn = button(
+                text("Enregistrer")
+                    .size(12)
+                    .font(style::MEDIUM)
+                    .color(palette.on_accent()),
+            )
+            .padding(Padding::from([6.0, 12.0]))
+            .on_press(Message::AudioNickSubmit(sink.name.clone()))
+            .style(style::tinted(palette.accent, palette.accent, 6.0));
+            control = control.push(save_btn);
+        } else if !saved_nick.is_empty() {
+            let reset_btn = button(
+                text("Effacer")
+                    .size(12)
+                    .font(style::MEDIUM)
+                    .color(palette.muted),
+            )
+            .padding(Padding::from([6.0, 10.0]))
+            .on_press(Message::Change(Change::AudioNick {
+                device: sink.name.clone(),
+                nick: None,
+            }))
+            .style(style::tinted(palette.block, palette.hover, 6.0));
+            control = control.push(reset_btn);
+        }
+
+        let nick_setting = setting(
+            "Surnom personnalisé",
+            "Nom court affiché dans le sélecteur rapide (Appuyer sur Entrée pour valider).",
+            None,
+            control,
+            palette,
+        );
+
+        let rows = vec![visibility, nick_setting];
+        content = content.push(column![title_block, card(rows, palette)].spacing(8));
+    }
+
+    content.into()
 }
 
 fn game<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {

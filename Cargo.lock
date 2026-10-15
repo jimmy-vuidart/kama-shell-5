@@ -872,6 +872,7 @@ dependencies = [
  "coquille-model",
  "coquille-ui",
  "iced",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

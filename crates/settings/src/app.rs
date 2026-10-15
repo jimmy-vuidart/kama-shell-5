@@ -2,6 +2,7 @@
 //! change is written to the configuration file at once, then the compositor
 //! is asked to read the file again.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use coquille_config::{Change, Settings, apply, assign};
@@ -45,6 +46,10 @@ pub enum Message {
     Layout(Choice),
     Variant(Choice),
     Terminal(Choice),
+    /// Audio settings.
+    AudioVisibility(String, bool),
+    AudioNickChanged(String, String),
+    AudioNickSubmit(String),
 }
 
 pub struct App {
@@ -69,11 +74,20 @@ pub struct App {
     pub mouse_speed: i32,
     /// Where the dock icon size slider stands (16..=64).
     pub dock_icon_size: u32,
+    /// The audio sinks known to the system.
+    pub audio_sinks: Vec<model::AudioDeviceCard>,
+    /// The draft nickname for each audio sink by name.
+    pub audio_nick_inputs: HashMap<String, String>,
 }
 
 impl App {
     pub fn new(options: Options) -> (Self, Task<Message>) {
         let file = read(&options);
+        let audio_sinks = model::load_audio_sinks(&file);
+        let mut audio_nick_inputs = HashMap::new();
+        for sink in &audio_sinks {
+            audio_nick_inputs.insert(sink.name.clone(), sink.nick.clone().unwrap_or_default());
+        }
         let app = Self {
             page: options.page,
             accent_text: file.accent.clone().unwrap_or_default(),
@@ -83,6 +97,8 @@ impl App {
             },
             mouse_speed: model::speed_to_slider(file.mouse_accel_speed()),
             dock_icon_size: model::dock_icon_size_on_slider(file.dock_icon_size()),
+            audio_sinks,
+            audio_nick_inputs,
             file,
             error: None,
             snapshot: None,
@@ -128,6 +144,16 @@ impl App {
         if file.dock_icon_size != self.file.dock_icon_size {
             self.dock_icon_size = model::dock_icon_size_on_slider(file.dock_icon_size());
         }
+        let audio_sinks = model::load_audio_sinks(&file);
+        for sink in &audio_sinks {
+            let file_nick = sink.nick.as_deref().unwrap_or("");
+            let old_file_nick = self.file.audio_sink_nick(&sink.name).unwrap_or("");
+            if file_nick != old_file_nick || !self.audio_nick_inputs.contains_key(&sink.name) {
+                self.audio_nick_inputs
+                    .insert(sink.name.clone(), file_nick.to_owned());
+            }
+        }
+        self.audio_sinks = audio_sinks;
         self.file = file;
     }
 
@@ -200,6 +226,25 @@ impl App {
                 variant: choice.value,
             }),
             Message::Terminal(choice) => self.change(Change::Terminal(choice.value)),
+            Message::AudioVisibility(device, visible) => {
+                self.change(Change::AudioVisibility { device, visible });
+            }
+            Message::AudioNickChanged(device, text) => {
+                self.audio_nick_inputs.insert(device, text);
+            }
+            Message::AudioNickSubmit(device) => {
+                let text = self
+                    .audio_nick_inputs
+                    .get(&device)
+                    .cloned()
+                    .unwrap_or_default();
+                let nick = if text.trim().is_empty() {
+                    None
+                } else {
+                    Some(text.trim().to_owned())
+                };
+                self.change(Change::AudioNick { device, nick });
+            }
         }
         Task::none()
     }
