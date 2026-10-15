@@ -50,39 +50,48 @@ pub struct Palette {
     pub muted: Color,
     /// What dims the rest of the screen behind the drawer.
     pub scrim: Color,
+    pub glass: Color,
+    pub glass_strong: Color,
+    pub rim: Color,
+    pub shadow: Color,
 }
 
 impl Palette {
     pub fn new(theme: ThemeName, accent: Option<Color>) -> Self {
-        match theme {
-            ThemeName::Dark => Self {
-                dark: true,
-                accent: accent.unwrap_or(Color::from_rgb8(0x7a, 0xa7, 0xff)),
-                bar: Color::from_rgba8(30, 35, 45, 0.96),
-                bar_border: Color::from_rgba8(255, 255, 255, 0.07),
-                panel: Color::from_rgba8(0x1b, 0x1f, 0x27, 0.98),
-                block: Color::from_rgb8(0x23, 0x28, 0x33),
-                card: Color::from_rgb8(0x2c, 0x32, 0x3e),
-                hover: Color::from_rgba8(255, 255, 255, 0.07),
-                separator: Color::from_rgba8(255, 255, 255, 0.08),
-                text: Color::from_rgb8(0xf1, 0xf3, 0xf6),
-                muted: Color::from_rgb8(0x98, 0xa1, 0xb2),
-                scrim: Color::from_rgba8(0, 0, 0, 0.45),
-            },
-            ThemeName::Light => Self {
-                dark: false,
-                accent: accent.unwrap_or(Color::from_rgb8(0x2f, 0x6f, 0xed)),
-                bar: Color::from_rgba8(255, 255, 255, 0.92),
-                bar_border: Color::from_rgba8(0, 0, 0, 0.06),
-                panel: Color::from_rgba8(0xf6, 0xf7, 0xfa, 0.98),
-                block: Color::from_rgb8(0xec, 0xee, 0xf3),
-                card: Color::WHITE,
-                hover: Color::from_rgba8(0, 0, 0, 0.05),
-                separator: Color::from_rgba8(0, 0, 0, 0.08),
-                text: Color::from_rgb8(0x1c, 0x22, 0x30),
-                muted: Color::from_rgb8(0x6b, 0x73, 0x85),
-                scrim: Color::from_rgba8(15, 18, 24, 0.35),
-            },
+        let kind = match theme {
+            ThemeName::Dark => coquille_theme::ThemeKind::Dark,
+            ThemeName::Light => coquille_theme::ThemeKind::Light,
+        };
+        let tokens = coquille_theme::Tokens::new(kind);
+        let to_iced =
+            |c: coquille_theme::Color| Color::from_rgba8(c.r, c.g, c.b, f32::from(c.a) / 255.0);
+        let glass = to_iced(tokens.glass);
+        let glass_strong = to_iced(tokens.glass_strong);
+        let rim = to_iced(tokens.rim);
+        let card = to_iced(tokens.card);
+        let hover = to_iced(tokens.hover);
+        let separator = to_iced(tokens.separator);
+        let text = to_iced(tokens.text);
+        let muted = to_iced(tokens.muted);
+        let scrim = to_iced(tokens.scrim);
+        let shadow = to_iced(tokens.shadow);
+        Self {
+            dark: kind == coquille_theme::ThemeKind::Dark,
+            accent: accent.unwrap_or_else(|| to_iced(tokens.accent)),
+            bar: glass,
+            bar_border: rim,
+            panel: glass,
+            block: card,
+            card,
+            hover,
+            separator,
+            text,
+            muted,
+            scrim,
+            glass,
+            glass_strong,
+            rim,
+            shadow,
         }
     }
 
@@ -90,7 +99,7 @@ impl Palette {
     /// needs it more than the dark one.
     pub fn shadow(&self) -> Shadow {
         Shadow {
-            color: Color::from_rgba8(0, 0, 0, if self.dark { 0.35 } else { 0.16 }),
+            color: self.shadow,
             offset: Vector::new(0.0, 4.0),
             blur_radius: 18.0,
         }
@@ -108,12 +117,7 @@ impl Palette {
 
 /// `#rrggbb` as a color.
 pub fn parse_color(text: &str) -> Option<Color> {
-    let digits = text.strip_prefix('#')?;
-    if digits.len() != 6 || !digits.bytes().all(|digit| digit.is_ascii_hexdigit()) {
-        return None;
-    }
-    let channel = |index: usize| u8::from_str_radix(&digits[index..index + 2], 16).ok();
-    Some(Color::from_rgb8(channel(0)?, channel(2)?, channel(4)?))
+    coquille_theme::Color::parse(text).map(|c| Color::from_rgb8(c.r, c.g, c.b))
 }
 
 /// A filled rounded rectangle.
@@ -196,8 +200,8 @@ mod tests {
         let dark = Palette::new(ThemeName::Dark, None);
         let light = Palette::new(ThemeName::Light, None);
 
-        assert_eq!(dark.accent, Color::from_rgb8(0x7a, 0xa7, 0xff));
-        assert_eq!(light.accent, Color::from_rgb8(0x2f, 0x6f, 0xed));
+        assert_eq!(dark.accent, Color::from_rgb8(0x8f, 0x97, 0xff));
+        assert_eq!(light.accent, Color::from_rgb8(0x5b, 0x63, 0xe6));
     }
 
     #[test]

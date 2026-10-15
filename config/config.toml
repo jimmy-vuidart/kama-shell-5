@@ -11,8 +11,8 @@
 # theme = "light"
 
 # Couleur d'accent (anneau de la fenêtre active, dock), en #rrggbb ; par
-# défaut celle du thème : #2f6fed en clair, #7aa7ff en sombre.
-# accent = "#2f6fed"
+# défaut celle du thème : #5b63e6 en clair, #8f97ff en sombre.
+# accent = "#5b63e6"
 
 # Terminal ouvert par Super+Entrée ; par défaut le premier trouvé parmi
 # kitty, alacritty et foot.

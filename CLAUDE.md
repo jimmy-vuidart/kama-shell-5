@@ -134,6 +134,7 @@ coquille/
 │  ├─ ipc/          # ce que le compositeur et le dock se disent (JSON par lignes).
 │  ├─ apps/         # les applis installées (fichiers .desktop, icônes du thème).
 │  ├─ config/       # le fichier de configuration : le lire, en réécrire un réglage à la fois.
+│  ├─ theme/        # jetons d'apparence purs (couleurs, accents, repli), sans dépendance graphique.
 │  ├─ ui/           # ce que partagent les programmes du shell dessinés avec iced :
 │  │                # couleurs, police Figtree, symboles, lien au compositeur.
 │  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.

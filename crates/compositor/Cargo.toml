@@ -10,6 +10,7 @@ publish.workspace = true
 coquille-model.workspace = true
 coquille-apps.workspace = true
 coquille-ipc.workspace = true
+coquille-theme.workspace = true
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }

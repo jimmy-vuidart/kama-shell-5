@@ -11,6 +11,7 @@ coquille-apps.workspace = true
 coquille-config.workspace = true
 coquille-ipc.workspace = true
 coquille-model.workspace = true
+coquille-theme.workspace = true
 coquille-ui.workspace = true
 serde.workspace = true
 serde_json = "1"

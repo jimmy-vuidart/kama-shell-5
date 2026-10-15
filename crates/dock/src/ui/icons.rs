@@ -97,20 +97,7 @@ fn initial<'a, Message: 'a>(name: &str, key: &str, size: f32) -> Element<'a, Mes
 
 /// One of a few pleasant colors, always the same for an application.
 pub fn tile_color(key: &str) -> Color {
-    const COLORS: [(u8, u8, u8); 8] = [
-        (0x25, 0x63, 0xeb),
-        (0x63, 0x66, 0xf1),
-        (0xea, 0x58, 0x0c),
-        (0x7c, 0x3a, 0xed),
-        (0xca, 0x8a, 0x04),
-        (0x0d, 0x94, 0x88),
-        (0xdb, 0x27, 0x77),
-        (0x47, 0x55, 0x69),
-    ];
-    let sum = key.bytes().fold(0_usize, |sum, byte| {
-        sum.wrapping_mul(31).wrapping_add(byte.into())
-    });
-    let (r, g, b) = COLORS[sum % COLORS.len()];
+    let [r, g, b] = coquille_theme::badge_rgb(key);
     Color::from_rgb8(r, g, b)
 }
 
@@ -121,5 +108,13 @@ mod tests {
     #[test]
     fn an_application_always_gets_the_same_color() {
         assert_eq!(tile_color("discord"), tile_color("discord"));
+    }
+
+    #[test]
+    fn dock_tile_color_matches_theme_badge_rgb() {
+        for app in ["discord", "steam", "org.gnome.Nautilus", "kitty"] {
+            let [r, g, b] = coquille_theme::badge_rgb(app);
+            assert_eq!(tile_color(app), Color::from_rgb8(r, g, b));
+        }
     }
 }

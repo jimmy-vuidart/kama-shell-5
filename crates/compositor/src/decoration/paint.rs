@@ -797,7 +797,7 @@ mod tests {
 
         let cell = painted.layout.capsules[0].rect;
         let top = pixel(&painted.pixmap, (cell.x + cell.w / 2) as u32, cell.y as u32);
-        assert_eq!(&top[..3], &[0x2f, 0x6f, 0xed]);
+        assert_eq!(&top[..3], &[0x5b, 0x63, 0xe6]);
     }
 
     #[test]

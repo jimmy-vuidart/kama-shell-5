@@ -105,8 +105,9 @@ pub fn chosen(choices: &[Choice], value: Option<&str>) -> Option<Choice> {
 }
 
 /// The accents offered besides the one of the theme, as `#rrggbb`.
-pub const ACCENTS: [&str; 8] = [
-    "#2f6fed", "#7c5cf5", "#c6409f", "#e5484d", "#f08a24", "#c99a06", "#2f9e63", "#0f9aa8",
+pub const ACCENTS: [&str; 9] = [
+    "#5b63e6", "#2f6fed", "#7c5cf5", "#c6409f", "#e5484d", "#f08a24", "#c99a06", "#2f9e63",
+    "#0f9aa8",
 ];
 
 /// The keyboard layouts XKB knows, and the variants of each.

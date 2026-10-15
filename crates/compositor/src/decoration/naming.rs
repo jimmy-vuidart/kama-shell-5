@@ -13,18 +13,6 @@ pub fn identity(catalog: &Catalog, app_id: &str) -> (String, Option<String>) {
     }
 }
 
-/// Colors of the application badge, as in the mock-ups.
-pub const BADGE_PALETTE: [[u8; 3]; 8] = [
-    [0x7c, 0x3a, 0xed],
-    [0x25, 0x63, 0xeb],
-    [0x0d, 0x94, 0x88],
-    [0xea, 0x58, 0x0c],
-    [0xca, 0x8a, 0x04],
-    [0x4f, 0x46, 0xe5],
-    [0xdc, 0x26, 0x26],
-    [0x47, 0x55, 0x69],
-];
-
 /// A readable name: the last dotted segment of the `app_id`, capitalized.
 pub fn display_name(app_id: &str) -> String {
     let segment = app_id.rsplit('.').next().unwrap_or_default();
@@ -37,18 +25,13 @@ pub fn display_name(app_id: &str) -> String {
 
 /// The badge color of an application: always the same for a given `app_id`.
 pub fn badge_color(app_id: &str) -> [u8; 3] {
-    // FNV-1a: tiny, and stable across runs unlike the standard hasher.
-    let hash = app_id
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        });
-    BADGE_PALETTE[(hash % BADGE_PALETTE.len() as u64) as usize]
+    coquille_theme::badge_rgb(app_id)
 }
 
 #[cfg(test)]
 mod tests {
     use coquille_apps::App;
+    use coquille_theme::BADGE_PALETTE;
 
     use super::*;
 

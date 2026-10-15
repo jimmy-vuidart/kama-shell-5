@@ -109,7 +109,6 @@ Tout ticket qui choisit une couleur translucide respecte cette règle.
 
 | N° | Ticket | Dépend de | Fichiers principaux |
 |---|---|---|---|
-| 01 | [Jetons du verre](01-jetons.md) | — | `crates/theme` (nouvelle), `crates/ui/src/style.rs`, `crates/compositor/src/theme.rs` |
 | 02 | [Moteur de flou](02-moteur-de-flou.md) | — | `crates/compositor/src/render/glass.rs`, `render/shaders/`, configuration |
 | 03 | [Ombres douces](03-ombres.md) | 01 | `render/shadow.rs`, `render/shaders/shadow.frag`, `render/scene.rs` |
 | 04 | [Décorations du compositeur en verre](04-decorations-en-verre.md) | 01, 02 | `decoration/paint.rs`, `render/scene.rs`, `input.rs` |

@@ -5,6 +5,7 @@ members = [
     "crates/ipc",
     "crates/apps",
     "crates/config",
+    "crates/theme",
     "crates/ui",
     "crates/compositor",
     "crates/dock",
@@ -23,6 +24,7 @@ coquille-model = { path = "crates/model" }
 coquille-ipc = { path = "crates/ipc" }
 coquille-apps = { path = "crates/apps" }
 coquille-config = { path = "crates/config" }
+coquille-theme = { path = "crates/theme" }
 coquille-ui = { path = "crates/ui" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

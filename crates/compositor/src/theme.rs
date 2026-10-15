@@ -2,6 +2,8 @@
 
 use clap::ValueEnum;
 
+pub use coquille_theme::Color as Rgba;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeKind {
@@ -9,51 +11,12 @@ pub enum ThemeKind {
     Dark,
 }
 
-/// A straight (non-premultiplied) sRGB color.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Rgba {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
-}
-
-impl Rgba {
-    pub const WHITE: Self = Self::rgb(0xff_ff_ff);
-
-    /// From `0xRRGGBB`, opaque.
-    pub const fn rgb(hex: u32) -> Self {
-        Self {
-            r: (hex >> 16) as u8,
-            g: (hex >> 8) as u8,
-            b: hex as u8,
-            a: 0xff,
+impl From<ThemeKind> for coquille_theme::ThemeKind {
+    fn from(kind: ThemeKind) -> Self {
+        match kind {
+            ThemeKind::Light => coquille_theme::ThemeKind::Light,
+            ThemeKind::Dark => coquille_theme::ThemeKind::Dark,
         }
-    }
-
-    pub const fn from_array([r, g, b]: [u8; 3]) -> Self {
-        Self { r, g, b, a: 0xff }
-    }
-
-    /// From `#rrggbb`, as the configuration writes colors.
-    pub fn parse(text: &str) -> Option<Self> {
-        let digits = text.strip_prefix('#')?;
-        if digits.len() != 6 || !digits.bytes().all(|digit| digit.is_ascii_hexdigit()) {
-            return None;
-        }
-        u32::from_str_radix(digits, 16).ok().map(Self::rgb)
-    }
-
-    /// As `#rrggbb`, without the opacity.
-    pub fn hex(self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
-    }
-
-    /// Premultiplied components in `0.0..=1.0`, as the renderer wants them.
-    pub fn premultiplied(self) -> [f32; 4] {
-        let alpha = f32::from(self.a) / 255.0;
-        let channel = |value: u8| f32::from(value) / 255.0 * alpha;
-        [channel(self.r), channel(self.g), channel(self.b), alpha]
     }
 }
 
@@ -74,42 +37,45 @@ pub struct Theme {
     pub accent: Rgba,
     pub button_hover: Rgba,
     pub close_hover: Rgba,
+    /// Translucent glass for chrome surfaces.
+    pub glass: Rgba,
+    /// Strong glass for menus, tooltips, mixer.
+    pub glass_strong: Rgba,
+    /// 1px edge rim.
+    pub rim: Rgba,
+    /// Card on top of glass.
+    pub card: Rgba,
+    /// Soft shadows.
+    pub shadow: Rgba,
 }
 
 impl Theme {
     pub const fn new(kind: ThemeKind) -> Self {
-        match kind {
-            ThemeKind::Light => Self {
-                kind,
-                backdrop: Rgba::rgb(0xe8_eb_f0),
-                surface: Rgba::rgb(0xff_ff_ff),
-                titlebar: Rgba::rgb(0xff_ff_ff),
-                separator: Rgba::rgb(0xe6_e8_ec),
-                text: Rgba::rgb(0x1c_22_30),
-                text_muted: Rgba::rgb(0x6b_73_85),
-                disabled: Rgba::rgb(0xb3_b9_c5),
-                accent: Rgba::rgb(0x2f_6f_ed),
-                button_hover: Rgba::rgb(0xec_ee_f2),
-                close_hover: Rgba::rgb(0xe5_48_4d),
-            },
-            ThemeKind::Dark => Self {
-                kind,
-                backdrop: Rgba::rgb(0x0f_12_18),
-                surface: Rgba::rgb(0x17_1b_22),
-                titlebar: Rgba::rgb(0x1b_1f_27),
-                separator: Rgba::rgb(0x26_2b_35),
-                text: Rgba::rgb(0xf1_f3_f6),
-                text_muted: Rgba::rgb(0x98_a1_b2),
-                disabled: Rgba::rgb(0x4b_52_62),
-                accent: Rgba::rgb(0x7a_a7_ff),
-                button_hover: Rgba::rgb(0x2a_2f_3a),
-                close_hover: Rgba::rgb(0xe5_48_4d),
-            },
+        let theme_kind = match kind {
+            ThemeKind::Light => coquille_theme::ThemeKind::Light,
+            ThemeKind::Dark => coquille_theme::ThemeKind::Dark,
+        };
+        let tokens = coquille_theme::Tokens::new(theme_kind);
+        Self {
+            kind,
+            backdrop: tokens.backdrop,
+            surface: tokens.surface,
+            titlebar: tokens.titlebar,
+            separator: tokens.separator,
+            text: tokens.text,
+            text_muted: tokens.muted,
+            disabled: tokens.disabled,
+            accent: tokens.accent,
+            button_hover: tokens.button_hover,
+            close_hover: tokens.close_hover,
+            glass: tokens.glass,
+            glass_strong: tokens.glass_strong,
+            rim: tokens.rim,
+            card: tokens.card,
+            shadow: tokens.shadow,
         }
     }
-}
 
-impl Theme {
     /// The same theme with the accent the user chose.
     pub const fn with_accent(mut self, accent: Rgba) -> Self {
         self.accent = accent;
@@ -174,7 +140,7 @@ mod tests {
 
     #[test]
     fn accents_match_the_design() {
-        assert_eq!(Theme::new(ThemeKind::Light).accent, Rgba::rgb(0x2f_6f_ed));
-        assert_eq!(Theme::new(ThemeKind::Dark).accent, Rgba::rgb(0x7a_a7_ff));
+        assert_eq!(Theme::new(ThemeKind::Light).accent, Rgba::rgb(0x5b_63_e6));
+        assert_eq!(Theme::new(ThemeKind::Dark).accent, Rgba::rgb(0x8f_97_ff));
     }
 }
