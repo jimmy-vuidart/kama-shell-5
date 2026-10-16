@@ -109,7 +109,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de toucher au rendu). Celles d'origine, dans `docs/maquettes/shell/`, font référence pour les fenêtres, leurs décorations et le rangement ; **plus pour les barres latérales ni pour le lanceur**, abandonnés sous cette forme.
 
 - Style proche de Windows 11 / Fluent : coins arrondis, surfaces translucides en **verre liquide** flouté, sobre.
-- Thèmes **clair** et **sombre** (indigo translucide).
+- Thèmes **clair** et **sombre** (anthracite translucide).
 - Fenêtres : rayon **12 px**, espacement **8 px** entre emplacements et avec les bords.
 - **Règle cardinale de la refonte** : aucune disposition, métrique, taille ou espacement ne change. Seules les matières (surfaces translucides, flou, liserés rim et ombres douces) changent.
 - **Décorations côté serveur** (dessinées par le compositeur, via `xdg-decoration`) :

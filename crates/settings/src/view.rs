@@ -344,11 +344,16 @@ fn theme_tile<'a>(
         });
     let dock = container(space().width(6).height(Length::Fill))
         .style(move |_| style::fill(style::alpha(look.muted, 0.45), 3.0));
+    let scene_bg = if look.dark {
+        Color::from_rgb8(0x18, 0x18, 0x1c)
+    } else {
+        style::alpha(look.block, 1.0)
+    };
     let scene = container(row![dock, pane].spacing(6))
         .width(176)
         .height(96)
         .padding(8)
-        .style(move |_| style::fill(style::alpha(look.block, 1.0), 8.0));
+        .style(move |_| style::fill(scene_bg, 8.0));
     let font = if chosen {
         style::SEMIBOLD
     } else {

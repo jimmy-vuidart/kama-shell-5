@@ -178,25 +178,25 @@ impl Tokens {
                 }
             }
             ThemeKind::Dark => {
-                let glass = Color::rgba(42, 40, 92, 128);
-                let hover = Color::rgba(255, 255, 255, 26);
+                let glass = Color::rgba(22, 22, 26, 140);
+                let hover = Color::rgba(255, 255, 255, 24);
                 Self {
                     kind,
-                    backdrop: Color::rgb(0x1c_1b_3a),
+                    backdrop: Color::rgb(0x12_12_14),
                     glass,
-                    glass_strong: Color::rgba(36, 34, 78, 209),
-                    rim: Color::rgba(255, 255, 255, 31),
-                    card: Color::rgba(255, 255, 255, 20),
+                    glass_strong: Color::rgba(28, 28, 33, 210),
+                    rim: Color::rgba(255, 255, 255, 28),
+                    card: Color::rgba(255, 255, 255, 18),
                     hover,
-                    separator: Color::rgba(255, 255, 255, 20),
-                    text: Color::rgb(0xf2_f1_fb),
-                    muted: Color::rgb(0xa7_a6_c8),
-                    shadow: Color::rgba(8, 6, 30, 45),
+                    separator: Color::rgba(255, 255, 255, 18),
+                    text: Color::rgb(0xf1_f2_f4),
+                    muted: Color::rgb(0x94_98_a4),
+                    shadow: Color::rgba(0, 0, 0, 45),
                     scrim: Color::rgba(0, 0, 0, 45),
                     accent: Color::rgb(0x8f_97_ff),
                     surface: glass,
                     titlebar: glass,
-                    disabled: Color::rgb(0x4b_52_62),
+                    disabled: Color::rgb(0x50_54_60),
                     button_hover: hover,
                     close_hover: Color::rgb(0xe5_48_4d),
                 }

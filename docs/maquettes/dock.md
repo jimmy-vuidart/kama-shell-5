@@ -152,7 +152,7 @@ Les volumes par appli sont mémorisés dans `~/.local/state/coquille/`.
   fond en `palette.glass_strong` avec liseré `palette.rim`, bloc intérieur en `palette.card`, sortie audio, volume général, une ligne par appli (icône, nom, état, curseur, niveau en direct en vert,
   bouton couper le son rouge quand coupé), note sur la mémorisation des volumes.
 
-Thèmes clair et sombre (indigo translucide), accent depuis la config (pervenche par défaut), textes en français, police Figtree (repli sans-serif).
+Thèmes clair et sombre (anthracite translucide), accent depuis la config (pervenche par défaut), textes en français, police Figtree (repli sans-serif).
 
 ## Comportement
 
