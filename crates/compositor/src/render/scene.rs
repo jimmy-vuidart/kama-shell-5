@@ -147,7 +147,7 @@ pub struct Layers<'a> {
     /// Pre-captured frozen screens for interactive region screenshot.
     pub freeze: &'a [(MemoryRenderBuffer, Rect)],
     pub glass: &'a GlassConfig,
-    pub panel_glass: &'a mut HashMap<WlSurface, GlassCache>,
+    pub panel_glass: &'a mut PanelGlass,
     pub bar_glass: &'a mut GlassCache,
     pub drop_glass: &'a mut HashMap<usize, GlassCache>,
     pub bar_shadow: &'a mut ShadowCache,
@@ -165,6 +165,74 @@ fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }
 
+/// The glass caches of the shell's panels: one per element of each surface
+/// tree, menus included.
+pub type PanelGlass = HashMap<(WlSurface, usize), GlassCache>;
+
+/// The glass under a client surface, shaped by its alpha, when it has a
+/// texture.
+fn alpha_glass(
+    element: &WaylandSurfaceRenderElement<GlesRenderer>,
+    cache: &mut GlassCache,
+    shaders: &Shaders,
+    glass: &GlassConfig,
+    output_size: Size<i32, Physical>,
+    shape: Rectangle<i32, Physical>,
+    radii: [f32; 4],
+) -> Option<SceneElement> {
+    let WaylandSurfaceTexture::Texture(texture) = element.texture() else {
+        return None;
+    };
+    let mask = Mask::Alpha {
+        texture: texture.clone(),
+        src: element.src(),
+        dst: element.geometry(SCALE.into()),
+        transform: element.transform(),
+        commit: element.current_commit(),
+        radii,
+    };
+    Some(SceneElement::Glass(cache.element(
+        shaders,
+        shape,
+        output_size,
+        mask,
+        glass.strength,
+    )))
+}
+
+/// Pushes the elements of a surface tree, each with its glass under it when
+/// `glass_of` names the tree's surface and the caches of its glass.
+fn push_with_glass(
+    elements: &mut Vec<SceneElement>,
+    rendered: Vec<WaylandSurfaceRenderElement<GlesRenderer>>,
+    glass_of: Option<(&WlSurface, &mut PanelGlass)>,
+    shaders: &Shaders,
+    glass: &GlassConfig,
+    output_size: Size<i32, Physical>,
+) {
+    let Some((surface, caches)) = glass_of else {
+        elements.extend(rendered.into_iter().map(SceneElement::Surface));
+        return;
+    };
+    for (index, element) in rendered.into_iter().enumerate() {
+        // One cache per element of the tree: two elements sharing an Id
+        // would be captured again at every frame.
+        let cache = caches.entry((surface.clone(), index)).or_default();
+        let shape = element.geometry(SCALE.into());
+        let under = alpha_glass(
+            &element,
+            cache,
+            shaders,
+            glass,
+            output_size,
+            shape,
+            [0.0; 4],
+        );
+        elements.push(SceneElement::Surface(element));
+        elements.extend(under);
+    }
+}
+
 /// The surfaces of the panels on some layers, with their menus, topmost
 /// first.
 #[allow(clippy::too_many_arguments)]
@@ -172,7 +240,7 @@ fn panel_elements(
     renderer: &mut GlesRenderer,
     shaders: &Shaders,
     glass: &GlassConfig,
-    panel_glass: &mut HashMap<WlSurface, GlassCache>,
+    panel_glass: &mut PanelGlass,
     output_size: Size<i32, Physical>,
     panels: &[Panel],
     layers: &[Layer],
@@ -203,34 +271,14 @@ fn panel_elements(
                     1.0,
                     Kind::Unspecified,
                 );
-            for el in rendered {
-                let glass_elem = if is_coquille && glass.blur {
-                    if let WaylandSurfaceTexture::Texture(tex) = el.texture() {
-                        let cache = panel_glass.entry(popup_surface.clone()).or_default();
-                        let mask = Mask::Alpha {
-                            texture: tex.clone(),
-                            src: el.src(),
-                            dst: el.geometry(SCALE.into()),
-                            radii: [0.0; 4],
-                        };
-                        Some(SceneElement::Glass(cache.element(
-                            shaders,
-                            el.geometry(SCALE.into()),
-                            output_size,
-                            mask,
-                            glass.strength,
-                        )))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                elements.push(SceneElement::Surface(el));
-                if let Some(glass) = glass_elem {
-                    elements.push(glass);
-                }
-            }
+            push_with_glass(
+                &mut elements,
+                rendered,
+                (is_coquille && glass.blur).then_some((popup_surface, &mut *panel_glass)),
+                shaders,
+                glass,
+                output_size,
+            );
         }
 
         let rendered =
@@ -242,34 +290,14 @@ fn panel_elements(
                 1.0,
                 Kind::Unspecified,
             );
-        for el in rendered {
-            let glass_elem = if is_coquille && glass.blur {
-                if let WaylandSurfaceTexture::Texture(tex) = el.texture() {
-                    let cache = panel_glass.entry(surface.clone()).or_default();
-                    let mask = Mask::Alpha {
-                        texture: tex.clone(),
-                        src: el.src(),
-                        dst: el.geometry(SCALE.into()),
-                        radii: [0.0; 4],
-                    };
-                    Some(SceneElement::Glass(cache.element(
-                        shaders,
-                        el.geometry(SCALE.into()),
-                        output_size,
-                        mask,
-                        glass.strength,
-                    )))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            elements.push(SceneElement::Surface(el));
-            if let Some(glass) = glass_elem {
-                elements.push(glass);
-            }
-        }
+        push_with_glass(
+            &mut elements,
+            rendered,
+            (is_coquille && glass.blur).then_some((surface, &mut *panel_glass)),
+            shaders,
+            glass,
+            output_size,
+        );
     }
     elements
 }
@@ -440,6 +468,10 @@ pub fn build(
         }
 
         let bar = managed.titlebar().map(|bar| bar.translated(shift));
+        // The glass of the title bar goes under the client, not over it:
+        // what it blurs is what is behind the window, never the window's own
+        // content next to the bar.
+        let mut titlebar_glass = None;
         if let (Some(bar), Some(buffer)) = (bar, &managed.chrome.titlebar) {
             let location = Point::<i32, Physical>::from((bar.x, bar.y)).to_f64();
             match MemoryRenderBufferRenderElement::from_buffer(
@@ -456,13 +488,14 @@ pub fn build(
                     if glass.blur {
                         let bar_rect = rectangle(bar).to_physical_precise_round(SCALE);
                         let radii = [radius as f32, radius as f32, 0.0, 0.0];
-                        windows.push(SceneElement::Glass(managed.chrome.titlebar_glass.element(
-                            shaders,
-                            bar_rect,
-                            output_size,
-                            Mask::Rounded { radii },
-                            glass.strength,
-                        )));
+                        titlebar_glass =
+                            Some(SceneElement::Glass(managed.chrome.titlebar_glass.element(
+                                shaders,
+                                bar_rect,
+                                output_size,
+                                Mask::Rounded { radii },
+                                glass.strength,
+                            )));
                     }
                 }
                 Err(error) => warn!(?error, "cannot upload a title bar"),
@@ -482,25 +515,17 @@ pub fn build(
         let client_rect = rectangle(client).to_physical_precise_round(SCALE);
         let radii = [top as f32, top as f32, radius as f32, radius as f32];
 
-        let glass_elem = if is_settings && glass.blur {
-            surfaces.first().and_then(|surf_el| {
-                if let WaylandSurfaceTexture::Texture(tex) = surf_el.texture() {
-                    let mask = Mask::Alpha {
-                        texture: tex.clone(),
-                        src: surf_el.src(),
-                        dst: client_rect,
-                        radii,
-                    };
-                    Some(SceneElement::Glass(managed.chrome.glass.element(
-                        shaders,
-                        client_rect,
-                        output_size,
-                        mask,
-                        glass.strength,
-                    )))
-                } else {
-                    None
-                }
+        let client_glass = if is_settings && glass.blur {
+            surfaces.first().and_then(|element| {
+                alpha_glass(
+                    element,
+                    &mut managed.chrome.glass,
+                    shaders,
+                    glass,
+                    output_size,
+                    client_rect,
+                    radii,
+                )
             })
         } else {
             None
@@ -518,10 +543,8 @@ pub fn build(
         } else {
             windows.extend(surfaces.into_iter().map(SceneElement::Surface));
         }
-
-        if let Some(glass) = glass_elem {
-            windows.push(glass);
-        }
+        windows.extend(client_glass);
+        windows.extend(titlebar_glass);
 
         // The client may draw less than its area (fixed-size dialogs, or no
         // buffer yet): the rest shows the window background. Nothing is put
@@ -562,15 +585,13 @@ pub fn build(
             geometry.titlebar.is_none() && managed.window.geometry().loc != (0, 0).into();
         let draws_own_shadow = has_x11_shadows || has_csd_shadows;
 
-        if decorated && !draws_own_shadow {
-            let (blur, dy) = if geometry.floating {
-                if geometry.focused {
-                    (28.0, 8)
-                } else {
-                    (22.0, 6)
-                }
+        // Only a floating window casts a shadow: a tidied one would darken
+        // its neighbour and the capsules above it, 8 px away.
+        if decorated && geometry.floating && !draws_own_shadow {
+            let (blur, dy) = if geometry.focused {
+                (28.0, 8)
             } else {
-                (12.0, 2)
+                (22.0, 6)
             };
             let frame = managed.frame().translated(shift);
             let shadow = Shadow {

@@ -619,7 +619,8 @@ impl State {
             return;
         };
 
-        self.panel_glass.retain(|surface, _| surface.is_alive());
+        self.panel_glass
+            .retain(|(surface, _), _| surface.is_alive());
         let elements = scene::build(
             &mut udev.renderer,
             &udev.shaders,

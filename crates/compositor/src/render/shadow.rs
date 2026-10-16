@@ -70,6 +70,7 @@ pub fn shadow_element(program: &GlesPixelProgram, shadow: Shadow) -> PixelShader
             Uniform::new("color", shadow.color.premultiplied()),
             Uniform::new("radius", shadow.radii),
             Uniform::new("blur", shadow.blur),
+            Uniform::new("cutout", [shadow.offset.x as f32, shadow.offset.y as f32]),
         ],
         Kind::Unspecified,
     )

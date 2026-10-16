@@ -19,7 +19,6 @@ use smithay::output::Output;
 use smithay::reexports::calloop::{LoopHandle, LoopSignal};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_states};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
@@ -183,7 +182,7 @@ pub struct State {
     /// The next frame must be drawn whole, whatever the damage.
     pub full_redraw: bool,
     pub glass: GlassConfig,
-    pub panel_glass: HashMap<WlSurface, GlassCache>,
+    pub panel_glass: crate::render::scene::PanelGlass,
     pub bar_glass: GlassCache,
     pub drop_glass: HashMap<usize, GlassCache>,
     pub bar_shadow: crate::render::ShadowCache,

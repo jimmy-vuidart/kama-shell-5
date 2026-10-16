@@ -11,6 +11,10 @@ pub struct BlurProgram {
     pub u_tex: i32,
     pub u_halfpixel: i32,
     pub u_offset: i32,
+    /// Part of the input texture in use: blur textures are larger than
+    /// what they hold.
+    pub u_uv_scale: i32,
+    pub u_uv_max: i32,
     pub a_position: u32,
 }
 
@@ -21,15 +25,12 @@ pub struct Shaders {
     /// Draws a surface clipped to a rounded rectangle.
     pub clip: GlesTexProgram,
     /// Glass effect shader (masking, saturation, dithering).
-    #[allow(dead_code)]
     pub glass: GlesTexProgram,
     /// Gaussian soft shadow for rounded rectangles.
     pub shadow: GlesPixelProgram,
     /// Raw GL program for Dual Kawase downsampling.
-    #[allow(dead_code)]
     pub blur_down: BlurProgram,
     /// Raw GL program for Dual Kawase upsampling.
-    #[allow(dead_code)]
     pub blur_up: BlurProgram,
 }
 
@@ -118,17 +119,23 @@ fn link_blur_program(
         let c_halfpixel = std::ffi::CString::new("halfpixel").unwrap();
         let c_offset = std::ffi::CString::new("offset").unwrap();
         let c_pos = std::ffi::CString::new("position").unwrap();
+        let c_uv_scale = std::ffi::CString::new("uv_scale").unwrap();
+        let c_uv_max = std::ffi::CString::new("uv_max").unwrap();
 
         let u_tex = gl.GetUniformLocation(program, c_tex.as_ptr());
         let u_halfpixel = gl.GetUniformLocation(program, c_halfpixel.as_ptr());
         let u_offset = gl.GetUniformLocation(program, c_offset.as_ptr());
         let a_position = gl.GetAttribLocation(program, c_pos.as_ptr()) as u32;
+        let u_uv_scale = gl.GetUniformLocation(program, c_uv_scale.as_ptr());
+        let u_uv_max = gl.GetUniformLocation(program, c_uv_max.as_ptr());
 
         Ok(BlurProgram {
             program,
             u_tex,
             u_halfpixel,
             u_offset,
+            u_uv_scale,
+            u_uv_max,
             a_position,
         })
     }
@@ -168,6 +175,12 @@ impl Shaders {
                 UniformName::new("mask_mode", UniformType::_1i),
                 UniformName::new("mask_tex", UniformType::_1i),
                 UniformName::new("saturation", UniformType::_1f),
+                UniformName::new("blur_origin", UniformType::_2f),
+                UniformName::new("blur_texel", UniformType::_2f),
+                UniformName::new("blur_max", UniformType::_2f),
+                UniformName::new("mask_origin", UniformType::_2f),
+                UniformName::new("mask_texel", UniformType::_2f),
+                UniformName::new("mask_max", UniformType::_2f),
             ],
         )?;
         let shadow = renderer.compile_custom_pixel_shader(
@@ -178,6 +191,7 @@ impl Shaders {
                 UniformName::new("color", UniformType::_4f),
                 UniformName::new("radius", UniformType::_4f),
                 UniformName::new("blur", UniformType::_1f),
+                UniformName::new("cutout", UniformType::_2f),
             ],
         )?;
 

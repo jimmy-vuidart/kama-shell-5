@@ -229,7 +229,8 @@ impl State {
 
         let damage = match winit.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
-                self.panel_glass.retain(|surface, _| surface.is_alive());
+                self.panel_glass
+                    .retain(|(surface, _), _| surface.is_alive());
                 let view = Rect::new(0, 0, size.w, size.h);
                 let elements = scene::build(
                     renderer,

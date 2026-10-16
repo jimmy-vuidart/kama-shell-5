@@ -138,7 +138,9 @@ pub struct Tokens {
     pub scrim: Color,
     /// Default periwinkle accent.
     pub accent: Color,
-    /// Window background behind client surfaces.
+    /// Window background, where a client draws less than its area (while it
+    /// resizes, before its first buffer, a fixed-size dialog): opaque, or the
+    /// sharp wallpaper would flash through.
     pub surface: Color,
     /// Titlebar fill.
     pub titlebar: Color,
@@ -170,7 +172,7 @@ impl Tokens {
                     shadow: Color::rgba(60, 50, 120, 36),
                     scrim: Color::rgba(40, 30, 80, 26),
                     accent: Color::rgb(0x5b_63_e6),
-                    surface: Color::rgba(255, 255, 255, 153),
+                    surface: Color::rgb(0xf6_f5_fb),
                     titlebar: glass,
                     disabled: Color::rgb(0xb3_b9_c5),
                     button_hover: hover,
@@ -194,7 +196,7 @@ impl Tokens {
                     shadow: Color::rgba(0, 0, 0, 45),
                     scrim: Color::rgba(0, 0, 0, 45),
                     accent: Color::rgb(0x8f_97_ff),
-                    surface: glass,
+                    surface: Color::rgb(0x1c_1c_21),
                     titlebar: glass,
                     disabled: Color::rgb(0x50_54_60),
                     button_hover: hover,
@@ -241,6 +243,8 @@ mod tests {
                 "{kind:?} glass_strong alpha < 0.45: {}",
                 tokens.glass_strong.a
             );
+            // What shows where a window has not drawn yet is opaque.
+            assert_eq!(tokens.surface.a, 0xff, "{kind:?} window background");
         }
     }
 
