@@ -23,14 +23,20 @@ const PAGE: f32 = 720.0;
 /// The width of the drawing of the three screens, without its gaps.
 const DRAWING: f32 = 420.0;
 
-/// What is behind everything: the window is opaque.
-pub fn backdrop(palette: Palette) -> Color {
-    style::alpha(palette.panel, 1.0)
+/// What is behind everything: translucent glass inside coquille, opaque when standalone.
+pub fn backdrop(palette: Palette, connected: bool) -> Color {
+    if connected {
+        palette.glass
+    } else {
+        style::alpha(palette.glass_strong, 1.0)
+    }
 }
 
 pub fn window(app: &App) -> Element<'_, Message> {
     let palette = app.palette();
-    row![sidebar(app, palette), page(app, palette)].into()
+    let vrule = container(space().width(1).height(Length::Fill))
+        .style(move |_| style::fill(palette.separator, 0.0));
+    row![sidebar(app, palette), vrule, page(app, palette)].into()
 }
 
 fn sidebar<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
@@ -60,7 +66,7 @@ fn sidebar<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         .width(SIDEBAR)
         .height(Length::Fill)
         .padding(14)
-        .style(move |_| style::fill(style::alpha(palette.block, 1.0), 0.0))
+        .style(move |_| style::fill(palette.glass, 0.0))
         .into()
 }
 
@@ -196,10 +202,10 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             let line = match status {
                 _ if wrong => style::DANGER,
                 text_input::Status::Focused { .. } => palette.accent,
-                _ => palette.separator,
+                _ => palette.rim,
             };
             text_input::Style {
-                background: palette.block.into(),
+                background: palette.card.into(),
                 border: Border {
                     color: line,
                     width: 1.0,
@@ -257,7 +263,7 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             )
             .padding(Padding::from([6.0, 12.0]))
             .on_press(Message::Change(Change::WallpaperPath(None)))
-            .style(style::tinted(palette.block, palette.hover, 6.0));
+            .style(style::tinted(palette.card, palette.hover, 6.0));
 
             row![
                 text(display_path)
@@ -358,7 +364,7 @@ fn theme_tile<'a>(
             let (line, width) = match (chosen, hovered) {
                 (true, _) => (palette.accent, 2.0),
                 (false, true) => (palette.muted, 1.0),
-                (false, false) => (palette.separator, 1.0),
+                (false, false) => (palette.rim, 1.0),
             };
             button::Style {
                 border: Border {
@@ -389,10 +395,10 @@ fn usual_accent<'a>(color: Color, chosen: bool, palette: Palette) -> Element<'a,
             let line = match (chosen, hovered) {
                 (true, _) => palette.accent,
                 (false, true) => palette.muted,
-                (false, false) => palette.separator,
+                (false, false) => palette.rim,
             };
             button::Style {
-                background: Some(palette.block.into()),
+                background: Some(palette.card.into()),
                 border: Border {
                     color: line,
                     width: if chosen { 2.0 } else { 1.0 },
@@ -572,13 +578,13 @@ fn drawing<'a>(
             .width(width)
             .height(height)
             .padding(5)
-            .style(move |_| style::outlined(palette.block, palette.separator, 6.0));
+            .style(move |_| style::outlined(palette.card, palette.rim, 6.0));
         line = line.push(screen);
     }
     container(line)
         .center_x(Length::Fill)
         .padding(Padding::from([18.0, 16.0]))
-        .style(move |_| style::outlined(palette.card, palette.separator, 10.0))
+        .style(move |_| style::outlined(palette.card, palette.rim, 10.0))
         .into()
 }
 
@@ -689,10 +695,10 @@ fn audio<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             .style(move |_, status| {
                 let line = match status {
                     text_input::Status::Focused { .. } => palette.accent,
-                    _ => palette.separator,
+                    _ => palette.rim,
                 };
                 text_input::Style {
-                    background: palette.block.into(),
+                    background: palette.card.into(),
                     border: Border {
                         color: line,
                         width: 1.0,
@@ -729,7 +735,7 @@ fn audio<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
                 device: sink.name.clone(),
                 nick: None,
             }))
-            .style(style::tinted(palette.block, palette.hover, 6.0));
+            .style(style::tinted(palette.card, palette.hover, 6.0));
             control = control.push(reset_btn);
         }
 
@@ -1007,7 +1013,7 @@ fn card<'a>(rows: Vec<Element<'a, Message>>, palette: Palette) -> Element<'a, Me
     }
     container(lines)
         .width(Length::Fill)
-        .style(move |_| style::outlined(palette.card, palette.separator, 10.0))
+        .style(move |_| style::outlined(palette.card, palette.rim, 10.0))
         .into()
 }
 
@@ -1034,7 +1040,7 @@ fn setting<'a>(
     if let Some(tag) = tag {
         let pill = container(text(tag).size(11).font(style::MEDIUM).color(palette.muted))
             .padding(Padding::from([2.0, 7.0]))
-            .style(move |_| style::fill(palette.block, 6.0));
+            .style(move |_| style::fill(palette.card, 6.0));
         words = words.push(container(pill).padding(Padding::from([3.0, 0.0])));
     }
     row![words.width(Length::Fill), control.into()]
@@ -1067,18 +1073,20 @@ fn switch<'a>(
             } else {
                 track
             };
-            let knob = if toggled {
-                palette.on_accent()
+            let (knob, knob_border, knob_border_width) = if toggled {
+                (palette.on_accent(), Color::TRANSPARENT, 0.0)
+            } else if palette.dark {
+                (palette.glass_strong, palette.rim, 1.0)
             } else {
-                Color::WHITE
+                (Color::WHITE, palette.rim, 1.0)
             };
             toggler::Style {
                 background: track.into(),
                 background_border_width: 0.0,
                 background_border_color: Color::TRANSPARENT,
                 foreground: knob.into(),
-                foreground_border_width: 0.0,
-                foreground_border_color: Color::TRANSPARENT,
+                foreground_border_width: knob_border_width,
+                foreground_border_color: knob_border,
                 text_color: None,
                 border_radius: None,
                 padding_ratio: 0.14,
@@ -1110,7 +1118,7 @@ fn segmented<'a, T: Copy + PartialEq>(
     }
     container(line)
         .padding(3)
-        .style(move |_| style::fill(palette.block, 9.0))
+        .style(move |_| style::fill(palette.card, 9.0))
         .into()
 }
 
@@ -1130,14 +1138,14 @@ fn picker<'a>(
         .font(style::MEDIUM)
         .style(move |_, status| {
             let line = match status {
-                pick_list::Status::Active => palette.separator,
+                pick_list::Status::Active => palette.rim,
                 pick_list::Status::Hovered | pick_list::Status::Opened { .. } => palette.accent,
             };
             pick_list::Style {
                 text_color: palette.text,
                 placeholder_color: palette.muted,
                 handle_color: palette.muted,
-                background: palette.block.into(),
+                background: palette.card.into(),
                 border: Border {
                     color: line,
                     width: 1.0,
@@ -1146,9 +1154,9 @@ fn picker<'a>(
             }
         })
         .menu_style(move |_| menu::Style {
-            background: style::alpha(palette.card, 1.0).into(),
+            background: palette.glass_strong.into(),
             border: Border {
-                color: palette.separator,
+                color: palette.rim,
                 width: 1.0,
                 radius: 8.0.into(),
             },
@@ -1172,12 +1180,14 @@ fn level<'a>(delay: u32, palette: Palette) -> Element<'a, Message> {
 
 /// A slider filled with the accent up to its handle.
 fn slider_style(palette: Palette) -> slider::Style {
+    let knob_bg = if palette.dark {
+        palette.glass_strong
+    } else {
+        Color::WHITE
+    };
     slider::Style {
         rail: slider::Rail {
-            backgrounds: (
-                palette.accent.into(),
-                style::alpha(palette.muted, 0.3).into(),
-            ),
+            backgrounds: (palette.accent.into(), palette.separator.into()),
             width: 4.0,
             border: Border {
                 radius: 2.0.into(),
@@ -1186,9 +1196,9 @@ fn slider_style(palette: Palette) -> slider::Style {
         },
         handle: slider::Handle {
             shape: slider::HandleShape::Circle { radius: 7.0 },
-            background: Color::WHITE.into(),
+            background: knob_bg.into(),
             border_width: 1.0,
-            border_color: style::alpha(palette.muted, 0.6),
+            border_color: palette.rim,
         },
     }
 }

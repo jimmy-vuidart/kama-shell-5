@@ -61,6 +61,7 @@ fn main() -> iced::Result {
             .window(window::Settings {
                 size: iced::Size::new(900.0, 640.0),
                 min_size: Some(iced::Size::new(720.0, 480.0)),
+                transparent: true,
                 platform_specific: window::settings::PlatformSpecific {
                     application_id: APP_ID.to_owned(),
                     ..Default::default()

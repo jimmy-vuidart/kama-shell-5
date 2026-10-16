@@ -280,8 +280,9 @@ impl App {
 
     pub fn style(&self, _theme: &iced::Theme) -> iced::theme::Style {
         let palette = self.palette();
+        let connected = self.connected() || coquille_ipc::socket_from_env().is_some();
         iced::theme::Style {
-            background_color: view::backdrop(palette),
+            background_color: view::backdrop(palette, connected),
             text_color: palette.text,
         }
     }
