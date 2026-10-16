@@ -127,32 +127,32 @@ Les volumes par appli sont mémorisés dans `~/.local/state/coquille/`.
 ### Dock
 
 - Largeur **44**, à **8** du bord gauche, centré verticalement, rayon **14**.
-  Sombre : `rgba(30,35,45,0.96)` + liseré `rgba(255,255,255,0.07)` ; clair : `rgba(255,255,255,0.92)` + ombre douce.
-  Le flou n'est pas requis.
+  Verre liquide (`palette.glass`) avec liseré clair (`palette.rim`) et ombre douce.
+  Le flou d'arrière-plan est fourni par le compositeur.
 - Emplacement d'icône **36 × 36** (rayon 10), icône **24**. Indicateurs à gauche : barre d'accent **3 × 12**
   = ouverte ici ; point gris **3 × 4** = ouverte sur un autre écran. Badge non-lus rouge `#e5484d`.
 - Heure en bas sur deux lignes, gras. Déploiement au survol : largeur ~**200**, noms et sous-titres,
   titres « FAVORIS » / « SUR CET ÉCRAN », heure complète et date.
-- Menu contextuel ~**240** de large : « OUVRIR SUR » Gauche / Centre / Droite, Nouvelle fenêtre,
+- Menu contextuel ~**240** de large en `palette.glass_strong` avec liseré `palette.rim` : « OUVRIR SUR » Gauche / Centre / Droite, Nouvelle fenêtre,
   Retirer des favoris (ou Épingler), Oublier sa place, Fermer la fenêtre (rouge, si ouverte).
 
 ### Tiroir (`08-tiroir.png`)
 
 - Glisse depuis le bord gauche, **sur toute la hauteur** de l'écran gauche, largeur ~**640**,
-  coins droits arrondis (~**18**), le reste de l'écran assombri. Le dock reste visible, intégré au tiroir,
-  bouton du lanceur en accent.
+  coins droits arrondis (~**18**), le reste de l'écran voilé (`palette.scrim`). Le dock reste visible, intégré au tiroir,
+  bouton du lanceur en accent. Matière en verre liquide (`palette.glass`) avec liseré (`palette.rim`), flouté par le compositeur.
 - De haut en bas : **recherche** ; **Épinglées** (une rangée, étiquette d'emplacement sous chaque icône) ;
   **Applications** (grille 6 × 3, « 47 · de A à Z · page 1 sur 3 », flèches et numéros de page) ;
   **Jeux** (une rangée de jaquettes, lien « Toute la ludothèque ») ; **pas de section « récents »**.
-- Pied = **centre de contrôle** dans un bloc gris : cinq bascules (Réseau, Bluetooth, Ne pas déranger,
-  Éclairage nocturne, Thème sombre ; activée = fond d'accent), curseurs Volume (bouton « Par appli »)
+- Pied = **centre de contrôle** dans un bloc de carte (`palette.card`) : cinq bascules (Réseau, Bluetooth, Ne pas déranger,
+  Éclairage nocturne, Thème sombre ; tuiles éteintes en `palette.glass_strong` avec liseré `palette.rim`, activée = fond d'accent), curseurs Volume (bouton « Par appli »)
   et Luminosité (« 3 écrans »), puis utilisateur à gauche et Paramètres, Se déconnecter, Redémarrer,
   Éteindre (rouge) à droite.
 - **Mixeur** : panneau ~**290** de large à droite du tiroir, pointant vers le bouton « Par appli » :
-  sortie audio, volume général, une ligne par appli (icône, nom, état, curseur, niveau en direct en vert,
+  fond en `palette.glass_strong` avec liseré `palette.rim`, bloc intérieur en `palette.card`, sortie audio, volume général, une ligne par appli (icône, nom, état, curseur, niveau en direct en vert,
   bouton couper le son rouge quand coupé), note sur la mémorisation des volumes.
 
-Thèmes clair et sombre, accent depuis la config, textes en français, police Figtree (repli sans-serif).
+Thèmes clair et sombre (indigo translucide), accent depuis la config (pervenche par défaut), textes en français, police Figtree (repli sans-serif).
 
 ## Comportement
 

@@ -53,13 +53,6 @@ en garde la trace), et sa ligne retirée de ce tableau.
 | 23 | [Verrouillage de la session](23-verrouillage-de-session.md) | évolution | imbriqué |
 | 24 | [Protocole `wp_presentation`](24-presentation-time.md) | évolution | matériel |
 
-## Refonte « verre liquide »
-
-Les huit tickets de la refonte visuelle (verre translucide et flouté, sans
-changer aucune disposition) sont dans [`glass/`](glass/README.md), avec leurs
-images de référence, leurs dépendances et l'ordre où les confier à des
-agents.
-
 ## Ordre conseillé
 
 1. **20 puis 01**, et **02** : le confort en jeu. Le 20 rend le 01 testable
