@@ -1505,4 +1505,64 @@ mod tests {
     fn a_window_that_grows_is_held_at_the_same_share() {
         assert_eq!(held_at(200.0, 800, 1600), 400.0);
     }
+
+    #[test]
+    fn led_state_conversion_sets_num_lock_flag() {
+        use smithay::input::keyboard::LedState;
+        use smithay::reexports::input::Led;
+
+        let state = LedState {
+            num: Some(true),
+            caps: Some(false),
+            scroll: None,
+        };
+        let leds: Led = state.into();
+        assert!(leds.contains(Led::NUMLOCK));
+        assert!(!leds.contains(Led::CAPSLOCK));
+        assert!(!leds.contains(Led::SCROLLLOCK));
+
+        let state_off = LedState {
+            num: Some(false),
+            caps: Some(true),
+            scroll: Some(false),
+        };
+        let leds_off: Led = state_off.into();
+        assert!(!leds_off.contains(Led::NUMLOCK));
+        assert!(leds_off.contains(Led::CAPSLOCK));
+    }
+
+    #[test]
+    fn xkb_num_lock_key_toggles_modifier() {
+        use smithay::input::keyboard::xkb;
+
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap = xkb::Keymap::new_from_names(
+            &context,
+            "",
+            "",
+            "fr",
+            "",
+            None,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .unwrap();
+        let mut state = xkb::State::new(&keymap);
+
+        let num_mod = keymap.mod_get_index(xkb::MOD_NAME_NUM);
+        assert_ne!(num_mod, xkb::MOD_INVALID);
+
+        assert!(!state.mod_index_is_active(num_mod, xkb::STATE_MODS_LOCKED));
+
+        // Keycode 77 is KEY_NUMLOCK in XKB (evdev 69 + 8)
+        let num_lock_kc = xkb::Keycode::new(77);
+        state.update_key(num_lock_kc, xkb::KeyDirection::Down);
+        state.update_key(num_lock_kc, xkb::KeyDirection::Up);
+
+        assert!(state.mod_index_is_active(num_mod, xkb::STATE_MODS_LOCKED));
+
+        state.update_key(num_lock_kc, xkb::KeyDirection::Down);
+        state.update_key(num_lock_kc, xkb::KeyDirection::Up);
+
+        assert!(!state.mod_index_is_active(num_mod, xkb::STATE_MODS_LOCKED));
+    }
 }

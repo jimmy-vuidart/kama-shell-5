@@ -52,4 +52,11 @@ impl Backend {
             Self::Udev(udev) => udev.switch_vt(vt),
         }
     }
+
+    pub fn update_led_state(&mut self, led_state: smithay::input::keyboard::LedState) {
+        match self {
+            Self::Winit(_) => {}
+            Self::Udev(udev) => udev.update_led_state(led_state),
+        }
+    }
 }

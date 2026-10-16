@@ -26,6 +26,15 @@ voyants ne suivent pas.
    l'état reçu. Rien à faire en imbriqué.
 3. Donner l'état courant à un clavier qui vient d'être branché.
 
+## État
+
+- Implémenté :
+  - `SeatHandler::led_state_changed` (`handlers/mod.rs`) transmet le nouvel état des voyants au backend.
+  - `Backend::update_led_state` (`backend/mod.rs`) et `Udev::update_led_state` (`backend/udev.rs`) mettent à jour les voyants de tous les claviers via `libinput_device_led_update`.
+  - `Udev` conserve la liste des périphériques clavier (`keyboard_devices`) sur `DeviceAdded` et `DeviceRemoved`.
+  - Lors de la connexion d'un clavier, l'état courant des voyants lui est transmis immédiatement.
+- Reste à vérifier sur le matériel physique avec Jimmy.
+
 ## Terminé quand
 
 - Essai avec Jimmy sur le matériel : les voyants suivent Verr. Maj et

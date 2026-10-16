@@ -107,6 +107,7 @@ pub struct Udev {
     game: GameConfig,
     mouse: MouseConfig,
     pointer_devices: Vec<smithay::reexports::input::Device>,
+    keyboard_devices: Vec<smithay::reexports::input::Device>,
 }
 
 /// A plugged screen found while scanning, before it is lit.
@@ -290,8 +291,12 @@ pub fn init(
             LibinputInputBackend::new(libinput.clone()),
             |event, _, state| {
                 if let smithay::backend::input::InputEvent::DeviceAdded { ref device } = event {
+                    let led_state = state
+                        .seat
+                        .get_keyboard()
+                        .map(|keyboard| keyboard.led_state());
                     if let Backend::Udev(udev) = &mut state.backend {
-                        udev.device_added(device);
+                        udev.device_added(device, led_state);
                     }
                 } else if let smithay::backend::input::InputEvent::DeviceRemoved { ref device } =
                     event
@@ -326,6 +331,7 @@ pub fn init(
         game: game.clone(),
         mouse: mouse.clone(),
         pointer_devices: Vec::new(),
+        keyboard_devices: Vec::new(),
     };
     Ok((udev, outputs))
 }
@@ -523,7 +529,11 @@ impl Udev {
         self.game = game.clone();
     }
 
-    pub fn device_added(&mut self, device: &smithay::reexports::input::Device) {
+    pub fn device_added(
+        &mut self,
+        device: &smithay::reexports::input::Device,
+        led_state: Option<smithay::input::keyboard::LedState>,
+    ) {
         if device.has_capability(smithay::reexports::input::DeviceCapability::Pointer) {
             info!(name = %device.name(), "pointer device added");
             let mut dev = device.clone();
@@ -532,10 +542,28 @@ impl Udev {
                 self.pointer_devices.push(dev);
             }
         }
+        if device.has_capability(smithay::reexports::input::DeviceCapability::Keyboard) {
+            info!(name = %device.name(), "keyboard device added");
+            let mut dev = device.clone();
+            if let Some(led_state) = led_state {
+                dev.led_update(led_state.into());
+            }
+            if !self.keyboard_devices.contains(&dev) {
+                self.keyboard_devices.push(dev);
+            }
+        }
     }
 
     pub fn device_removed(&mut self, device: &smithay::reexports::input::Device) {
         self.pointer_devices.retain(|d| d != device);
+        self.keyboard_devices.retain(|d| d != device);
+    }
+
+    pub fn update_led_state(&mut self, led_state: smithay::input::keyboard::LedState) {
+        let leds = led_state.into();
+        for device in &mut self.keyboard_devices {
+            device.led_update(leds);
+        }
     }
 
     pub fn set_mouse(&mut self, mouse: &MouseConfig) {

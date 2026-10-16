@@ -34,6 +34,7 @@ use smithay::wayland::selection::ext_data_control::{
 use smithay::wayland::selection::wlr_data_control::{
     DataControlHandler as WlrDataControlHandler, DataControlState as WlrDataControlState,
 };
+use smithay::input::keyboard::LedState;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 
@@ -65,6 +66,10 @@ impl SeatHandler for State {
         // returns to the focused window instead.
         self.loop_handle
             .insert_idle(|state| state.sync_keyboard_focus());
+    }
+
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, led_state: LedState) {
+        self.backend.update_led_state(led_state);
     }
 }
 
