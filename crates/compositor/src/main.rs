@@ -457,8 +457,11 @@ fn default_terminal() -> String {
 /// Logs to the terminal, or to a file when the compositor is started from a
 /// menu. Panics are logged too, so that a crash leaves a trace either way.
 fn init_logging(file: Option<&Path>) -> anyhow::Result<()> {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(
+            "info,usvg=error,svgtree=error,wgpu_hal=error,layershellev=error",
+        )
+    });
     let builder = tracing_subscriber::fmt().with_env_filter(filter);
     match file {
         Some(path) => {

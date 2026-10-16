@@ -35,7 +35,9 @@ struct Cli {
 fn main() -> iced::Result {
     let cli = Cli::parse();
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new("warn,wgpu_hal=error,usvg=error,coquille_settings=info")
+        tracing_subscriber::EnvFilter::new(
+            "warn,wgpu_hal=error,usvg=error,svgtree=error,coquille_settings=info",
+        )
     });
     tracing_subscriber::fmt()
         .with_env_filter(filter)

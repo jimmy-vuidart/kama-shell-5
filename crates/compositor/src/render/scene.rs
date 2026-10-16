@@ -807,10 +807,12 @@ pub fn build(
             }
         }
     }
-    let glass_count = elements
-        .iter()
-        .filter(|e| matches!(e, SceneElement::Glass(_)))
-        .count();
-    tracing::debug!(?view, glass_count, "built scene elements");
+    if tracing::enabled!(tracing::Level::TRACE) {
+        let glass_count = elements
+            .iter()
+            .filter(|e| matches!(e, SceneElement::Glass(_)))
+            .count();
+        tracing::trace!(?view, glass_count, "built scene elements");
+    }
     elements
 }

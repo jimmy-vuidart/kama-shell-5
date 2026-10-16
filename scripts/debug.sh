@@ -94,5 +94,5 @@ for terminal in kitty alacritty foot; do
 done
 
 # Smithay is talkative at `info`: only coquille and its dock say everything.
-export RUST_LOG="${RUST_LOG:-warn,wgpu_hal=error,coquille=debug,coquille_dock=debug}"
+export RUST_LOG="${RUST_LOG:-warn,wgpu_hal=error,usvg=error,svgtree=error,layershellev=error,coquille=debug,coquille_dock=debug}"
 exec "$bin/coquille" --backend nested "${layout[@]}" "${fullscreen[@]}" "${spawn[@]}" "${extra[@]}"
