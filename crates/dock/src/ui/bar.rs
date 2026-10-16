@@ -507,16 +507,7 @@ fn tray_label<'a>(
     let card = container(texts)
         .padding(Padding::from([6.0, 10.0]))
         .max_width(2.0 * SIDE - 20.0)
-        .style(move |_| {
-            style::outlined(
-                iced::Color {
-                    a: 1.0,
-                    ..palette.bar
-                },
-                palette.bar_border,
-                10.0,
-            )
-        });
+        .style(move |_| style::outlined(palette.glass_strong, palette.rim, 10.0));
     let (col, _) = crate::model::tray::horizontal_coord(index);
     let tray_start = metrics.lying_tray_left(state.pinned(), state.entries.len() - state.pinned());
     let left = (SIDE
@@ -560,16 +551,7 @@ fn label<'a>(
     let card = container(texts)
         .padding(Padding::from([6.0, 10.0]))
         .max_width(2.0 * SIDE - 20.0)
-        .style(move |_| {
-            style::outlined(
-                iced::Color {
-                    a: 1.0,
-                    ..palette.bar
-                },
-                palette.bar_border,
-                10.0,
-            )
-        });
+        .style(move |_| style::outlined(palette.glass_strong, palette.rim, 10.0));
     let left = (SIDE + metrics.lying_left(index, state.pinned()) - 8.0).max(0.0);
     container(card)
         .padding(Padding {
@@ -621,7 +603,7 @@ fn lying<'a>(
         .padding(Padding::from([0.0, PADDING]))
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::outlined(palette.bar, palette.bar_border, metrics.radius)
+            ..style::outlined(palette.glass, palette.rim, metrics.radius)
         });
     if !live {
         return body.into();
@@ -934,7 +916,7 @@ fn bar<'a>(
         .clip(true)
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::outlined(palette.bar, palette.bar_border, metrics.radius)
+            ..style::outlined(palette.glass, palette.rim, metrics.radius)
         });
     let body: Element<'_, Message> = if live {
         mouse_area(body)

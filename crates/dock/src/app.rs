@@ -51,6 +51,8 @@ pub struct Options {
     pub state_dir: PathBuf,
     /// Open the drawer at once (to capture it without a click).
     pub drawer: bool,
+    /// Open the mixer at once (to capture it without a click).
+    pub mixer: bool,
 }
 
 impl Options {
@@ -352,8 +354,11 @@ impl Dock {
             Message::IconsLoaded,
         );
         let mut tasks = vec![icons, dock.show_bars()];
-        if dock.options.drawer {
+        if dock.options.drawer || dock.options.mixer {
             tasks.push(Task::done(Message::Launcher(None)));
+        }
+        if dock.options.mixer {
+            tasks.push(Task::done(Message::ToggleMixer));
         }
         (dock, Task::batch(tasks))
     }

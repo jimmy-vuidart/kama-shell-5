@@ -1,7 +1,7 @@
 //! The contextual popup menu for a system tray item, populated from its DBusMenu.
 
 use iced::widget::{Column, button, column, container, row, space, text};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use system_tray::menu::{MenuItem, MenuType, ToggleState, ToggleType};
 
 use super::icons::{self, Glyph};
@@ -96,16 +96,7 @@ pub fn view<'a>(dock: &'a Dock, item: &'a TrayItem) -> Element<'a, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(PADDING)
-        .style(move |_| {
-            style::outlined(
-                Color {
-                    a: 0.96,
-                    ..palette.bar
-                },
-                palette.bar_border,
-                12.0,
-            )
-        })
+        .style(move |_| style::outlined(palette.glass_strong, palette.rim, 12.0))
         .into()
 }
 

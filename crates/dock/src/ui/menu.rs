@@ -96,16 +96,7 @@ pub fn view<'a>(dock: &'a Dock, entry: &'a Entry) -> Element<'a, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(PADDING)
-        .style(move |_| {
-            style::outlined(
-                Color {
-                    a: 1.0,
-                    ..palette.bar
-                },
-                palette.bar_border,
-                14.0,
-            )
-        })
+        .style(move |_| style::outlined(palette.glass_strong, palette.rim, 14.0))
         .into()
 }
 

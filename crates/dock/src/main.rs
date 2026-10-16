@@ -48,6 +48,10 @@ struct Cli {
     /// Ouvre le tiroir dès le démarrage.
     #[arg(long)]
     drawer: bool,
+
+    /// Ouvre le tiroir et le mixeur dès le démarrage.
+    #[arg(long)]
+    mixer: bool,
 }
 
 fn state_dir() -> PathBuf {
@@ -87,6 +91,7 @@ fn main() -> iced_layershell::Result {
             .state_dir
             .unwrap_or_else(|| if cli.mock { scratch() } else { state_dir() }),
         drawer: cli.drawer,
+        mixer: cli.mixer,
     };
 
     let fonts = ui::style::FIGTREE

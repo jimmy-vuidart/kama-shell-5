@@ -7,7 +7,9 @@ use iced::widget::{
     Column, Row, button, column, container, image, mouse_area, opaque, pick_list, progress_bar,
     row, slider, space, stack, text, text_input,
 };
-use iced::{Alignment, Border, Color, ContentFit, Element, Length, Padding, border, mouse};
+use iced::{
+    Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, border, mouse,
+};
 
 use super::icons::{self, Glyph};
 use super::style::{self, Palette};
@@ -72,7 +74,7 @@ fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
     let color = if drawer.resizing {
         palette.accent
     } else {
-        style::alpha(Color::WHITE, 0.55)
+        palette.rim
     };
     let grip = container(space().width(4).height(44)).style(move |_| style::fill(color, 2.0));
     let strip = container(grip)
@@ -144,11 +146,12 @@ fn panel<'a>(
         .height(Length::Fill)
         .style(move |_| container::Style {
             border: Border {
+                color: palette.rim,
+                width: 1.0,
                 radius,
-                ..Border::default()
             },
             shadow: palette.shadow(),
-            ..style::fill(palette.panel, 0.0)
+            ..style::fill(palette.glass, 0.0)
         })
         .into()
 }
@@ -430,7 +433,7 @@ fn results<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<
 }
 
 /// The picture of a game with its play mark, as wide as its place.
-fn cover<'a>(game: &crate::steam::Game, height: f32) -> Element<'a, Message> {
+fn cover<'a>(game: &crate::steam::Game, height: f32, palette: Palette) -> Element<'a, Message> {
     let picture: Element<'_, Message> = match &game.cover {
         Some(path) => image(image::Handle::from_path(path))
             .width(Length::Fill)
@@ -447,13 +450,9 @@ fn cover<'a>(game: &crate::steam::Game, height: f32) -> Element<'a, Message> {
                 .into()
         }
     };
-    let play = container(icons::glyph(
-        Glyph::Play,
-        12.0,
-        Color::from_rgb8(0x1c, 0x22, 0x30),
-    ))
-    .center(18)
-    .style(|_| style::fill(Color::WHITE, 9.0));
+    let play = container(icons::glyph(Glyph::Play, 12.0, palette.text))
+        .center(18)
+        .style(move |_| style::fill(palette.glass_strong, 9.0));
     let play = container(play)
         .width(Length::Fill)
         .height(height)
@@ -471,7 +470,7 @@ fn game_card<'a>(game: &crate::steam::Game, height: f32, palette: Palette) -> El
         .color(palette.text)
         .wrapping(Wrapping::None);
     let name = container(name).width(Length::Fill).height(16).clip(true);
-    button(column![cover(game, height), name].spacing(6))
+    button(column![cover(game, height, palette), name].spacing(6))
         .width(Length::FillPortion(1))
         .padding(4)
         .on_press(Message::Open(Target::Game(game.id)))
@@ -548,14 +547,16 @@ fn level<'a>(
     on_change: impl Fn(f32) -> Message + Clone + 'a,
 ) -> Element<'a, Message> {
     let scrolled = on_change.clone();
+    let knob_bg = if palette.dark {
+        palette.glass_strong
+    } else {
+        Color::WHITE
+    };
     let slider = slider(0.0..=1.0, value, on_change)
         .step(0.01_f32)
         .style(move |_, _| slider::Style {
             rail: slider::Rail {
-                backgrounds: (
-                    palette.accent.into(),
-                    style::alpha(palette.muted, 0.3).into(),
-                ),
+                backgrounds: (palette.accent.into(), palette.separator.into()),
                 width: 4.0,
                 border: Border {
                     radius: 2.0.into(),
@@ -564,9 +565,9 @@ fn level<'a>(
             },
             handle: slider::Handle {
                 shape: slider::HandleShape::Circle { radius: 7.0 },
-                background: Color::WHITE.into(),
+                background: knob_bg.into(),
                 border_width: 1.0,
-                border_color: style::alpha(palette.muted, 0.6),
+                border_color: palette.rim,
             },
         });
     // The wheel over a slider moves it.
@@ -593,9 +594,21 @@ fn switch<'a>(
     let (idle, color) = match (on, available) {
         (true, true) => (palette.accent, palette.on_accent()),
         (_, false) => (style::alpha(palette.card, 0.5), palette.muted),
-        (false, true) => (palette.card, palette.text),
+        (false, true) => (palette.glass_strong, palette.text),
     };
     let hover = style::mix(idle, palette.text, 0.08);
+    let border = if on && available {
+        Border {
+            radius: 10.0.into(),
+            ..Border::default()
+        }
+    } else {
+        Border {
+            color: palette.rim,
+            width: 1.0,
+            radius: 10.0.into(),
+        }
+    };
     // Long names take two lines: at a readable size they do not fit on one.
     let name = text(name)
         .size(11)
@@ -616,7 +629,17 @@ fn switch<'a>(
         .width(Length::FillPortion(1))
         .height(54)
         .padding(Padding::from([0.0, 9.0]))
-        .style(style::tinted(idle, hover, 10.0));
+        .style(move |_, status| {
+            let color = match status {
+                button::Status::Hovered | button::Status::Pressed => hover,
+                button::Status::Active | button::Status::Disabled => idle,
+            };
+            button::Style {
+                background: Some(Background::Color(color)),
+                border,
+                ..button::Style::default()
+            }
+        });
     if available {
         tile.on_press(Message::Toggle(toggle)).into()
     } else {
@@ -793,7 +816,7 @@ fn control_center<'a>(
     };
     container(column![switches, sliders, rule(palette), foot].spacing(12))
         .padding(12)
-        .style(move |_| style::fill(palette.block, 14.0))
+        .style(move |_| style::fill(palette.card, 14.0))
         .into()
 }
 
@@ -1009,14 +1032,14 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
         .clip(true)
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::fill(palette.panel, 16.0)
+            ..style::outlined(palette.glass, palette.rim, 16.0)
         });
 
     // Its top edge is dragged to make it higher or lower.
     let color = if drawer.resizing {
         palette.accent
     } else {
-        style::alpha(Color::WHITE, 0.55)
+        palette.rim
     };
     let grip = container(space().width(44).height(4)).style(move |_| style::fill(color, 2.0));
     let edge = mouse_area(container(grip).width(width).center_x(width).center_y(EDGE))
@@ -1106,7 +1129,7 @@ fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     .align_y(Alignment::Center);
     let general = container(general)
         .padding(Padding::from([10.0, 12.0]))
-        .style(move |_| style::fill(palette.block, 10.0));
+        .style(move |_| style::fill(palette.card, 10.0));
 
     let mut lines: Column<'_, Message> = column![header, general].spacing(10);
     let playing = dock.mixer_lines();
@@ -1156,7 +1179,7 @@ fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
                 style::DANGER,
             )
         } else {
-            (Glyph::Volume, palette.block, palette.text)
+            (Glyph::Volume, palette.card, palette.text)
         };
         let mute = button(container(icons::glyph(glyph, 14.0, color)).center(Length::Fill))
             .width(28)
@@ -1189,13 +1212,7 @@ fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
         .padding(16)
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::fill(
-                Color {
-                    a: 1.0,
-                    ..palette.panel
-                },
-                16.0,
-            )
+            ..style::outlined(palette.glass_strong, palette.rim, 16.0)
         })
         .into()
 }
