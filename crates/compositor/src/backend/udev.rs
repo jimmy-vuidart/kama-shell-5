@@ -639,6 +639,7 @@ impl State {
                 bar_glass: &mut self.bar_glass,
                 drop_glass: &mut self.drop_glass,
                 bar_shadow: &mut self.bar_shadow,
+                overlay_shapes: &mut self.overlay_shapes,
             },
         );
         let crtc = screen.crtc;

@@ -120,6 +120,7 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         bar_glass: &mut state.bar_glass,
         drop_glass: &mut state.drop_glass,
         bar_shadow: &mut state.bar_shadow,
+        overlay_shapes: &mut state.overlay_shapes,
     };
     let elements = scene::build(renderer, &shaders, &mut state.shell, &state.theme, layers);
 

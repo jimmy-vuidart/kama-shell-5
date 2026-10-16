@@ -23,6 +23,7 @@ use tracing::warn;
 
 use super::clipped::ClippedSurface;
 use super::glass::{GlassCache, GlassElement, Mask};
+use super::per_view::PerView;
 use super::shaders::Shaders;
 use super::shadow::{Shadow, ShadowCache};
 use crate::config::GlassConfig;
@@ -105,14 +106,15 @@ pub struct Chrome {
     /// What `titlebar` was painted from.
     pub spec: Option<TitlebarSpec>,
     pub titlebar: Option<MemoryRenderBuffer>,
-    ring: ShapeCache,
+    ring: PerView<ShapeCache>,
     /// Window background where the client is narrower than its area.
-    beside: ShapeCache,
+    beside: PerView<ShapeCache>,
     /// Window background where the client is shorter than its area.
-    below: ShapeCache,
-    pub glass: GlassCache,
-    pub titlebar_glass: GlassCache,
-    pub shadow: ShadowCache,
+    below: PerView<ShapeCache>,
+    /// Glass under a client that draws see-through glass of its own.
+    pub glass: PerView<GlassCache>,
+    pub titlebar_glass: PerView<GlassCache>,
+    pub shadow: PerView<ShadowCache>,
 }
 
 /// What is drawn at the pointer.
@@ -148,9 +150,12 @@ pub struct Layers<'a> {
     pub freeze: &'a [(MemoryRenderBuffer, Rect)],
     pub glass: &'a GlassConfig,
     pub panel_glass: &'a mut PanelGlass,
-    pub bar_glass: &'a mut GlassCache,
-    pub drop_glass: &'a mut HashMap<usize, GlassCache>,
-    pub bar_shadow: &'a mut ShadowCache,
+    pub bar_glass: &'a mut PerView<GlassCache>,
+    /// The glass of each drop zone, by its place in the global space.
+    pub drop_glass: &'a mut HashMap<Rect, GlassCache>,
+    pub bar_shadow: &'a mut PerView<ShadowCache>,
+    /// The elements of the shell hints, by place and kind (fill or ring).
+    pub overlay_shapes: &'a mut OverlayShapes,
 }
 
 pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
@@ -168,6 +173,10 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 /// The glass caches of the shell's panels: one per element of each surface
 /// tree, menus included.
 pub type PanelGlass = HashMap<(WlSurface, usize), GlassCache>;
+
+/// The elements of the shell hints: by outline in the global space and ring
+/// width (0 for a fill).
+pub type OverlayShapes = HashMap<(Rect, i32), PerView<ShapeCache>>;
 
 /// The glass under a client surface, shaped by its alpha, when it has a
 /// texture.
@@ -326,6 +335,7 @@ pub fn build(
         bar_glass,
         drop_glass,
         bar_shadow,
+        overlay_shapes,
     } = layers;
     let output_size = Size::from((view.w, view.h));
 
@@ -463,7 +473,11 @@ pub fn build(
                 border: ring,
             };
             windows.push(SceneElement::Shape(
-                managed.chrome.ring.element(&shaders.rounded, shape),
+                managed
+                    .chrome
+                    .ring
+                    .get(view)
+                    .element(&shaders.rounded, shape),
             ));
         }
 
@@ -488,14 +502,15 @@ pub fn build(
                     if glass.blur {
                         let bar_rect = rectangle(bar).to_physical_precise_round(SCALE);
                         let radii = [radius as f32, radius as f32, 0.0, 0.0];
-                        titlebar_glass =
-                            Some(SceneElement::Glass(managed.chrome.titlebar_glass.element(
+                        titlebar_glass = Some(SceneElement::Glass(
+                            managed.chrome.titlebar_glass.get(view).element(
                                 shaders,
                                 bar_rect,
                                 output_size,
                                 Mask::Rounded { radii },
                                 glass.strength,
-                            )));
+                            ),
+                        ));
                     }
                 }
                 Err(error) => warn!(?error, "cannot upload a title bar"),
@@ -519,7 +534,7 @@ pub fn build(
             surfaces.first().and_then(|element| {
                 alpha_glass(
                     element,
-                    &mut managed.chrome.glass,
+                    managed.chrome.glass.get(view),
                     shaders,
                     glass,
                     output_size,
@@ -566,14 +581,22 @@ pub fn build(
             let area = Rect::new(client.x + drawn_w, client.y, client.w - drawn_w, drawn_h);
             let shape = Shape { area, ..background };
             windows.push(SceneElement::Shape(
-                managed.chrome.beside.element(&shaders.rounded, shape),
+                managed
+                    .chrome
+                    .beside
+                    .get(view)
+                    .element(&shaders.rounded, shape),
             ));
         }
         if drawn_h < client.h {
             let area = Rect::new(client.x, client.y + drawn_h, client.w, client.h - drawn_h);
             let shape = Shape { area, ..background };
             windows.push(SceneElement::Shape(
-                managed.chrome.below.element(&shaders.rounded, shape),
+                managed
+                    .chrome
+                    .below
+                    .get(view)
+                    .element(&shaders.rounded, shape),
             ));
         }
 
@@ -603,7 +626,11 @@ pub fn build(
             };
             if overlaps(shadow.area(), Rect::new(0, 0, view.w, view.h)) {
                 windows.push(SceneElement::Shape(
-                    managed.chrome.shadow.element(&shaders.shadow, shadow),
+                    managed
+                        .chrome
+                        .shadow
+                        .get(view)
+                        .element(&shaders.shadow, shadow),
                 ));
             }
         }
@@ -677,7 +704,7 @@ pub fn build(
                 if glass.blur {
                     let place_rect = Rect::new(corner.x, corner.y, place.w, place.h);
                     let shape = rectangle(place_rect).to_physical_precise_round(SCALE);
-                    elements.push(SceneElement::Glass(bar_glass.element(
+                    elements.push(SceneElement::Glass(bar_glass.get(view).element(
                         shaders,
                         shape,
                         output_size,
@@ -695,7 +722,7 @@ pub fn build(
                 };
                 if overlaps(shadow.area(), Rect::new(0, 0, view.w, view.h)) {
                     elements.push(SceneElement::Shape(
-                        bar_shadow.element(&shaders.shadow, shadow),
+                        bar_shadow.get(view).element(&shaders.shadow, shadow),
                     ));
                 }
             }
@@ -703,17 +730,28 @@ pub fn build(
         }
     }
     // Shell hints (drop zones) sit above every window, in the global space.
-    let mut drop_index = 0usize;
-    for shape in overlay {
+    // Each keeps its element while it stays where it is: a drag that only
+    // moves the window under them damages nothing else.
+    overlay_shapes.retain(|(outline, border), _| {
+        overlay
+            .iter()
+            .any(|shape| shape.outline == *outline && shape.border == *border)
+    });
+    drop_glass.retain(|outline, _| overlay.iter().any(|shape| shape.outline == *outline));
+    for global in overlay {
         let shape = Shape {
-            outline: shape.outline.translated(shift),
-            area: shape.area.translated(shift),
-            ..*shape
+            outline: global.outline.translated(shift),
+            area: global.area.translated(shift),
+            ..*global
         };
         if overlaps(shape.area, Rect::new(0, 0, view.w, view.h)) {
-            elements.push(SceneElement::Shape(shape_element(&shaders.rounded, shape)));
+            let cache = overlay_shapes
+                .entry((global.outline, global.border))
+                .or_default()
+                .get(view);
+            elements.push(SceneElement::Shape(cache.element(&shaders.rounded, shape)));
             if shape.border == 0 && glass.blur {
-                let cache = drop_glass.entry(drop_index).or_default();
+                let cache = drop_glass.entry(global.outline).or_default();
                 let rect = rectangle(shape.outline).to_physical_precise_round(SCALE);
                 let radii = shape.radii.map(|r| r as f32);
                 elements.push(SceneElement::Glass(cache.element(
@@ -723,7 +761,6 @@ pub fn build(
                     Mask::Rounded { radii },
                     glass.strength,
                 )));
-                drop_index += 1;
             }
         }
     }
@@ -787,7 +824,7 @@ pub fn build(
                         .translated(ModelPoint::new(corner.x, corner.y));
                     let shape = rectangle(box_rect).to_physical_precise_round(SCALE);
                     let radius = box_rect.h as f32 / 2.0;
-                    elements.push(SceneElement::Glass(group.glass.element(
+                    elements.push(SceneElement::Glass(group.glass.get(view).element(
                         shaders,
                         shape,
                         output_size,

@@ -97,7 +97,7 @@ pub struct CapsuleGroupView {
     /// What `buffer` was painted from.
     spec: Option<GroupSpec>,
     pub buffer: Option<MemoryRenderBuffer>,
-    pub glass: crate::render::GlassCache,
+    pub glass: crate::render::per_view::PerView<crate::render::GlassCache>,
 }
 
 impl CapsuleGroupView {

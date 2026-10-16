@@ -71,10 +71,33 @@ pub fn clamp_strength(strength: u8) -> u8 {
     strength.clamp(1, 5)
 }
 
-/// Margin added around the shape to capture enough context for blurring.
+/// How far a pass samples, in texels of its input times its half-pixel: the
+/// same for both directions, a little more at each level.
+pub fn pass_offset(strength: u8, level: usize) -> f32 {
+    1.0 + f32::from(clamp_strength(strength)) * 0.15 + level as f32 * 0.25
+}
+
+/// How far, in pixels of the screen, the blur reaches: what a pixel of the
+/// glass may take from around it. Down pass `i` reads half its offset away in
+/// texels of level `i` (2^i pixels); up pass `i` reads its whole offset away
+/// in texels of level `i + 1`.
+pub fn blur_reach(strength: u8) -> i32 {
+    let passes = usize::from(clamp_strength(strength));
+    let reach: f32 = (0..passes)
+        .map(|level| {
+            let scale = (1u32 << level) as f32;
+            let offset = pass_offset(strength, level);
+            0.5 * offset * scale + offset * 2.0 * scale
+        })
+        .sum();
+    reach.ceil() as i32
+}
+
+/// Margin captured around the shape: the reach of the blur, so that the
+/// edges of the glass blur what is really there instead of a stretched
+/// border.
 pub fn blur_margin(strength: u8) -> i32 {
-    let s = clamp_strength(strength) as i32;
-    8 * s
+    blur_reach(strength)
 }
 
 /// Expand the shape by the blur margin and clip it to output bounds.
@@ -475,7 +498,7 @@ impl GlassElement {
 
         let down_program = self.shaders.blur_down;
         let up_program = self.shaders.blur_up;
-        let strength = self.strength as f32;
+        let strength = self.strength;
 
         frame.with_context(|gl| unsafe {
             let mut draw_fbo = 0;
@@ -525,52 +548,58 @@ impl GlassElement {
             // 2. Down to the smallest level, then back up into `source`.
             gl.BindFramebuffer(ffi::FRAMEBUFFER, shared.fbo);
             gl.BindBuffer(ffi::ARRAY_BUFFER, shared.vbo);
-            let run = |program: BlurProgram, input: PassTexture, output: PassTexture, step: f32| {
-                gl.FramebufferTexture2D(
-                    ffi::FRAMEBUFFER,
-                    ffi::COLOR_ATTACHMENT0,
-                    ffi::TEXTURE_2D,
-                    output.id,
-                    0,
-                );
-                gl.Viewport(0, 0, output.used.0, output.used.1);
-                gl.BindTexture(ffi::TEXTURE_2D, input.id);
-                for (name, value) in [
-                    (ffi::TEXTURE_MIN_FILTER, ffi::LINEAR),
-                    (ffi::TEXTURE_MAG_FILTER, ffi::LINEAR),
-                    (ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE),
-                    (ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE),
-                ] {
-                    gl.TexParameteri(ffi::TEXTURE_2D, name, value as i32);
-                }
-                let (aw, ah) = (input.allocated.0 as f32, input.allocated.1 as f32);
-                let (uw, uh) = (input.used.0 as f32, input.used.1 as f32);
-                gl.UseProgram(program.program);
-                gl.Uniform1i(program.u_tex, 0);
-                gl.Uniform2f(program.u_halfpixel, 0.5 / aw, 0.5 / ah);
-                gl.Uniform1f(program.u_offset, 1.0 + strength * 0.15 + step * 0.25);
-                gl.Uniform2f(program.u_uv_scale, uw / aw, uh / ah);
-                gl.Uniform2f(program.u_uv_max, (uw - 0.5) / aw, (uh - 0.5) / ah);
-                gl.EnableVertexAttribArray(program.a_position);
-                gl.VertexAttribPointer(
-                    program.a_position,
-                    2,
-                    ffi::FLOAT,
-                    ffi::FALSE,
-                    0,
-                    std::ptr::null(),
-                );
-                gl.DrawArrays(ffi::TRIANGLE_STRIP, 0, 4);
-                gl.DisableVertexAttribArray(program.a_position);
-            };
+            let run =
+                |program: BlurProgram, input: PassTexture, output: PassTexture, offset: f32| {
+                    gl.FramebufferTexture2D(
+                        ffi::FRAMEBUFFER,
+                        ffi::COLOR_ATTACHMENT0,
+                        ffi::TEXTURE_2D,
+                        output.id,
+                        0,
+                    );
+                    gl.Viewport(0, 0, output.used.0, output.used.1);
+                    gl.BindTexture(ffi::TEXTURE_2D, input.id);
+                    for (name, value) in [
+                        (ffi::TEXTURE_MIN_FILTER, ffi::LINEAR),
+                        (ffi::TEXTURE_MAG_FILTER, ffi::LINEAR),
+                        (ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE),
+                        (ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE),
+                    ] {
+                        gl.TexParameteri(ffi::TEXTURE_2D, name, value as i32);
+                    }
+                    let (aw, ah) = (input.allocated.0 as f32, input.allocated.1 as f32);
+                    let (uw, uh) = (input.used.0 as f32, input.used.1 as f32);
+                    gl.UseProgram(program.program);
+                    gl.Uniform1i(program.u_tex, 0);
+                    gl.Uniform2f(program.u_halfpixel, 0.5 / aw, 0.5 / ah);
+                    gl.Uniform1f(program.u_offset, offset);
+                    gl.Uniform2f(program.u_uv_scale, uw / aw, uh / ah);
+                    gl.Uniform2f(program.u_uv_max, (uw - 0.5) / aw, (uh - 0.5) / ah);
+                    gl.EnableVertexAttribArray(program.a_position);
+                    gl.VertexAttribPointer(
+                        program.a_position,
+                        2,
+                        ffi::FLOAT,
+                        ffi::FALSE,
+                        0,
+                        std::ptr::null(),
+                    );
+                    gl.DrawArrays(ffi::TRIANGLE_STRIP, 0, 4);
+                    gl.DisableVertexAttribArray(program.a_position);
+                };
             let mut input = source;
             for (index, level) in down.iter().enumerate() {
-                run(down_program, input, *level, index as f32);
+                run(down_program, input, *level, pass_offset(strength, index));
                 input = *level;
             }
             for index in (0..down.len()).rev() {
                 let output = if index == 0 { source } else { down[index - 1] };
-                run(up_program, down[index], output, index as f32);
+                run(
+                    up_program,
+                    down[index],
+                    output,
+                    pass_offset(strength, index),
+                );
             }
 
             // Leave nothing attached: the textures may be freed at any time.
@@ -885,10 +914,14 @@ mod tests {
     }
 
     #[test]
-    fn blur_margin_scales_with_strength() {
-        assert_eq!(blur_margin(1), 8);
-        assert_eq!(blur_margin(3), 24);
-        assert_eq!(blur_margin(10), 40);
+    fn the_margin_covers_what_the_blur_reads() {
+        // Strength 3: down 0.5 × (1.45 + 1.7×2 + 1.95×4), up 2 × the same.
+        assert_eq!(blur_reach(3), 32);
+        for strength in 1..=5 {
+            assert!(blur_margin(strength) >= blur_reach(strength));
+        }
+        assert!(blur_margin(1) < blur_margin(3) && blur_margin(3) < blur_margin(5));
+        assert_eq!(blur_margin(10), blur_margin(5), "clamped like the strength");
     }
 
     #[test]
