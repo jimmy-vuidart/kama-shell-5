@@ -645,6 +645,7 @@ impl Dock {
             Request::Brightness(level) => self.brightness = Some(level),
             Request::TrayActivate { .. }
             | Request::TraySecondary { .. }
+            | Request::TrayContextMenu { .. }
             | Request::TrayMenuItem { .. } => {}
         }
     }
@@ -1164,6 +1165,17 @@ impl Dock {
                 let Some(item) = self.tray.get(index) else {
                     return Task::none();
                 };
+                // No menu to show: the item draws its own (Wine and other
+                // X11 tray icons do).
+                if item.menu.is_none() || item.menu_path.is_none() {
+                    let address = item.address.clone();
+                    self.request(backend::Request::TrayContextMenu {
+                        address,
+                        x: 0,
+                        y: 0,
+                    });
+                    return self.close_tray_menu().chain(self.close_menu());
+                }
                 let height = ui::tray_menu::height(item);
                 let size = (ui::tray_menu::WIDTH, height);
                 let unfolded = bar.unfold > 0.5;

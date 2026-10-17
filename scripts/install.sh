@@ -86,6 +86,14 @@ else
     icons_note="ABSENTES : paru -S $icons_package (AUR), sinon le thème d'icônes du système"
 fi
 
+# The tray icons of Wine and other X11 programs reach the dock through KDE's
+# bridge, never installed from here either.
+if command -v xembedsniproxy >/dev/null; then
+    tray_note="xembedsniproxy trouvé"
+else
+    tray_note="sans xembedsniproxy (paquet plasma-workspace) : celles de Wine restent dans une fenêtre"
+fi
+
 # Started from the menu there is no terminal to read: the log goes to a file.
 # The dock comes along, as in the real session.
 launch() {
@@ -192,6 +200,7 @@ coquille est installé :
   configuration    $config  ($config_note)
   fonds d'écran    $wallpapers_dir/
   icônes           $icons_note
+  notification X11 $tray_note
   écran de connexion  $session_note
   journaux         $log_dir/
 

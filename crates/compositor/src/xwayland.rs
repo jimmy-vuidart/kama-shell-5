@@ -147,6 +147,20 @@ impl State {
 
         info!(display = ?self.xdisplay.map(display_name), "XWayland is ready");
         self.xwm = Some(xwm);
+        self.start_tray_bridge();
+    }
+
+    /// X11 programs (Wine and Proton ones above all) put their tray icons
+    /// in an XEmbed tray; the dock shows StatusNotifierItems. With no XEmbed
+    /// tray, Wine shows its icons in a window of its own. KDE's bridge turns
+    /// each of them into an item of the dock; it quits with the X server.
+    fn start_tray_bridge(&self) {
+        const BRIDGE: &str = "xembedsniproxy";
+        if crate::installed(BRIDGE) {
+            self.spawn(&format!("QT_QPA_PLATFORM=xcb exec {BRIDGE}"));
+        } else {
+            info!("{BRIDGE} is not installed: X11 tray icons show in windows of their own");
+        }
     }
 
     /// An X11 window asks to be shown: the model places it.
@@ -353,6 +367,11 @@ impl XwmHandler for State {
     }
 
     fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
+        // A menu turned (in)visible: see `Shell::visible_overrides`.
+        if window.is_override_redirect() && property == WmWindowProperty::Opacity {
+            self.refresh_pointer_focus();
+            self.queue_redraw();
+        }
         let Some(id) = self.x11_id(&window) else {
             return;
         };

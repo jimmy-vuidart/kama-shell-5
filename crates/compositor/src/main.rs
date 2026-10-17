@@ -446,13 +446,15 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
     }
 }
 
+/// Whether a program is found on the `PATH`.
+pub fn installed(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
+    })
+}
+
 /// The first terminal found among the usual ones.
 fn default_terminal() -> String {
-    let installed = |name: &str| {
-        std::env::var_os("PATH").is_some_and(|path| {
-            std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
-        })
-    };
     let candidates = ["kitty", "alacritty", "foot"];
     let found = candidates.into_iter().find(|name| installed(name));
     found.unwrap_or(candidates[0]).to_owned()

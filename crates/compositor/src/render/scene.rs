@@ -766,7 +766,7 @@ pub fn build(
     }
     // X11 menus, tooltips and dropdowns: where they ask to be, above every
     // window, the one shown last on top.
-    for window in shell.overrides.iter().rev() {
+    for window in shell.visible_overrides().rev() {
         let Some(surface) = window.wl_surface() else {
             continue;
         };

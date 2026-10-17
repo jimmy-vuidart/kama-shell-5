@@ -1417,7 +1417,7 @@ impl State {
         }
 
         // X11 menus, tooltips and dropdowns sit above every window.
-        for window in self.shell.overrides.iter().rev() {
+        for window in self.shell.visible_overrides().rev() {
             let origin = window.last_configure().loc;
             let under =
                 window.surface_under(location - origin.to_f64(), (0, 0), WindowSurfaceType::ALL);

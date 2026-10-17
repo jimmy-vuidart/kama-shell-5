@@ -115,6 +115,12 @@ pub enum Request {
         x: i32,
         y: i32,
     },
+    /// The item draws its own menu (an X11 tray icon, through the bridge).
+    TrayContextMenu {
+        address: String,
+        x: i32,
+        y: i32,
+    },
     TrayMenuItem {
         address: String,
         menu_path: String,
@@ -135,9 +141,10 @@ impl Request {
             Self::Network(_) => Backend::Network,
             Self::Bluetooth(_) => Backend::Bluetooth,
             Self::Brightness(_) => Backend::Brightness,
-            Self::TrayActivate { .. } | Self::TraySecondary { .. } | Self::TrayMenuItem { .. } => {
-                Backend::Tray
-            }
+            Self::TrayActivate { .. }
+            | Self::TraySecondary { .. }
+            | Self::TrayContextMenu { .. }
+            | Self::TrayMenuItem { .. } => Backend::Tray,
         }
     }
 }

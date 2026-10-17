@@ -212,6 +212,16 @@ impl Shell {
         self.screens.iter().find(|screen| screen.id == id)
     }
 
+    /// The X11 menus and tooltips to show and point at, bottom to top. One
+    /// that says it is fully transparent (`_NET_WM_WINDOW_OPACITY` 0) is
+    /// left out: the tray bridge (`xembedsniproxy`) keeps such a window
+    /// mapped behind every tray icon, painted black.
+    pub fn visible_overrides(&self) -> impl DoubleEndedIterator<Item = &X11Surface> {
+        self.overrides
+            .iter()
+            .filter(|window| window.opacity() != Some(0))
+    }
+
     pub fn screen_at(&self, point: ModelPoint) -> Option<&ScreenInfo> {
         self.screens
             .iter()

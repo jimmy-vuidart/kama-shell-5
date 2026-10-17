@@ -169,6 +169,13 @@ n'est jamais réécrit.
   sans eux le curseur est remplacé par « indisponible ».
 - **Ne pas déranger** et **Éclairage nocturne** retiennent leur position mais
   n'ont pas d'effet : il n'y a encore ni notifications ni éclairage nocturne.
+- **Icônes X11 de la zone de notification** (Wine, Proton : Ubisoft
+  Connect…) : elles passent par `xembedsniproxy` (paquet `plasma-workspace`),
+  que le compositeur lance quand XWayland est prêt. Sans lui, Wine les
+  montre dans une petite fenêtre à lui. Un clic droit ouvre le menu que
+  l'appli dessine elle-même, en haut à gauche de l'écran gauche : le pont ne
+  sait pas où est l'icône. Une icône GTK sous X11 ne reçoit pas les clics
+  (le pont les rejoue par XTest, là où XWayland croit le pointeur).
 - **Messages non lus** : seule la simulation en montre.
 - **Jeux** : la ludothèque Steam seulement. Un jeu est reconnu par la classe
   de ses fenêtres (`steam_app_…`) ; un jeu natif lancé hors de la rangée Jeux

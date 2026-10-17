@@ -101,10 +101,35 @@ fn service() -> impl FutureStream<Item = Update> {
                                 error!(error = %e, "failed to activate tray menu item");
                             }
                         }
+                        Request::TrayContextMenu { address, x, y } => {
+                            if let Err(e) = context_menu(&address, x, y).await {
+                                error!(error = %e, "failed to open the menu of tray item");
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
         }
     })
+}
+
+/// Asks an item to show its own menu, which `system-tray` cannot do.
+async fn context_menu(address: &str, x: i32, y: i32) -> zbus::Result<()> {
+    let connection = zbus::Connection::session().await?;
+    // `address` is the bus name of the item, maybe followed by its path.
+    let (destination, path) = match address.split_once('/') {
+        Some((name, path)) => (name, format!("/{path}")),
+        None => (address, String::from("/StatusNotifierItem")),
+    };
+    connection
+        .call_method(
+            Some(destination),
+            path.as_str(),
+            Some("org.kde.StatusNotifierItem"),
+            "ContextMenu",
+            &(x, y),
+        )
+        .await?;
+    Ok(())
 }

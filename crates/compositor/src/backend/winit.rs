@@ -318,7 +318,7 @@ impl State {
             }
         }
         // X11 menus draw again only once told that a frame went out.
-        for window in &self.shell.overrides {
+        for window in self.shell.visible_overrides() {
             let rect = window.last_configure();
             let middle = rect.loc + rect.size.downscale(2).to_point();
             let on = self
