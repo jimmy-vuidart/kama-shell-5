@@ -62,9 +62,11 @@ impl State {
         let mut choices = vec![(BarAction::Keep, "Laisser flottante".to_owned())];
 
         if let Some(slot) = desk.suggested_slot(window) {
+            // A new column is not there yet.
             let occupied = desk
                 .screen(slot.output)
-                .is_some_and(|screen| !screen.slots()[slot.index].is_empty());
+                .and_then(|screen| screen.slots().get(slot.index))
+                .is_some_and(|stack| !stack.is_empty());
             let label = if occupied { "En onglet" } else { "Ranger ici" };
             choices.push((BarAction::Tidy(slot), label.to_owned()));
         }

@@ -6,10 +6,11 @@ use thiserror::Error;
 
 use crate::geometry::{Insets, Point, Rect, Size};
 use crate::ids::{AppKey, OutputId, WindowId};
-use crate::layout::{LayoutKind, Ratio, SlotId, StackId};
+use crate::layout::{LayoutKind, SlotId, StackId};
 use crate::memory::{AppMemory, RememberedPlace};
 use crate::metrics::Metrics;
 use crate::output::{OutputInfo, OutputRole};
+use crate::proportions::Proportions;
 use crate::screen::Screen;
 use crate::stack::TabStack;
 
@@ -26,8 +27,6 @@ pub enum ModelError {
     UnknownOutput(OutputId),
     #[error("slot {0:?} does not exist in the current layout")]
     UnknownSlot(SlotId),
-    #[error("layout {kind:?} is not allowed on the {role:?} screen")]
-    LayoutNotAllowed { kind: LayoutKind, role: OutputRole },
     #[error("{stack:?} has no tab {index}")]
     UnknownTab { stack: StackId, index: usize },
     #[error("output {0:?} is anchored by a fullscreen window")]
@@ -84,17 +83,11 @@ pub struct WindowRecord {
     pub own_titlebar: bool,
 }
 
-/// Where a dragged window can be released.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DropTarget {
-    Slot(SlotId),
-    /// Anywhere on a `Free` screen.
-    Float(OutputId),
-}
-
+/// Where a dragged window can be released: a column of a screen, or the one
+/// it would open on the right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DropZone {
-    pub target: DropTarget,
+    pub slot: SlotId,
     pub rect: Rect,
     /// Another window is already there: releasing stacks as a tab.
     pub occupied: bool,
@@ -156,14 +149,18 @@ enum Layer {
 /// Where a maximized window goes back to, on its screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Origin {
-    Slot(usize),
+    /// Its column; `alone` when it was the only window there, so that the
+    /// column closed behind it.
+    Slot {
+        index: usize,
+        alone: bool,
+    },
     Floating(Rect),
 }
 
 /// Where a remembered application reopens. Indices are into `Desk::screens`.
 enum Target {
     Slot { screen: usize, slot: usize },
-    Float { screen: usize },
     Maximized { screen: usize, back: Option<usize> },
 }
 
@@ -210,6 +207,23 @@ impl Desk {
 
     pub fn memory(&self) -> &AppMemory {
         &self.memory
+    }
+
+    /// Starts from the widths of columns saved by a previous session.
+    pub fn with_proportions(mut self, proportions: &Proportions) -> Self {
+        for screen in &mut self.screens {
+            screen.set_splits(proportions.of(screen.role()));
+        }
+        self
+    }
+
+    /// The widths the user gave to the columns, screen by screen.
+    pub fn proportions(&self) -> Proportions {
+        let mut proportions = Proportions::default();
+        for screen in &self.screens {
+            proportions.set(screen.role(), screen.splits().clone());
+        }
+        proportions
     }
 
     pub fn metrics(&self) -> &Metrics {
@@ -307,18 +321,24 @@ impl Desk {
         let remembered = remembered.filter(|_| wanted.is_none());
         let placement = match remembered.and_then(|place| self.remembered_target(place)) {
             Some(Target::Slot { screen, slot }) => {
-                if let Some(stack) = self.screens[screen].slot_mut(slot) {
-                    stack.push(id);
-                }
+                // Another window of the same application: the new one opens
+                // next to it while there is room.
+                let next_to = |stack: &TabStack| {
+                    let app = app.as_ref();
+                    stack.windows().iter().any(|window| {
+                        let other = self.windows.get(window).and_then(|r| r.app.as_ref());
+                        other.is_some_and(|other| app.is_some_and(|app| other.same_app(app)))
+                    })
+                };
+                let shown = &self.screens[screen];
+                let beside = shown.has_room() && shown.slots().get(slot).is_some_and(next_to);
+                let slot = self.put_back(screen, id, slot + usize::from(beside), true);
                 Placement::Slot(SlotId::new(self.screens[screen].id(), slot))
-            }
-            Some(Target::Float { screen }) => {
-                self.open_floating(id, screen, request.preferred_size)
             }
             // Shown at once, even while a game keeps the focus elsewhere.
             Some(Target::Maximized { screen, back }) => {
                 let origin = match back {
-                    Some(slot) => Origin::Slot(slot),
+                    Some(index) => Origin::Slot { index, alone: true },
                     None => Origin::Floating(self.opening_rect(screen, request.preferred_size)),
                 };
                 let screen = &mut self.screens[screen];
@@ -387,6 +407,11 @@ impl Desk {
         let was_focused = self.focused() == Some(id);
 
         self.take(screen, id);
+        // Its column may close, and the columns after it move left.
+        let column_left = match spot {
+            Spot::Slot(index) => !self.screens[screen].slots()[index].is_empty(),
+            _ => false,
+        };
         self.windows.remove(&id);
         self.focus_order.retain(|window| *window != id);
         self.minimized.retain(|window| *window != id);
@@ -395,7 +420,8 @@ impl Desk {
         if was_focused {
             let screen = &self.screens[screen];
             let neighbour = match spot {
-                Spot::Slot(index) => screen.slots()[index].active(),
+                Spot::Slot(index) if column_left => screen.slots()[index].active(),
+                Spot::Slot(_) => None,
                 Spot::Maximized => screen.maximized().active().filter(|_| screen.covered()),
                 Spot::Floating(_) => None,
             };
@@ -416,7 +442,9 @@ impl Desk {
         Ok(())
     }
 
-    /// The user tidies a window into a slot (rules 2, 3 and 4).
+    /// The user tidies a window into a slot (rules 2, 3 and 4): one of the
+    /// columns of a screen, or, while the layout has room, the one past the
+    /// last, which opens a new column on the right.
     ///
     /// An occupied slot never refuses: the window stacks as a tab. The
     /// application will reopen there.
@@ -425,17 +453,19 @@ impl Desk {
         let to = self.screen_index(slot.output)?;
         self.ensure_not_anchored(from)?;
         self.ensure_not_anchored(to)?;
-        if slot.index >= self.screens[to].slots().len() {
+        let screen = &self.screens[to];
+        let count = screen.slots().len();
+        if slot.index > count || (slot.index == count && !screen.has_room()) {
             return Err(ModelError::UnknownSlot(slot));
         }
 
         self.take(from, id);
-        if let Some(stack) = self.screens[to].slot_mut(slot.index) {
-            stack.push(id);
-        }
+        self.screens[to].push_to_slot(slot.index, id);
         self.settle();
 
-        let place = RememberedPlace::in_slot(self.screens[to].role(), slot.index);
+        // Its own column may have closed on the way, moving it left.
+        let index = self.screens[to].slot_of(id).unwrap_or(slot.index);
+        let place = RememberedPlace::in_slot(self.screens[to].role(), index);
         self.remember(id, Some(place));
         self.mark_focused(id);
         Ok(())
@@ -468,27 +498,34 @@ impl Desk {
         Ok(())
     }
 
-    /// Where tidying a floating window on its own screen would put it: the
-    /// first empty slot, else the slot focused last. `None` when the screen
-    /// has no usable slot, or when the window is already in one.
+    /// Where tidying a floating window on its own screen would put it: a
+    /// new column while the layout has room, else the column focused last.
+    /// `None` on an anchored screen, or when the window is not floating.
     pub fn suggested_slot(&self, id: WindowId) -> Option<SlotId> {
         let (index, spot) = self.locate(id)?;
         let screen = &self.screens[index];
         if !matches!(spot, Spot::Floating(_)) || screen.anchored().is_some() {
             return None;
         }
-        let slots = screen.slots();
-        let empty = slots.iter().position(TabStack::is_empty);
-        let recent = || {
-            let others = self
-                .focus_order
-                .iter()
-                .rev()
-                .filter(|window| **window != id);
-            others.clone().find_map(|window| screen.slot_of(*window))
-        };
-        let slot = empty.or_else(recent).or((!slots.is_empty()).then_some(0))?;
-        Some(SlotId::new(screen.id(), slot))
+        Some(SlotId::new(screen.id(), self.tidy_slot(index, id)))
+    }
+
+    /// The slot a window tidied on a screen without saying where goes to:
+    /// a new column while there is room, else the column of the window
+    /// focused last there, else the first one.
+    fn tidy_slot(&self, screen: usize, id: WindowId) -> usize {
+        let screen = &self.screens[screen];
+        if screen.has_room() {
+            return screen.slots().len();
+        }
+        let mut others = self
+            .focus_order
+            .iter()
+            .rev()
+            .filter(|window| **window != id);
+        others
+            .find_map(|window| screen.slot_of(*window))
+            .unwrap_or(0)
     }
 
     /// A floating window's client chose another size. Unlike
@@ -506,12 +543,12 @@ impl Desk {
     }
 
     /// "To the center": the user tidies a side window into the center
-    /// screen, in the slot used last there. An occupied slot stacks it as a
-    /// tab (rule 3); a `Free` center takes it floating, at its size.
+    /// screen, in a new column while there is room, else in the column used
+    /// last there, as a tab (rule 3).
     ///
     /// Refused while a game is anchored on either screen.
     pub fn send_to_center(&mut self, id: WindowId) -> Result<(), ModelError> {
-        let (side, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        let (side, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         if !self.screens[side].role().is_side() {
             return Err(ModelError::NotOnSideScreen(id));
         }
@@ -524,38 +561,41 @@ impl Desk {
         self.ensure_not_anchored(side)?;
 
         let output = self.screens[center].id();
-        if self.screens[center].slots().is_empty() {
-            let area = self.screens[center].floating_area(&self.metrics);
-            let size = match spot {
-                Spot::Floating(rect) => rect.size(),
-                Spot::Slot(_) | Spot::Maximized => Size::new(area.w * 3 / 5, area.h * 7 / 10),
-            };
-            self.float_window(id, output, Rect::centered(size, area))
-        } else {
-            self.move_to_slot(id, SlotId::new(output, self.center_slot(center)))
-        }
+        self.move_to_slot(id, SlotId::new(output, self.tidy_slot(center, id)))
     }
 
-    /// Changes the layout of a screen; see [`Screen`] for how windows are
-    /// redistributed. The focused window stays visible.
+    /// Changes the layout of a screen, a setting of the user: columns
+    /// beyond what it allows merge into its last one, as tabs. The focused
+    /// window stays visible.
     pub fn set_layout(&mut self, output: OutputId, kind: LayoutKind) -> Result<(), ModelError> {
         let index = self.screen_index(output)?;
-        self.ensure_not_anchored(index)?;
-        let role = self.screens[index].role();
-        if !kind.allowed_on(role) {
-            return Err(ModelError::LayoutNotAllowed { kind, role });
+        if self.screens[index].layout() == kind {
+            return Ok(());
         }
-        self.screens[index].apply_layout(kind, &self.metrics);
+        self.screens[index].apply_layout(kind);
         self.settle();
         self.show_focused();
         Ok(())
     }
 
-    pub fn set_ratio(&mut self, output: OutputId, ratio: Ratio) -> Result<(), ModelError> {
-        let index = self.screen_index(output)?;
-        self.ensure_not_anchored(index)?;
-        self.screens[index].set_ratio(ratio);
-        Ok(())
+    /// Puts separation `index` of a screen under `point`, given relative to
+    /// the screen. Says whether the columns changed.
+    pub fn move_separator(
+        &mut self,
+        output: OutputId,
+        index: usize,
+        point: Point,
+    ) -> Result<bool, ModelError> {
+        let screen = self.screen_index(output)?;
+        self.ensure_not_anchored(screen)?;
+        let screen = &mut self.screens[screen];
+        match screen.split_at(&self.metrics, index, point) {
+            Some(split) if split != screen.split() => {
+                screen.set_split(split);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     /// The output changed size; floating windows are kept inside it.
@@ -631,8 +671,8 @@ impl Desk {
     /// screen, its capsule at the top of the middle. Its application will
     /// reopen there, maximized.
     ///
-    /// A window that already fills its screen, alone in the slot of `Full`,
-    /// stays as it is. Refused on an anchored screen.
+    /// A window in the only column of its screen already fills it: it stays
+    /// as it is. Refused on an anchored screen.
     pub fn maximize(&mut self, id: WindowId) -> Result<(), ModelError> {
         let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         self.ensure_not_anchored(index)?;
@@ -642,7 +682,10 @@ impl Desk {
                 return Ok(());
             }
             Spot::Slot(_) if self.screens[index].slots().len() == 1 => return Ok(()),
-            Spot::Slot(slot) => Origin::Slot(slot),
+            Spot::Slot(slot) => Origin::Slot {
+                index: slot,
+                alone: self.screens[index].slots()[slot].windows().len() == 1,
+            },
             Spot::Floating(rect) => Origin::Floating(rect),
         };
 
@@ -652,7 +695,7 @@ impl Desk {
         self.settle();
 
         let back = match origin {
-            Origin::Slot(slot) => Some(slot),
+            Origin::Slot { index, .. } => Some(index),
             Origin::Floating(_) => None,
         };
         let place = RememberedPlace::maximized(self.screens[index].role(), back);
@@ -661,9 +704,10 @@ impl Desk {
         Ok(())
     }
 
-    /// A maximized window goes back where it was: its slot, as a tab if it
-    /// is taken, or floating where it floated. Its application reopens
-    /// there; floating, it has no habit any more.
+    /// A maximized window goes back where it was: its column, opened again
+    /// if it closed and there is room, else as a tab; or floating where it
+    /// floated. Its application reopens there; floating, it has no habit
+    /// any more.
     pub fn unmaximize(&mut self, id: WindowId) -> Result<(), ModelError> {
         let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         if !matches!(spot, Spot::Maximized) {
@@ -673,26 +717,21 @@ impl Desk {
         let origin = self.restore.remove(&id);
         self.screens[index].remove(id);
 
-        let count = self.screens[index].slots().len();
         let area = self.screens[index].floating_area(&self.metrics);
         let back = match origin {
-            Some(Origin::Slot(slot)) if count > 0 => Some(slot.min(count - 1)),
-            _ => None,
-        };
-        match back {
-            Some(slot) => {
-                if let Some(stack) = self.screens[index].slot_mut(slot) {
-                    stack.push(id);
-                }
+            Some(Origin::Slot { index: slot, alone }) => {
+                Some(self.put_back(index, id, slot, alone))
+            }
+            Some(Origin::Floating(rect)) => {
+                self.screens[index].push_floating(id, rect.clamped_to(area));
+                None
             }
             None => {
-                let rect = match origin {
-                    Some(Origin::Floating(rect)) => rect.clamped_to(area),
-                    _ => self.opening_rect(index, None),
-                };
+                let rect = self.opening_rect(index, None);
                 self.screens[index].push_floating(id, rect);
+                None
             }
-        }
+        };
         self.settle();
 
         let role = self.screens[index].role();
@@ -740,24 +779,13 @@ impl Desk {
         Some(id)
     }
 
-    /// The gap between the two slots of a screen, relative to the screen.
-    /// An anchored screen has none to grab.
-    pub fn separator(&self, output: OutputId) -> Option<Rect> {
-        let screen = self.screen(output)?;
-        if screen.anchored().is_some() {
-            return None;
+    /// The gaps between the columns of a screen, left to right, relative
+    /// to the screen. An anchored screen has none to grab.
+    pub fn separators(&self, output: OutputId) -> Vec<Rect> {
+        match self.screen(output) {
+            Some(screen) if screen.anchored().is_none() => screen.separators(&self.metrics),
+            _ => Vec::new(),
         }
-        screen.separator(&self.metrics)
-    }
-
-    /// The ratio that puts the separation of a screen under `point`, given
-    /// relative to the screen.
-    pub fn ratio_at(&self, output: OutputId, point: Point) -> Option<Ratio> {
-        let screen = self.screen(output)?;
-        if screen.anchored().is_some() {
-            return None;
-        }
-        screen.ratio_at(&self.metrics, point)
     }
 
     /// A window entered or left fullscreen on the screen it is on. While
@@ -852,27 +880,24 @@ impl Desk {
         side.role().is_side() && free(side) && centers.next().is_some_and(free)
     }
 
-    /// Where `dragged` can be released (rule 2). Anchored screens offer
-    /// nothing.
+    /// Where `dragged` can be released (rule 2): the columns of each screen,
+    /// shown as they would be with one more on the right while the layout
+    /// has room, that one free. Anchored screens offer nothing.
     pub fn drop_zones(&self, dragged: WindowId) -> Vec<DropZone> {
         let mut zones = Vec::new();
         for screen in &self.screens {
             if screen.anchored().is_some() {
                 continue;
             }
-            let rects = screen.slot_rects(&self.metrics);
-            if rects.is_empty() {
+            let count = screen.slots().len() + usize::from(screen.has_room());
+            for (index, rect) in screen.columns(count, &self.metrics).into_iter().enumerate() {
+                let stack = screen.slots().get(index);
                 zones.push(DropZone {
-                    target: DropTarget::Float(screen.id()),
-                    rect: screen.info().usable(),
-                    occupied: false,
-                });
-            }
-            for (index, (rect, stack)) in rects.into_iter().zip(screen.slots()).enumerate() {
-                zones.push(DropZone {
-                    target: DropTarget::Slot(SlotId::new(screen.id(), index)),
+                    slot: SlotId::new(screen.id(), index),
                     rect,
-                    occupied: stack.windows().iter().any(|window| *window != dragged),
+                    occupied: stack.is_some_and(|stack| {
+                        stack.windows().iter().any(|window| *window != dragged)
+                    }),
                 });
             }
         }
@@ -891,7 +916,7 @@ impl Desk {
 
     /// The capsules to show: on each screen, the group of the maximized
     /// windows first, if any, then one group above each occupied slot.
-    /// Anchored screens have none, `Free` ones only maximized windows.
+    /// Anchored screens have none.
     pub fn capsule_groups(&self) -> Vec<CapsuleGroup> {
         let mut groups = Vec::new();
         for screen in &self.screens {
@@ -1073,13 +1098,29 @@ impl Desk {
             });
         }
         let slot = place.slot?;
-        Some(match screen.slots().len() {
-            0 => Target::Float { screen: index },
-            count => Target::Slot {
-                screen: index,
-                slot: slot.min(count - 1),
-            },
+        Some(Target::Slot {
+            screen: index,
+            slot,
         })
+    }
+
+    /// Puts `id` back in column `slot` of a screen, where it was or where its
+    /// habit says: as a tab when the column is there and the window was not
+    /// `alone` in it, else in a column opened at that place while there is
+    /// room, else as a tab in the nearest column. Returns its column.
+    fn put_back(&mut self, screen: usize, id: WindowId, slot: usize, alone: bool) -> usize {
+        let screen = &mut self.screens[screen];
+        let count = screen.slots().len();
+        if slot < count && !(alone && screen.has_room()) {
+            screen.push_to_slot(slot, id);
+            slot
+        } else if screen.has_room() {
+            screen.insert_slot(slot, id)
+        } else {
+            let slot = slot.min(count - 1);
+            screen.push_to_slot(slot, id);
+            slot
+        }
     }
 
     /// The screen a floating window opens on (rules 1 and 7).
@@ -1127,17 +1168,6 @@ impl Desk {
         Rect::centered(size, area)
     }
 
-    /// The center slot a side window is sent to: the one focused last, else
-    /// the first occupied one.
-    fn center_slot(&self, center: usize) -> usize {
-        let screen = &self.screens[center];
-        let mut recent = self.focus_order.iter().rev();
-        recent
-            .find_map(|window| screen.slot_of(*window))
-            .or_else(|| screen.slots().iter().position(|stack| !stack.is_empty()))
-            .unwrap_or(0)
-    }
-
     /// Records `id` as focused, shows its tab or raises it, and notes its
     /// side screen as used. `id` must be a known window.
     fn mark_focused(&mut self, id: WindowId) {
@@ -1173,6 +1203,7 @@ impl Desk {
         let minimized = &self.minimized;
         let mut shown = None;
         for screen in &mut self.screens {
+            screen.compact();
             for slot in 0..screen.slots().len() {
                 if let Some(next) = successor(&screen.slots()[slot], minimized) {
                     if let Some(stack) = screen.slot_mut(slot) {
@@ -1205,8 +1236,11 @@ impl Desk {
         let mut seen = BTreeMap::new();
         for screen in &self.screens {
             let output = screen.id();
-            if screen.slots().len() != screen.layout().slot_count() {
-                return Err(format!("{output:?}: slot count does not match the layout"));
+            if screen.slots().len() > screen.layout().max_columns() {
+                return Err(format!("{output:?} has more columns than its layout"));
+            }
+            if screen.slots().iter().any(TabStack::is_empty) {
+                return Err(format!("{output:?} shows an empty column"));
             }
             let stacks = || screen.slots().iter().chain([screen.maximized()]);
             if stacks().any(|s| !s.is_empty() && s.active().is_none()) {

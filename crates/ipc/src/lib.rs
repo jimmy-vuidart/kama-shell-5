@@ -209,7 +209,7 @@ mod tests {
                 role: OutputRole::Left,
                 width: 1920,
                 height: 1080,
-                layout: LayoutKind::Columns,
+                layout: LayoutKind::TwoColumns,
                 anchored: false,
             }],
             windows: vec![Window {

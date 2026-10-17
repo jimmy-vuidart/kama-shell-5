@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use coquille_model::{LayoutKind, OutputRole};
 use serde::Deserialize;
 use tracing::{info, warn};
 
@@ -15,6 +16,8 @@ pub struct Config {
     pub outputs: RoleConfig,
     pub keyboard: KeyboardConfig,
     pub mouse: MouseConfig,
+    /// How each screen arranges the windows tidied into it.
+    pub layout: LayoutConfig,
     pub theme: Option<ThemeKind>,
     /// The accent color, as `#rrggbb`; by default, the one of the theme.
     pub accent: Option<String>,
@@ -88,6 +91,26 @@ impl GameConfig {
     pub fn sticky_edges_ms(&self) -> u64 {
         self.sticky_edges_ms
             .unwrap_or(Self::DEFAULT_STICKY_EDGES_MS)
+    }
+}
+
+/// The layout of each screen; the default of its role where none is named.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LayoutConfig {
+    pub left: Option<LayoutKind>,
+    pub center: Option<LayoutKind>,
+    pub right: Option<LayoutKind>,
+}
+
+impl LayoutConfig {
+    pub fn of(&self, role: OutputRole) -> LayoutKind {
+        let named = match role {
+            OutputRole::Left => self.left,
+            OutputRole::Center => self.center,
+            OutputRole::Right => self.right,
+        };
+        named.unwrap_or(LayoutKind::default_for(role))
     }
 }
 
@@ -394,7 +417,6 @@ mod tests {
     fn what_the_settings_screen_writes_is_accepted() {
         use coquille_config::{Change, DockPlace, PerScreen, apply};
         use coquille_ipc::ThemeName;
-        use coquille_model::OutputRole;
 
         let changes = [
             Change::Theme(ThemeName::Dark),
@@ -415,6 +437,8 @@ mod tests {
             Change::Vrr(false),
             Change::Dock(OutputRole::Center, DockPlace::Horizontal),
             Change::Dock(OutputRole::Right, DockPlace::VerticalRight),
+            Change::Layout(OutputRole::Left, LayoutKind::MainSide),
+            Change::Layout(OutputRole::Center, LayoutKind::ThreeColumns),
             Change::MouseAccelSpeed(0.2),
             Change::MouseAccelProfile(coquille_config::MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
@@ -454,6 +478,22 @@ mod tests {
         assert_eq!(config.wallpaper.path.as_deref(), Some("/path/to/wall.png"));
         assert_eq!(config.wallpaper.left.as_deref(), Some("/path/to/left.png"));
         assert_eq!(config.wallpaper.mode(), WallpaperMode::Fit);
+        assert_eq!(config.layout.of(OutputRole::Left), LayoutKind::MainSide);
+        assert_eq!(
+            config.layout.of(OutputRole::Center),
+            LayoutKind::ThreeColumns
+        );
+        assert_eq!(config.layout.of(OutputRole::Right), LayoutKind::TwoColumns);
+    }
+
+    #[test]
+    fn each_screen_has_the_layout_of_its_role_unless_told_otherwise() {
+        let config = parse("[layout]\nright = \"full\"\n").unwrap();
+
+        assert_eq!(config.layout.of(OutputRole::Left), LayoutKind::TwoColumns);
+        assert_eq!(config.layout.of(OutputRole::Center), LayoutKind::Full);
+        assert_eq!(config.layout.of(OutputRole::Right), LayoutKind::Full);
+        assert!(parse("[layout]\nleft = \"rows\"\n").is_err());
     }
 
     #[test]

@@ -4,9 +4,9 @@
 //! positions and stacking are kept for rendering and hit-testing.
 
 use coquille_model::{
-    AppKey, AppMemory, CapsuleGroup, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo,
-    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, StackId, WindowGeometry,
-    WindowId,
+    AppKey, AppMemory, CapsuleGroup, Desk, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole,
+    Placement, Point as ModelPoint, Proportions, Rect, Size as ModelSize, SlotId, StackId,
+    WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 
+use crate::config::LayoutConfig;
 use crate::decoration::capsules::{CapsuleButton, GroupLayout};
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::naming::{badge_color, identity};
@@ -176,14 +177,28 @@ pub struct Shell {
 }
 
 impl Shell {
-    /// `memory` holds the habits saved by earlier sessions.
-    pub fn new(screens: Vec<ScreenInfo>, memory: AppMemory) -> Self {
+    /// `memory` holds the habits saved by earlier sessions, `proportions`
+    /// the widths they gave to columns; `layout` comes from the
+    /// configuration.
+    pub fn new(
+        screens: Vec<ScreenInfo>,
+        memory: AppMemory,
+        proportions: &Proportions,
+        layout: &LayoutConfig,
+    ) -> Self {
         let outputs = screens
             .iter()
             .map(|screen| OutputInfo::new(screen.id, screen.role, screen.rect.size()))
             .collect();
+        let mut desk = Desk::new(outputs, Metrics::default())
+            .with_memory(memory)
+            .with_proportions(proportions);
+        for screen in &screens {
+            // The screens were just given to the desk: they are all known.
+            let _ = desk.set_layout(screen.id, layout.of(screen.role));
+        }
         Self {
-            desk: Desk::new(outputs, Metrics::default()).with_memory(memory),
+            desk,
             screens,
             windows: Vec::new(),
             capsules: Vec::new(),
@@ -245,16 +260,12 @@ impl Shell {
     }
 
     /// Where a dragged window can be released, in the global space.
-    pub fn drop_zones(&self, dragged: WindowId) -> Vec<(Rect, DropTarget, bool)> {
+    pub fn drop_zones(&self, dragged: WindowId) -> Vec<(Rect, SlotId, bool)> {
         let zones = self.desk.drop_zones(dragged).into_iter();
         zones
             .filter_map(|zone| {
-                let output = match zone.target {
-                    DropTarget::Slot(slot) => slot.output,
-                    DropTarget::Float(output) => output,
-                };
-                let origin = self.screen(output)?.rect.origin();
-                Some((zone.rect.translated(origin), zone.target, zone.occupied))
+                let origin = self.screen(zone.slot.output)?.rect.origin();
+                Some((zone.rect.translated(origin), zone.slot, zone.occupied))
             })
             .collect()
     }
@@ -784,9 +795,29 @@ impl State {
 
         self.sync_keyboard_focus();
         self.save_habits();
+        self.save_proportions();
         self.shell_changed();
         self.full_redraw = true;
         self.queue_redraw();
+    }
+
+    /// Writes the widths of the columns to disk when the user changed them.
+    /// Not while a separation is being dragged: once it is let go.
+    pub fn save_proportions(&mut self) {
+        let Some(directory) = &self.state_dir else {
+            return;
+        };
+        if matches!(self.gesture, Some(Gesture::Splitting { .. })) {
+            return;
+        }
+        let proportions = self.shell.desk.proportions();
+        if proportions == self.saved_proportions {
+            return;
+        }
+        match crate::persist::save_proportions(directory, &proportions) {
+            Ok(()) => self.saved_proportions = proportions,
+            Err(error) => warn!(%error, "cannot save the widths of the columns"),
+        }
     }
 
     /// Writes the habits to disk when tidying a window changed them.

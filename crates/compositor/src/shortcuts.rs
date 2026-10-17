@@ -1,6 +1,5 @@
 //! Keyboard shortcuts of the compositor.
 
-use coquille_model::LayoutKind;
 use smithay::input::keyboard::{Keysym, ModifiersState};
 
 /// The modifier that marks a shortcut as meant for the shell.
@@ -42,7 +41,6 @@ impl ModKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Quit,
-    SetLayout(LayoutKind),
     CycleTab {
         forward: bool,
     },
@@ -64,21 +62,11 @@ pub struct KeyPress<'a> {
     pub shift: bool,
     pub ctrl: bool,
     pub alt: bool,
-    /// XKB keycode (evdev code + 8): names a physical key, whatever the layout.
-    pub keycode: u32,
     /// Keysyms of the key without modifiers.
     pub syms: &'a [Keysym],
     /// Keysym of the key with the modifiers held.
     pub modified: Keysym,
 }
-
-/// Digit-row keys are matched by position, because layouts such as AZERTY do
-/// not produce digits without Shift.
-const KEY_1: u32 = 10;
-const KEY_2: u32 = 11;
-const KEY_3: u32 = 12;
-const KEY_4: u32 = 13;
-const KEY_5: u32 = 14;
 
 pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     let has = |sym: Keysym| press.syms.contains(&sym);
@@ -99,19 +87,20 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     if !press.main {
         return None;
     }
-    match press.keycode {
-        KEY_1 => Some(Action::SetLayout(LayoutKind::Full)),
-        KEY_2 => Some(Action::SetLayout(LayoutKind::Columns)),
-        KEY_3 => Some(Action::SetLayout(LayoutKind::Rows)),
-        KEY_4 => Some(Action::SetLayout(LayoutKind::Free)),
-        KEY_5 => Some(Action::SetLayout(LayoutKind::TwoThirdsOneThird)),
-        _ if press.shift && has(Keysym::e) => Some(Action::Quit),
-        _ if has(Keysym::Return) => Some(Action::SpawnTerminal),
-        _ if has(Keysym::r) => Some(Action::RestoreWindow),
-        _ if has(Keysym::Escape) => Some(Action::LeaveFullscreen),
-        _ if has(Keysym::Next) => Some(Action::CycleTab { forward: true }),
-        _ if has(Keysym::Prior) => Some(Action::CycleTab { forward: false }),
-        _ => None,
+    if press.shift && has(Keysym::e) {
+        Some(Action::Quit)
+    } else if has(Keysym::Return) {
+        Some(Action::SpawnTerminal)
+    } else if has(Keysym::r) {
+        Some(Action::RestoreWindow)
+    } else if has(Keysym::Escape) {
+        Some(Action::LeaveFullscreen)
+    } else if has(Keysym::Next) {
+        Some(Action::CycleTab { forward: true })
+    } else if has(Keysym::Prior) {
+        Some(Action::CycleTab { forward: false })
+    } else {
+        None
     }
 }
 
@@ -119,11 +108,10 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
 mod tests {
     use super::*;
 
-    fn press(main: bool, shift: bool, keycode: u32, syms: &[Keysym]) -> Option<Action> {
+    fn press(main: bool, shift: bool, syms: &[Keysym]) -> Option<Action> {
         action_for(KeyPress {
             main,
             shift,
-            keycode,
             syms,
             ..PLAIN
         })
@@ -135,7 +123,6 @@ mod tests {
         shift: false,
         ctrl: false,
         alt: false,
-        keycode: 0,
         syms: &[],
         modified: Keysym::NoSymbol,
     };
@@ -143,10 +130,10 @@ mod tests {
     #[test]
     fn mod_r_restores_the_last_minimized_window() {
         assert_eq!(
-            press(true, false, 27, &[Keysym::r]),
+            press(true, false, &[Keysym::r]),
             Some(Action::RestoreWindow)
         );
-        assert_eq!(press(false, false, 27, &[Keysym::r]), None);
+        assert_eq!(press(false, false, &[Keysym::r]), None);
     }
 
     #[test]
@@ -180,19 +167,19 @@ mod tests {
     #[test]
     fn mod_escape_puts_the_game_back_in_a_window() {
         assert_eq!(
-            press(true, false, 9, &[Keysym::Escape]),
+            press(true, false, &[Keysym::Escape]),
             Some(Action::LeaveFullscreen)
         );
-        assert_eq!(press(false, false, 9, &[Keysym::Escape]), None);
+        assert_eq!(press(false, false, &[Keysym::Escape]), None);
     }
 
     #[test]
     fn mod_return_opens_a_terminal() {
         assert_eq!(
-            press(true, false, 36, &[Keysym::Return]),
+            press(true, false, &[Keysym::Return]),
             Some(Action::SpawnTerminal)
         );
-        assert_eq!(press(false, false, 36, &[Keysym::Return]), None);
+        assert_eq!(press(false, false, &[Keysym::Return]), None);
     }
 
     #[test]
@@ -200,7 +187,6 @@ mod tests {
         let third = KeyPress {
             ctrl: true,
             alt: true,
-            keycode: 69,
             syms: &[Keysym::F3],
             modified: Keysym::XF86_Switch_VT_3,
             ..PLAIN
@@ -219,7 +205,6 @@ mod tests {
         let emergency = KeyPress {
             ctrl: true,
             alt: true,
-            keycode: 22,
             syms: &[Keysym::BackSpace],
             ..PLAIN
         };
@@ -235,65 +220,36 @@ mod tests {
     }
 
     #[test]
-    fn the_first_digit_key_selects_full() {
-        assert_eq!(
-            press(true, false, KEY_1, &[Keysym::ampersand]),
-            Some(Action::SetLayout(LayoutKind::Full))
-        );
-    }
-
-    #[test]
-    fn the_second_digit_key_selects_columns() {
-        assert_eq!(
-            press(true, false, KEY_2, &[Keysym::eacute]),
-            Some(Action::SetLayout(LayoutKind::Columns))
-        );
-    }
-
-    #[test]
-    fn the_other_digit_keys_select_the_other_layouts() {
-        let layout = |keycode| press(true, false, keycode, &[]);
-
-        assert_eq!(layout(12), Some(Action::SetLayout(LayoutKind::Rows)));
-        assert_eq!(layout(13), Some(Action::SetLayout(LayoutKind::Free)));
-        assert_eq!(
-            layout(14),
-            Some(Action::SetLayout(LayoutKind::TwoThirdsOneThird))
-        );
-        assert_eq!(layout(15), None);
-    }
-
-    #[test]
     fn nothing_happens_without_the_shell_modifier() {
-        assert_eq!(press(false, false, KEY_1, &[Keysym::_1]), None);
-        assert_eq!(press(false, true, 26, &[Keysym::e]), None);
-        assert_eq!(press(false, false, 117, &[Keysym::Next]), None);
+        assert_eq!(press(false, false, &[Keysym::_1]), None);
+        assert_eq!(press(false, true, &[Keysym::e]), None);
+        assert_eq!(press(false, false, &[Keysym::Next]), None);
     }
 
     #[test]
     fn mod_shift_e_quits() {
-        assert_eq!(press(true, true, 26, &[Keysym::e]), Some(Action::Quit));
+        assert_eq!(press(true, true, &[Keysym::e]), Some(Action::Quit));
     }
 
     #[test]
     fn mod_e_without_shift_does_nothing() {
-        assert_eq!(press(true, false, 26, &[Keysym::e]), None);
+        assert_eq!(press(true, false, &[Keysym::e]), None);
     }
 
     #[test]
     fn page_keys_cycle_tabs() {
         assert_eq!(
-            press(true, false, 117, &[Keysym::Next]),
+            press(true, false, &[Keysym::Next]),
             Some(Action::CycleTab { forward: true })
         );
         assert_eq!(
-            press(true, false, 112, &[Keysym::Prior]),
+            press(true, false, &[Keysym::Prior]),
             Some(Action::CycleTab { forward: false })
         );
     }
 
     #[test]
     fn an_unbound_key_does_nothing() {
-        assert_eq!(press(true, false, 38, &[Keysym::a]), None);
+        assert_eq!(press(true, false, &[Keysym::a]), None);
     }
 }

@@ -45,7 +45,7 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
                 OutputRole::Left,
                 1920,
                 1080,
-                LayoutKind::Columns,
+                LayoutKind::TwoColumns,
                 false,
             ),
             screen(
@@ -61,7 +61,7 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
                 OutputRole::Right,
                 1920,
                 1080,
-                LayoutKind::Columns,
+                LayoutKind::TwoColumns,
                 false,
             ),
         ],

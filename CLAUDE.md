@@ -50,24 +50,27 @@ Et parfois des choses inhabituelles (un logiciel de retouche une seule fois, une
 
 ### Dispositions par écran
 
-Chaque écran a une disposition parmi une liste courte :
+Chaque écran a une disposition parmi quatre, choisie dans « Paramètres » (page Écrans et dock), écrite dans `config.toml` (section `[layout]`) et appliquée à chaud. Une disposition donne le **nombre maximal de colonnes** :
 
-- `Full` : une pile de fenêtres occupe tout l'écran, une seule affichée à la fois.
-- `Columns` : deux emplacements côte à côte, ratio réglable (défaut 50/50 ; exemple réel : 58/42). **Partage par défaut sur les écrans latéraux en paysage.**
-- `Rows` : deux emplacements haut / bas (moins utile en paysage, mais disponible).
-- `Free` (« écran libre ») : fenêtres flottantes qui se chevauchent, comme un bureau classique.
-- Le centre 21:9 accepte aussi `TwoThirdsOneThird` hors jeu.
+- `full` (« Plein écran ») : une colonne ; les fenêtres rangées sont les onglets d'une même pile.
+- `two-columns` (« 2 colonnes ») : jusqu'à deux colonnes, 50/50 par défaut. **Par défaut sur les écrans latéraux.**
+- `three-columns` (« 3 colonnes ») : jusqu'à trois colonnes, un tiers chacune par défaut.
+- `main-side` (« Maître / esclave ») : une colonne maître à gauche (2/3) et une esclave (1/3).
 
-Changement de disposition : `Super+1` à `5`. Le dock ne s'en charge pas : toujours rien à la souris pour cela.
+Le centre est en `full` par défaut. **Les colonnes sont adaptatives** : seules existent celles qui ont des fenêtres (réduites comprises). Une fenêtre rangée seule prend tout l'écran, deux se le partagent, et ainsi de suite jusqu'au maximum ; au-delà, elles s'empilent en onglets. Une colonne qui se vide disparaît, les autres s'élargissent. En `Super + glisser`, un écran qui a encore de la place montre ses colonnes telles qu'elles seraient avec **une de plus, à droite** (libre) ; les colonnes existantes reçoivent la fenêtre en onglet. Changer de disposition ne déplace rien, sauf quand l'écran perd des colonnes : celles en trop rejoignent la dernière, en onglets.
 
-**Fenêtres maximisées** : chaque écran a aussi une pile « maximisée », posée par-dessus ses emplacements (la disposition `Full` du centre, offerte aux écrans latéraux sans défaire leur partage). Une fenêtre qui se maximise (double-clic sur sa barre, son bouton « agrandir », celui de sa capsule ou de la barre du shell, demande xdg-shell ou `_NET_WM_STATE` X11) quitte son emplacement et couvre l'écran ; ses capsules forment un groupe en haut au centre, ceux des emplacements restent à leur place, atténués. Cliquer une capsule d'emplacement ramène l'écran partagé (la fenêtre maximisée reste dans son groupe, atténuée) ; cliquer la sienne recouvre l'écran. Réduire la fenêtre maximisée montre la suivante de son groupe, ou l'écran partagé s'il n'y en a plus. Restaurée, elle retourne où elle était (son emplacement, en onglet s'il est pris, ou flottante à son rectangle d'avant). Les flottantes restent au-dessus. Une fenêtre seule dans l'emplacement d'un écran `Full` a déjà tout l'écran : la demande est sans effet.
+Toutes les séparations se règlent (`Super + glisser` sur la séparation ; chaque colonne garde au moins 20 %). Les largeurs sont gardées **par écran, par disposition et par nombre de colonnes affichées**, d'une session à l'autre (`~/.local/state/coquille/proportions.json`).
+
+« Haut / bas », « Écran libre » et « Deux tiers + un tiers », comme les raccourcis `Super+1` à `5`, ont été retirés : les fenêtres flottantes restent possibles sur tous les écrans.
+
+**Fenêtres maximisées** : chaque écran a aussi une pile « maximisée », posée par-dessus ses colonnes (une colonne pleine, offerte aux écrans partagés sans défaire leur partage). Une fenêtre qui se maximise (double-clic sur sa barre, son bouton « agrandir », celui de sa capsule ou de la barre du shell, demande xdg-shell ou `_NET_WM_STATE` X11) quitte son emplacement et couvre l'écran ; ses capsules forment un groupe en haut au centre, ceux des emplacements restent à leur place, atténués. Cliquer une capsule d'emplacement ramène l'écran partagé (la fenêtre maximisée reste dans son groupe, atténuée) ; cliquer la sienne recouvre l'écran. Réduire la fenêtre maximisée montre la suivante de son groupe, ou l'écran partagé s'il n'y en a plus. Restaurée, elle retourne où elle était (sa colonne, rouverte à sa place si elle s'était fermée et qu'il reste de la place, sinon en onglet ; ou flottante à son rectangle d'avant). Les flottantes restent au-dessus. Une fenêtre dans la seule colonne de son écran a déjà tout l'écran : la demande est sans effet.
 
 ### Règles de placement
 
 1. **Une appli jamais rangée s'ouvre en flottant**, sur l'écran où se trouve le curseur, sans déplacer les autres fenêtres. Une petite barre propose : laisser flottante, ranger dans un emplacement, au centre, en onglet.
 2. **Glisser une fenêtre par sa barre de titre la déplace** : elle flotte et suit le curseur (une fenêtre rangée quitte son emplacement). **`Super + glisser`**, n'importe où sur la fenêtre, affiche les emplacements possibles sur les trois écrans ; relâcher la place.
 3. **Un écran n'est jamais plein** : déposer sur un emplacement occupé empile la fenêtre **en onglet** avec celle qui s'y trouve.
-4. **Mémoire par application** : une appli que j'ai rangée moi-même rouvre au même écran / emplacement (clé : `app_id` Wayland ou `WM_CLASS` X11). **Les fenêtres laissées flottantes ne créent aucune habitude.** Maximiser est un rangement : l'appli rouvre maximisée sur cet écran, et restaurée elle retourne dans l'emplacement qu'elle avait (ou flotte, et l'habitude s'efface). Ce qu'une appli redemande d'elle-même en s'ouvrant (avant de dessiner ou dans la seconde qui suit : kitty, les applis GTK se souviennent d'avoir été fermées maximisées) est ignoré : c'est la mémoire du shell qui décide.
+4. **Mémoire par application** : une appli que j'ai rangée moi-même rouvre au même écran / emplacement (clé : `app_id` Wayland ou `WM_CLASS` X11) : dans une colonne rouverte à sa place s'il reste de la place (à côté d'une autre fenêtre de la même appli si elle occupe déjà cette colonne), sinon en onglet dans sa colonne (ou la plus proche). **Les fenêtres laissées flottantes ne créent aucune habitude.** Maximiser est un rangement : l'appli rouvre maximisée sur cet écran, et restaurée elle retourne dans l'emplacement qu'elle avait (ou flotte, et l'habitude s'efface). Ce qu'une appli redemande d'elle-même en s'ouvrant (avant de dessiner ou dans la seconde qui suit : kitty, les applis GTK se souviennent d'avoir été fermées maximisées) est ignoré : c'est la mémoire du shell qui décide.
 5. *Supprimée* : l'échange avec le centre (bouton ⇄, `Mod+C`), jugé inutile à l'usage. Il en reste « Au centre », dans la barre de rangement : la fenêtre est rangée au centre, en onglet si l'emplacement est pris, et l'appli y rouvrira.
 6. **Instantanés optionnels** : mémoriser la disposition actuelle des trois écrans, la restaurer. Rien n'oblige à préparer quoi que ce soit. *Concept conservé, pas encore réalisé : sa forme reste à définir.*
 7. Si je lance une appli alors qu'un jeu est ancré au centre, elle s'ouvre en flottant sur **l'écran latéral utilisé en dernier**, jamais devant le jeu.
@@ -103,7 +106,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 **Sans la touche Super, la souris ne fait jamais rien d'autre que ce que fait l'application.** Dans un jeu ancré, tous les boutons appartiennent au jeu.
 
 - `Super + glisser` : ranger une fenêtre (même hors barre de titre) : les emplacements s'affichent, relâcher la place.
-- `Super + glisser sur la séparation` : ajuster le ratio d'une disposition.
+- `Super + glisser sur une séparation` : ajuster la largeur des deux colonnes qu'elle sépare.
 - **Secouer la souris** : halo autour du curseur pour le retrouver.
 
 ## Apparence (référence : maquettes)
@@ -119,7 +122,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
   - boutons à droite, pour une fenêtre flottante seulement : réduire, agrandir, fermer (une fenêtre rangée ou maximisée les a sur sa capsule) ;
   - un double-clic sur la barre maximise la fenêtre, un autre la restaure.
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis Electron comme Discord ou Claude Desktop, qui demandent par `xdg-decoration` à se décorer elles-mêmes, et sont alors prises au mot ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (la fenêtre flotte et suit le curseur).
-- **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine (`palette.glass_strong` avec liseré `palette.rim`) et montre réduire, agrandir (« restaurer », deux carrés, dans le groupe des fenêtres maximisées) et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Les fenêtres maximisées ont leur groupe en haut au centre de l'écran (dans la moitié centrale de la bande) ; un groupe d'emplacement qui le toucherait s'écarte du côté de son milieu (à gauche s'ils partagent le même). Ni capsule pour une fenêtre flottante, ni sur un écran ancré ; un écran libre n'a que le groupe de ses fenêtres maximisées. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
+- **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine (`palette.glass_strong` avec liseré `palette.rim`) et montre réduire, agrandir (« restaurer », deux carrés, dans le groupe des fenêtres maximisées) et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Les fenêtres maximisées ont leur groupe en haut au centre de l'écran (dans la moitié centrale de la bande) ; un groupe d'emplacement qui le toucherait s'écarte du côté de son milieu (à gauche s'ils partagent le même). Ni capsule pour une fenêtre flottante, ni sur un écran ancré. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
 - Fenêtre active : **anneau d'accent de 2 px**, d'une couleur unie. Accent par défaut : pervenche `#5b63e6` (clair), `#8f97ff` (sombre), réglable (`accent`, page Apparence de « Paramètres »).
 - **Ombres douces** : seules les fenêtres flottantes et la barre de rangement projettent une ombre douce teintée (`palette.shadow`), dessinée par le shader `shadow` (`render/shadow.rs`). Une fenêtre rangée n'en a pas : à 8 px, elle salirait sa voisine et les capsules. L'ombre est évidée sous la fenêtre qui la projette, pour qu'une barre de titre translucide montre ce qui est derrière, pas l'ombre.
 - **Flou d'arrière-plan** : le compositeur calcule un vrai flou d'arrière-plan (« framebuffer effects » de Smithay, Dual Kawase : passes de réduction puis d'agrandissement, shaders `blur_down` et `blur_up`, puis `glass` qui applique le masque) derrière ses décorations et derrière les programmes du shell (panneaux `coquille-*`, fenêtre `coquille-settings`). Le verre d'une barre de titre est sous la fenêtre : il floute ce qui est derrière elle, jamais son contenu. Coupé en mode jeu (écran ancré).
@@ -154,8 +157,8 @@ coquille/
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
 - Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Notifications et instantanés n'ont pas encore de forme.
-- Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, ratios, délai des bords collants).
-- État persistant (mémoire par appli, instantanés) : `~/.local/state/coquille/`.
+- Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, disposition de chaque écran, délai des bords collants).
+- État persistant (mémoire par appli, largeurs des colonnes, instantanés) : `~/.local/state/coquille/`.
 
 ### Trouver son chemin dans le code
 
@@ -198,7 +201,7 @@ scripts/codegraph.sh files                                               # l'arb
 - **winit et iced** : `iced_layershell` est écrit pour winit-core 0.31.0-beta.2, Smithay épingle la beta.3. `vendor/iced_exdevtools` (une ligne modifiée) les réconcilie par `[patch.crates-io]` ; à retirer quand `iced_layershell` suivra.
 - **Le dock passe par les outils des services** (`pactl`, `parec`, `nmcli`, `bluetoothctl`, `ddcutil`) plutôt que par leurs bibliothèques : rien à lier, un outil absent grise sa commande.
 - **Thème et accent** : `theme` et `accent` de la configuration valent pour le compositeur et le dock ; le thème change en cours de session (commande `set_theme`).
-- **Configuration relue à chaud** : la commande `reload_config` fait relire `config.toml` au compositeur (`reload.rs`), qui applique ce qui peut changer en cours de route (thème, accent, terminal, disposition du clavier, bords collants, affichage direct et VRR) puis prévient les autres programmes (`config_changed`) : le dock relit alors sa part et déplace ses barres. **Le rôle des écrans et XWayland ne changent qu'au démarrage.** Un fichier illisible ou invalide ne change rien.
+- **Configuration relue à chaud** : la commande `reload_config` fait relire `config.toml` au compositeur (`reload.rs`), qui applique ce qui peut changer en cours de route (thème, accent, terminal, disposition du clavier, disposition de chaque écran, bords collants, affichage direct et VRR) puis prévient les autres programmes (`config_changed`) : le dock relit alors sa part et déplace ses barres. **Le rôle des écrans et XWayland ne changent qu'au démarrage.** Un fichier illisible ou invalide ne change rien.
 - **Un seul endroit écrit le fichier** : la crate `config` (`toml_edit`). Elle remplace une valeur là où elle est, commentaires conservés ; un réglage que le fichier ne fait que suggérer (`# vrr = true`) est activé sur place, sous son explication. Le compositeur, lui, lit le fichier strictement (`deny_unknown_fields`) : un test vérifie qu'il accepte tout ce que l'écran « Paramètres » écrit.
 
 ### Lancer le compositeur
@@ -213,10 +216,10 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 
 - Le plus rapide : `scripts/debug.sh` compile (debug) et lance coquille et le dock en imbriqué. `scripts/debug.sh left` pour un seul écran, `-f` en plein écran, `--mock` pour un dock simulé, `-- <options de coquille>` pour le reste. Les boutons de session du dock y sont simulés.
 - Souris : glisser une barre de titre déplace la fenêtre librement (rangée, elle devient flottante et reprend la taille que choisit l'appli, le curseur restant sur sa barre) ; `Mod+glisser` sur une fenêtre, ou glisser une capsule, montre les emplacements des trois écrans, relâcher range la fenêtre (en onglet si l'emplacement est pris ; relâcher ailleurs ne change rien). `Mod+clic` sans bouger ne fait rien. Une fenêtre qui s'ouvre flottante est accompagnée d'une petite barre : « Laisser flottante », « Ranger ici » / « En onglet », « Au centre ».
-- Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux emplacements règle leur ratio.
+- Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux colonnes règle leurs largeurs.
 - Capsules : un clic affiche la fenêtre ; « réduire » la cache (sa capsule reste, grisée ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; « agrandir » la maximise (« restaurer » la remet à sa place) ; « fermer » la ferme, affichée ou non. La barre de titre d'une fenêtre flottante garde ces trois boutons ; un double-clic sur une barre de titre du shell maximise ou restaure.
 - Dock : `target/debug/coquille --role left --spawn "$PWD/target/debug/coquille-dock --mock"` (tout simulé) ; sans `--mock`, vraies fenêtres et vrais services. Détail dans `crates/dock/README.md`.
-- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+1` à `5` disposition de l'écran du pointeur (plein, côte à côte, haut/bas, écran libre, deux tiers + un tiers) ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter.
+- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter.
 - Mode jeu : `Mod+Échap` remet le jeu en fenêtre ; `Mod` seul ouvre le tiroir du dock et libère le pointeur. (En imbriqué, GNOME garde `Alt+Échap` pour lui : ce raccourci ne s'essaie qu'avec `--debug-input`.)
 - Applications X11 : `DISPLAY` est transmis aux programmes lancés par le compositeur (et aux services de la session avec `--export-environment`). `--no-xwayland` ou `xwayland = false` s'en passent.
 - Mémoire par appli : enregistrée dans `~/.local/state/coquille/memory.json` sur le matériel ; en imbriqué, seulement avec `--state-dir`.
@@ -227,7 +230,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 
 - Paramètres : le bouton du dock (à côté de la déconnexion) lance `coquille-settings` sur le fichier que lit le dock. À la main : `target/debug/coquille-settings --config FICHIER --page screens` (`appearance`, `screens`, `game`, `system`). Détail dans `crates/settings/README.md`.
 
-Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[glass]` (`blur` = `true`, `strength` de 1 à 5, défaut `3` ; un entier, sinon tout le fichier est refusé), `[outputs]`, `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`, `icon_size`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"vertical-right"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
+Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[glass]` (`blur` = `true`, `strength` de 1 à 5, défaut `3` ; un entier, sinon tout le fichier est refusé), `[outputs]`, `[layout]` (`left`, `center`, `right` : `"full"`, `"two-columns"`, `"three-columns"` ou `"main-side"`), `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`, `icon_size`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"vertical-right"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
 
 ### Installer
 
@@ -241,9 +244,9 @@ Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour
 
 ### État de la phase 2
 
-Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (depuis en capsules au-dessus des emplacements), mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, bouton « réduire ». L'échange avec le centre (⇄) et la disposition « Onglets » ont été retirés depuis.
+Terminée : trois écrans réels, flottant par défaut à la taille choisie par l'appli, glisser-déposer vers les emplacements, onglets (depuis en capsules au-dessus des emplacements), mémoire par appli, écran libre, barre de rangement, redimensionnement des flottantes, ratio à la souris, bouton « réduire ». L'échange avec le centre (⇄), la disposition « Onglets », puis l'écran libre et les raccourcis `Mod+1` à `5` ont été retirés depuis (dispositions adaptatives, voir plus bas).
 
-Toujours sans solution à la souris : changer de disposition (`Mod+1` à `5`).
+La disposition d'un écran se change dans « Paramètres ».
 
 ### État de la phase 3
 
@@ -291,7 +294,7 @@ Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un é
 
 ### État de l'écran « Paramètres »
 
-Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : cinq pages (Apparence, Écrans et dock, Mode jeu, Souris, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, accent, sens du dock par écran, vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et en sombre) et par tests unitaires : cinq pages (Apparence, Écrans et dock, Mode jeu, Souris, Système) ; chaque changement est écrit aussitôt dans `config.toml` et appliqué à chaud (thème, accent, disposition et sens du dock par écran, vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons, disposition du clavier) ; le thème changé depuis le dock se reflète dans la fenêtre ; hors de coquille, la fenêtre règle le fichier pour le prochain démarrage.
 
 Fait mais **jamais exécuté** (backend matériel) : le choix du connecteur de chaque écran (en imbriqué les écrans sont simulés, la liste est remplacée par « Écrans simulés » ; l'échange de deux connecteurs a été essayé sans compositeur et par tests) ; l'affichage direct et le VRR coupés ou remis en cours de session (`Udev::set_game`) ; les réglages libinput appliqués aux périphériques pointeur (`Udev::set_mouse`).
 
@@ -300,7 +303,6 @@ Limites connues :
 - pas de réglage pour les favoris du dock, les épinglées et la taille du lanceur : ils se règlent à la souris dans le dock ;
 - les dispositions du clavier portent leur nom anglais (celui de XKB) ;
 - la disposition donnée par `--keyboard-layout` l'emporte sur le fichier : la changer dans l'écran est alors sans effet jusqu'au prochain démarrage sans l'option ;
-- changer la disposition d'un écran (`Mod+1` à `5`) n'y est pas : ce n'est pas un réglage du fichier.
 
 ### État des capsules
 
@@ -319,9 +321,18 @@ Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair et 
 Limites connues :
 
 - pas de raccourci clavier ni de zone de dépôt « maximisée » : on maximise depuis la fenêtre ou sa capsule ;
-- en `Rows`, tant que l'écran est recouvert, les deux groupes d'emplacements passent en haut, côte à côte (la bande du bas serait sous la fenêtre) ;
 - une appli qui redemande son état d'avant plus d'une seconde après avoir dessiné est prise au mot ;
 - le canal du shell ne dit pas qu'une fenêtre ou une habitude est maximisée (le dock n'en a pas l'usage).
+
+### État des dispositions adaptatives
+
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues) et par tests unitaires : quatre dispositions par écran, choisies dans « Paramètres » et relues à chaud (passer de 3 à 2 colonnes empile la troisième en onglet dans la deuxième) ; 1, 2, 3 fenêtres rangées → tout l'écran, moitiés, tiers, la suivante en onglet ; colonne fermée → les autres s'élargissent ; zones de dépôt avec la nouvelle colonne à droite ; séparations des 3 colonnes réglées à la souris et retrouvées à la session suivante. Jamais vu sur les trois vrais écrans.
+
+Limites connues :
+
+- les colonnes d'un écran se renumérotent quand l'une se ferme : une appli mémorisée « colonne 3 » rouvre dans la plus proche disponible ;
+- une nouvelle colonne s'ouvre toujours à droite en `Super + glisser` (la mémoire, elle, rouvre une colonne à sa place) : pour réordonner, on déplace une fenêtre ;
+- la colonne maître est toujours à gauche.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 

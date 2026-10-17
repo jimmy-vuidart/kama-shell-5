@@ -306,7 +306,7 @@ mod tests {
             role,
             width: 1920,
             height: 1080,
-            layout: coquille_model::LayoutKind::Columns,
+            layout: coquille_model::LayoutKind::TwoColumns,
             anchored,
         }
     }

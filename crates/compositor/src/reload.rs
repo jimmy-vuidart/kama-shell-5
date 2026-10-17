@@ -2,7 +2,8 @@
 //! settings screen asks for it.
 //!
 //! What takes effect at once: theme, accent, terminal, keyboard layout,
-//! sticky edges, and what game mode may do on the hardware. The role of
+//! the layout of each screen, sticky edges, and what game mode may do on
+//! the hardware. The role of
 //! each screen and XWayland are decided when the compositor starts.
 
 use smithay::input::keyboard::XkbConfig;
@@ -34,6 +35,7 @@ impl State {
             udev.set_game(&config.game);
             udev.set_mouse(&config.mouse);
         }
+        self.set_layouts(&config.layout);
         self.glass = config.glass;
         self.wallpaper_config = config.wallpaper.clone();
         self.refresh_wallpapers();
@@ -42,6 +44,29 @@ impl State {
         // to learn it.
         self.queue_redraw();
         self.config_changed();
+    }
+
+    /// Gives each screen the layout the configuration names; windows move
+    /// only where a screen loses columns.
+    fn set_layouts(&mut self, layout: &config::LayoutConfig) {
+        let screens: Vec<_> = self
+            .shell
+            .desk
+            .screens()
+            .iter()
+            .map(|screen| (screen.id(), screen.role(), screen.layout()))
+            .collect();
+        let mut changed = false;
+        for (output, role, current) in screens {
+            let wanted = layout.of(role);
+            if wanted != current && self.shell.desk.set_layout(output, wanted).is_ok() {
+                info!(?role, layout = wanted.name(), "layout changed");
+                changed = true;
+            }
+        }
+        if changed {
+            self.apply_arrangement();
+        }
     }
 
     /// Gives the keyboard the layout the configuration names, or the one of

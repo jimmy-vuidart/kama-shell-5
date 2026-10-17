@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use coquille_ipc::ThemeName;
-use coquille_model::OutputRole;
+use coquille_model::{LayoutKind, OutputRole};
 use toml_edit::{DocumentMut, Item, Value};
 
 use crate::edit::{with_value, without};
@@ -163,6 +163,8 @@ pub struct Settings {
     pub direct_scanout: Option<bool>,
     pub vrr: Option<bool>,
     pub docks: PerScreen<Option<DockPlace>>,
+    /// How each screen arranges the windows tidied into it.
+    pub layouts: PerScreen<Option<LayoutKind>>,
     pub dock_icon_size: Option<u32>,
     pub mouse_accel_speed: Option<f64>,
     pub mouse_accel_profile: Option<MouseAccelProfile>,
@@ -241,6 +243,10 @@ impl Settings {
                 let said = text_of(&["dock", "screens", role_name(role)])?;
                 DockPlace::named(&said)
             }),
+            layouts: PerScreen::from_roles(|role| {
+                let said = text_of(&["layout", role_name(role)])?;
+                LayoutKind::named(&said)
+            }),
             dock_icon_size: item(&["dock", "icon_size"])
                 .and_then(Item::as_integer)
                 .and_then(|size| u32::try_from(size).ok()),
@@ -283,6 +289,12 @@ impl Settings {
 
     pub fn dock(&self, role: OutputRole) -> DockPlace {
         self.docks.get(role).unwrap_or(DockPlace::usual(role))
+    }
+
+    pub fn layout(&self, role: OutputRole) -> LayoutKind {
+        self.layouts
+            .get(role)
+            .unwrap_or(LayoutKind::default_for(role))
     }
 
     pub fn dock_icon_size(&self) -> u32 {
@@ -357,6 +369,7 @@ pub enum Change {
     DirectScanout(bool),
     Vrr(bool),
     Dock(OutputRole, DockPlace),
+    Layout(OutputRole, LayoutKind),
     DockIconSize(u32),
     MouseAccelSpeed(f64),
     MouseAccelProfile(MouseAccelProfile),
@@ -423,6 +436,10 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
         Change::Dock(role, place) => {
             let path = ["dock", "screens", role_name(*role)];
             with_value(text, &path, place.name().into())
+        }
+        Change::Layout(role, kind) => {
+            let path = ["layout", role_name(*role)];
+            with_value(text, &path, kind.name().into())
         }
         Change::DockIconSize(size) => {
             let path = ["dock", "icon_size"];
@@ -611,6 +628,7 @@ mod tests {
             Change::Dock(OutputRole::Left, DockPlace::Off),
             Change::Dock(OutputRole::Center, DockPlace::VerticalRight),
             Change::Dock(OutputRole::Right, DockPlace::Horizontal),
+            Change::Layout(OutputRole::Right, LayoutKind::MainSide),
             Change::MouseAccelSpeed(0.5),
             Change::MouseAccelProfile(MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
@@ -647,6 +665,10 @@ mod tests {
                 left: Some(DockPlace::Off),
                 center: Some(DockPlace::VerticalRight),
                 right: Some(DockPlace::Horizontal),
+            },
+            layouts: PerScreen {
+                right: Some(LayoutKind::MainSide),
+                ..PerScreen::default()
             },
             dock_icon_size: None,
             mouse_accel_speed: Some(0.5),
@@ -777,6 +799,36 @@ mod tests {
         let text = apply(&text, &Change::Wallpaper(OutputRole::Right, None)).unwrap();
         let settings = Settings::parse(&text);
         assert_eq!(settings.wallpapers.right, None);
+    }
+
+    #[test]
+    fn layouts_are_read_and_written_under_their_explanation() {
+        let settings = Settings::parse(SAMPLE);
+        assert_eq!(settings.layout(OutputRole::Left), LayoutKind::TwoColumns);
+        assert_eq!(settings.layout(OutputRole::Center), LayoutKind::Full);
+
+        let changed = apply(
+            SAMPLE,
+            &Change::Layout(OutputRole::Center, LayoutKind::ThreeColumns),
+        )
+        .unwrap();
+
+        let settings = Settings::parse(&changed);
+        assert_eq!(
+            settings.layout(OutputRole::Center),
+            LayoutKind::ThreeColumns
+        );
+        assert_eq!(settings.layouts.left, None);
+        assert!(changed.contains("center = \"three-columns\""));
+        // Switched on where the file suggested it, not added again.
+        assert_eq!(
+            changed.matches("center = ").count(),
+            SAMPLE.matches("center = ").count()
+        );
+        assert_eq!(
+            Settings::parse("[layout]\nleft = \"rows\"\n").layouts.left,
+            None
+        );
     }
 
     #[test]

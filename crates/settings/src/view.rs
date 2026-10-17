@@ -3,12 +3,12 @@
 
 use coquille_config::{Change, DockPlace, MouseAccelProfile, PerScreen, WallpaperMode};
 use coquille_ipc::ThemeName;
-use coquille_model::OutputRole;
+use coquille_model::{LayoutKind, OutputRole};
 use coquille_ui::glyph::{Glyph, glyph};
 use coquille_ui::style::{self, Palette, parse_color};
 use iced::overlay::menu;
 use iced::widget::{
-    Column, Row, button, column, container, pick_list, row, scrollable, slider, space, text,
+    Column, Row, button, column, container, pick_list, row, scrollable, slider, space, stack, text,
     text_input, toggler,
 };
 use iced::{Alignment, Border, Color, Element, Length, Padding};
@@ -485,12 +485,26 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             move |place| Message::Change(Change::Dock(role, place)),
             palette,
         );
+        let layouts = LayoutKind::ALL.map(|kind| (kind, kind.label()));
+        let layout = segmented(
+            &layouts,
+            app.file.layout(role),
+            move |kind| Message::Change(Change::Layout(role, kind)),
+            palette,
+        );
         let rows = vec![
             setting(
                 "Connecteur",
                 "La prise sur laquelle cet écran est branché.",
                 Some("Au prochain démarrage"),
                 connector,
+                palette,
+            ),
+            setting(
+                "Disposition",
+                "Combien de colonnes les fenêtres rangées se partagent au plus.",
+                None,
+                layout,
                 palette,
             ),
             setting(
@@ -548,7 +562,8 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     content.into()
 }
 
-/// The three screens side by side, in their proportions, each with its dock.
+/// The three screens side by side, in their proportions, each with its
+/// columns and its dock.
 fn drawing<'a>(
     app: &'a App,
     cards: &PerScreen<ScreenCard>,
@@ -563,8 +578,9 @@ fn drawing<'a>(
             OutputRole::Center => "Centre",
             OutputRole::Right => "Droite",
         };
-        let label = container(text(name).size(12).font(style::MEDIUM).color(palette.muted))
+        let name = container(text(name).size(12).font(style::MEDIUM).color(palette.muted))
             .center(Length::Fill);
+        let label = stack![columns(app.file.layout(role), palette), name];
         let dock = |width: Length, height: Length| {
             container(space().width(width).height(height))
                 .style(move |_| style::fill(palette.accent, 2.0))
@@ -591,6 +607,30 @@ fn drawing<'a>(
         .padding(Padding::from([18.0, 16.0]))
         .style(move |_| style::outlined(palette.card, palette.rim, 10.0))
         .into()
+}
+
+/// The columns of a layout, at the widths they start with, as blocks tinted
+/// with the accent.
+fn columns<'a>(kind: LayoutKind, palette: Palette) -> Element<'a, Message> {
+    let tint = Color {
+        a: 0.14,
+        ..palette.accent
+    };
+    let portions: &[u16] = match kind {
+        LayoutKind::Full => &[1],
+        LayoutKind::TwoColumns => &[1, 1],
+        LayoutKind::ThreeColumns => &[1, 1, 1],
+        LayoutKind::MainSide => &[2, 1],
+    };
+    let mut line: Row<'_, Message> = row![].spacing(3);
+    for portion in portions {
+        let column = container(space())
+            .width(Length::FillPortion(*portion))
+            .height(Length::Fill)
+            .style(move |_| style::fill(tint, 3.0));
+        line = line.push(column);
+    }
+    container(line).padding(2).into()
 }
 
 fn audio<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {

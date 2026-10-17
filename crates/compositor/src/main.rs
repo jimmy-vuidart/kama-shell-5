@@ -100,12 +100,16 @@ impl From<Role> for OutputRole {
 /// emplacements, relâcher range la fenêtre ; un clic sur une capsule affiche
 /// sa fenêtre ; Mod+glisser la déplace librement ; tirer un bord ou un coin
 /// d'une fenêtre flottante la redimensionne ; Mod+glisser sur la séparation
-/// de deux emplacements règle leur ratio.
+/// de deux colonnes règle leurs largeurs.
 ///
-/// Clavier : Mod+Entrée terminal ; Mod+1 à 5 disposition de l'écran du
-/// pointeur (plein, côte à côte, haut/bas, écran libre, deux tiers + un
-/// tiers) ; Mod+Page suiv./préc. onglet suivant/précédent ; Mod+R restaure la
-/// dernière fenêtre réduite ; Mod+Maj+E quitter.
+/// Dispositions : chaque écran a la sienne (section [layout] du fichier de
+/// configuration, ou l'écran « Paramètres ») : plein écran, 2 colonnes,
+/// 3 colonnes ou maître / esclave. Les fenêtres rangées se partagent l'écran
+/// jusqu'à ce nombre de colonnes.
+///
+/// Clavier : Mod+Entrée terminal ; Mod+Page suiv./préc. onglet
+/// suivant/précédent ; Mod+R restaure la dernière fenêtre réduite ;
+/// Mod+Maj+E quitter.
 /// Ctrl+Alt+Retour arrière quitte aussi, quoi qu'il arrive.
 ///
 /// Mode jeu : une fenêtre en plein écran ancre son écran (ni décoration ni
@@ -119,8 +123,7 @@ struct Cli {
     #[arg(long, value_enum, default_value = "auto")]
     backend: BackendChoice,
 
-    /// Mode imbriqué : rôle de l'écran simulé. Un écran latéral démarre en
-    /// « côte à côte », le centre en « plein ».
+    /// Mode imbriqué : rôle de l'écran simulé, dont il prend la disposition.
     #[arg(long, value_enum, default_value = "right")]
     role: Role,
 
@@ -439,6 +442,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         sticky_edges_ms: config.game.sticky_edges_ms(),
         glass: config.glass,
         wallpaper: config.wallpaper.clone(),
+        layout: config.layout,
     }
 }
 

@@ -17,7 +17,7 @@ fn outputs() -> Vec<OutputInfo> {
     ]
 }
 
-/// Left 16:9 in `Columns`, center 21:9 in `Full`, right 16:9 in `Columns`.
+/// Left 16:9 in two columns, center 21:9 in one, right 16:9 in two.
 fn desk() -> Desk {
     Desk::new(outputs(), Metrics::default())
 }
@@ -196,11 +196,13 @@ fn opening_on_an_unknown_output_is_refused() {
 #[test]
 fn dropping_on_an_empty_slot_places_the_window_there() {
     let mut desk = desk();
+    open_in(&mut desk, 2, "notes", RIGHT, 0);
     open(&mut desk, 1, "guide", CENTER);
 
     desk.move_to_slot(WindowId(1), slot(RIGHT, 1)).unwrap();
 
     assert_eq!(place(&desk, 1), Placement::Slot(slot(RIGHT, 1)));
+    assert_eq!(tabs(&desk, RIGHT, 0), [2]);
     assert!(desk.screen(CENTER).unwrap().floating().is_empty());
 }
 
@@ -221,21 +223,40 @@ fn a_slot_accepts_any_number_of_windows() {
     let mut desk = desk();
 
     for id in 1..=6 {
-        open_in(&mut desk, id, "browser", RIGHT, 1);
+        open_in(&mut desk, id, "browser", RIGHT, 0);
     }
 
-    assert_eq!(tabs(&desk, RIGHT, 1), [1, 2, 3, 4, 5, 6]);
+    assert_eq!(tabs(&desk, RIGHT, 0), [1, 2, 3, 4, 5, 6]);
 }
 
 #[test]
-fn moving_to_another_slot_leaves_the_previous_one() {
+fn moving_to_another_slot_closes_the_column_it_leaves() {
     let mut desk = desk();
     open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
 
-    desk.move_to_slot(WindowId(1), slot(LEFT, 1)).unwrap();
+    desk.move_to_slot(WindowId(1), slot(LEFT, 0)).unwrap();
 
-    assert!(tabs(&desk, RIGHT, 0).is_empty());
-    assert_eq!(tabs(&desk, LEFT, 1), [1]);
+    assert_eq!(tabs(&desk, LEFT, 0), [1]);
+    assert_eq!(desk.screen(RIGHT).unwrap().slots().len(), 1);
+    assert_eq!(geo(&desk, 2).frame, Rect::new(8, 48, 1904, 1024));
+}
+
+#[test]
+fn a_window_moved_right_on_its_own_screen_lands_in_the_new_column() {
+    let mut desk = desk();
+    desk.set_layout(RIGHT, LayoutKind::ThreeColumns).unwrap();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+
+    desk.move_to_slot(WindowId(1), slot(RIGHT, 2)).unwrap();
+
+    assert_eq!(tabs(&desk, RIGHT, 0), [2]);
+    assert_eq!(tabs(&desk, RIGHT, 1), [1]);
+    assert_eq!(
+        desk.memory().get(&AppKey::new("guide")),
+        Some(RememberedPlace::in_slot(OutputRole::Right, 1))
+    );
 }
 
 #[test]
@@ -263,6 +284,7 @@ fn moving_an_unknown_window_is_refused() {
 #[test]
 fn a_tidied_app_reopens_in_the_same_slot() {
     let mut desk = desk();
+    open_in(&mut desk, 9, "guide", LEFT, 0);
     open(&mut desk, 1, "discord", RIGHT);
     desk.move_to_slot(WindowId(1), slot(LEFT, 1)).unwrap();
     desk.close_window(WindowId(1)).unwrap();
@@ -270,6 +292,20 @@ fn a_tidied_app_reopens_in_the_same_slot() {
     let placement = open(&mut desk, 2, "discord", CENTER);
 
     assert_eq!(placement, Placement::Slot(slot(LEFT, 1)));
+}
+
+#[test]
+fn a_second_window_of_an_app_opens_beside_the_first_while_there_is_room() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "kitty", LEFT, 0);
+
+    let second = open(&mut desk, 2, "kitty", CENTER);
+    let third = open(&mut desk, 3, "kitty", CENTER);
+
+    assert_eq!(second, Placement::Slot(slot(LEFT, 1)));
+    assert_eq!(third, Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(tabs(&desk, LEFT, 0), [1, 3]);
+    assert_eq!(tabs(&desk, LEFT, 1), [2]);
 }
 
 #[test]
@@ -300,27 +336,45 @@ fn a_window_without_app_key_is_never_remembered() {
 #[test]
 fn a_remembered_slot_missing_from_the_layout_falls_back_to_the_last_slot() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "notes", RIGHT, 1);
-    desk.close_window(WindowId(1)).unwrap();
-    open_in(&mut desk, 2, "guide", RIGHT, 0);
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    desk.close_window(WindowId(2)).unwrap();
     desk.set_layout(RIGHT, LayoutKind::Full).unwrap();
 
     let placement = open(&mut desk, 3, "notes", LEFT);
 
     assert_eq!(placement, Placement::Slot(slot(RIGHT, 0)));
-    assert_eq!(tabs(&desk, RIGHT, 0), [2, 3]);
+    assert_eq!(tabs(&desk, RIGHT, 0), [1, 3]);
 }
 
 #[test]
-fn an_app_remembered_on_a_free_screen_floats_on_that_screen() {
+fn a_remembered_column_that_closed_opens_again_at_its_place() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "notes", LEFT, 0);
+    open_in(&mut desk, 1, "agent", LEFT, 0);
+    open_in(&mut desk, 2, "product", LEFT, 1);
     desk.close_window(WindowId(1)).unwrap();
-    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
+    desk.close_window(WindowId(2)).unwrap();
 
-    let placement = open(&mut desk, 2, "notes", RIGHT);
+    open(&mut desk, 3, "product", CENTER);
+    let placement = open(&mut desk, 4, "agent", CENTER);
 
-    assert_eq!(floating_output(placement), LEFT);
+    assert_eq!(placement, Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(tabs(&desk, LEFT, 0), [4]);
+    assert_eq!(tabs(&desk, LEFT, 1), [3]);
+}
+
+#[test]
+fn a_remembered_column_that_is_there_takes_the_app_as_a_tab_when_the_screen_is_full() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    open_in(&mut desk, 3, "chat", RIGHT, 1);
+    desk.close_window(WindowId(3)).unwrap();
+
+    let placement = open(&mut desk, 4, "chat", LEFT);
+
+    assert_eq!(placement, Placement::Slot(slot(RIGHT, 1)));
+    assert_eq!(tabs(&desk, RIGHT, 1), [2, 4]);
 }
 
 #[test]
@@ -388,14 +442,13 @@ fn sending_to_an_occupied_center_stacks_and_leaves_its_window_there() {
 
     assert_eq!(tabs(&desk, CENTER, 0), [1, 2]);
     assert_eq!(active_tab(&desk, CENTER, 0), Some(2));
-    assert!(tabs(&desk, RIGHT, 0).is_empty());
+    assert!(desk.screen(RIGHT).unwrap().slots().is_empty());
 }
 
 #[test]
-fn sending_to_a_split_center_goes_to_the_slot_used_last() {
+fn sending_to_a_full_split_center_goes_to_the_column_used_last() {
     let mut desk = desk();
-    desk.set_layout(CENTER, LayoutKind::TwoThirdsOneThird)
-        .unwrap();
+    desk.set_layout(CENTER, LayoutKind::MainSide).unwrap();
     open_in(&mut desk, 1, "product", CENTER, 0);
     open_in(&mut desk, 2, "admin", CENTER, 1);
     open_in(&mut desk, 3, "editor", RIGHT, 0);
@@ -403,37 +456,31 @@ fn sending_to_a_split_center_goes_to_the_slot_used_last() {
     desk.send_to_center(WindowId(3)).unwrap();
 
     assert_eq!(place(&desk, 3), Placement::Slot(slot(CENTER, 1)));
+    assert_eq!(tabs(&desk, CENTER, 1), [2, 3]);
 }
 
 #[test]
-fn sending_to_an_empty_split_center_goes_to_its_first_slot() {
+fn sending_to_a_split_center_with_room_opens_a_column() {
     let mut desk = desk();
-    desk.set_layout(CENTER, LayoutKind::TwoThirdsOneThird)
-        .unwrap();
+    desk.set_layout(CENTER, LayoutKind::ThreeColumns).unwrap();
+    open_in(&mut desk, 1, "product", CENTER, 0);
+    open_in(&mut desk, 2, "editor", RIGHT, 0);
+
+    desk.send_to_center(WindowId(2)).unwrap();
+
+    assert_eq!(place(&desk, 2), Placement::Slot(slot(CENTER, 1)));
+    assert_eq!(desk.screen(CENTER).unwrap().slots().len(), 2);
+}
+
+#[test]
+fn sending_to_an_empty_center_opens_its_first_column() {
+    let mut desk = desk();
+    desk.set_layout(CENTER, LayoutKind::MainSide).unwrap();
     open_in(&mut desk, 1, "editor", RIGHT, 0);
 
     desk.send_to_center(WindowId(1)).unwrap();
 
     assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
-}
-
-#[test]
-fn sending_to_a_free_center_floats_the_window_at_its_size() {
-    let mut desk = desk();
-    desk.set_layout(CENTER, LayoutKind::Free).unwrap();
-    open(&mut desk, 1, "editor", RIGHT);
-    desk.float_window(WindowId(1), RIGHT, Rect::new(100, 120, 900, 700))
-        .unwrap();
-
-    desk.send_to_center(WindowId(1)).unwrap();
-
-    match place(&desk, 1) {
-        Placement::Floating { output, rect } => {
-            assert_eq!(output, CENTER);
-            assert_eq!(rect.size(), Size::new(900, 700));
-        }
-        other => panic!("expected a floating window, got {other:?}"),
-    }
 }
 
 #[test]
@@ -645,10 +692,7 @@ fn an_anchored_screen_offers_no_drop_zone() {
     let zones = desk.drop_zones(WindowId(2));
 
     assert!(!zones.is_empty());
-    assert!(zones.iter().all(|zone| match zone.target {
-        DropTarget::Slot(slot) => slot.output != CENTER,
-        DropTarget::Float(output) => output != CENTER,
-    }));
+    assert!(zones.iter().all(|zone| zone.slot.output != CENTER));
 }
 
 #[test]
@@ -657,10 +701,6 @@ fn shell_gestures_are_refused_on_an_anchored_screen() {
     anchor_game(&mut desk, 1);
     open(&mut desk, 2, "notes", LEFT);
 
-    assert_eq!(
-        desk.set_layout(CENTER, LayoutKind::Columns),
-        Err(ModelError::Anchored(CENTER))
-    );
     assert_eq!(
         desk.move_to_slot(WindowId(2), slot(CENTER, 0)),
         Err(ModelError::Anchored(CENTER))
@@ -718,6 +758,7 @@ fn going_fullscreen_on_another_screen_moves_the_window_there() {
 #[test]
 fn going_fullscreen_without_naming_a_screen_anchors_the_window_where_it_is() {
     let mut desk = desk();
+    open_in(&mut desk, 2, "notes", LEFT, 0);
     open_in(&mut desk, 1, "video", LEFT, 1);
 
     desk.set_fullscreen(WindowId(1), None).unwrap();
@@ -729,6 +770,7 @@ fn going_fullscreen_without_naming_a_screen_anchors_the_window_where_it_is() {
 #[test]
 fn going_fullscreen_on_its_own_screen_keeps_the_place_of_the_window() {
     let mut desk = desk();
+    open_in(&mut desk, 2, "notes", LEFT, 0);
     open_in(&mut desk, 1, "video", LEFT, 1);
 
     desk.set_fullscreen(WindowId(1), Some(LEFT)).unwrap();
@@ -847,12 +889,16 @@ fn a_window_under_a_side_game_cannot_be_sent_to_the_center() {
 fn an_anchored_screen_has_no_separation_to_grab() {
     let mut desk = desk();
     open_in(&mut desk, 1, "video", RIGHT, 0);
-    assert!(desk.separator(RIGHT).is_some());
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    assert_eq!(desk.separators(RIGHT).len(), 1);
 
     desk.set_anchored(WindowId(1), true).unwrap();
 
-    assert_eq!(desk.separator(RIGHT), None);
-    assert_eq!(desk.ratio_at(RIGHT, Point::new(900, 500)), None);
+    assert!(desk.separators(RIGHT).is_empty());
+    assert_eq!(
+        desk.move_separator(RIGHT, 0, Point::new(900, 500)),
+        Err(ModelError::Anchored(RIGHT))
+    );
 }
 
 #[test]
@@ -942,110 +988,114 @@ fn merging_slots_keeps_the_focused_window_visible() {
 }
 
 #[test]
-fn going_from_full_to_columns_leaves_the_second_slot_empty() {
+fn going_from_full_to_columns_moves_nothing() {
     let mut desk = desk();
     open_in(&mut desk, 1, "product", CENTER, 0);
     open_in(&mut desk, 2, "admin", CENTER, 0);
 
-    desk.set_layout(CENTER, LayoutKind::Columns).unwrap();
+    desk.set_layout(CENTER, LayoutKind::TwoColumns).unwrap();
 
+    assert_eq!(desk.screen(CENTER).unwrap().slots().len(), 1);
     assert_eq!(tabs(&desk, CENTER, 0), [1, 2]);
-    assert!(tabs(&desk, CENTER, 1).is_empty());
+    assert_eq!(geo(&desk, 2).frame, Rect::new(8, 48, 3424, 1384));
 }
 
 #[test]
-fn going_from_columns_to_rows_keeps_each_slot() {
+fn going_from_three_columns_to_two_merges_the_third_into_the_second() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "guide", RIGHT, 0);
-    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    desk.set_layout(RIGHT, LayoutKind::ThreeColumns).unwrap();
+    for (id, app) in [(1, "guide"), (2, "notes"), (3, "chat")] {
+        open_in(&mut desk, id, app, RIGHT, id as usize - 1);
+    }
 
-    desk.set_layout(RIGHT, LayoutKind::Rows).unwrap();
+    desk.set_layout(RIGHT, LayoutKind::TwoColumns).unwrap();
 
     assert_eq!(tabs(&desk, RIGHT, 0), [1]);
-    assert_eq!(tabs(&desk, RIGHT, 1), [2]);
-    assert_eq!(geo(&desk, 2).frame, Rect::new(8, 584, 1904, 488));
+    assert_eq!(tabs(&desk, RIGHT, 1), [2, 3]);
+    assert_eq!(active_tab(&desk, RIGHT, 1), Some(3));
 }
 
 #[test]
-fn going_to_free_floats_every_window_where_it_was() {
+fn changing_the_layout_of_an_anchored_screen_is_allowed() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "guide", RIGHT, 0);
-    open_in(&mut desk, 2, "notes", RIGHT, 1);
-    let guide = geo(&desk, 1).frame;
-    let notes = geo(&desk, 2).frame;
+    anchor_game(&mut desk, 1);
 
-    desk.set_layout(RIGHT, LayoutKind::Free).unwrap();
-
-    assert!(desk.screen(RIGHT).unwrap().slots().is_empty());
-    assert_eq!(
-        place(&desk, 1),
-        Placement::Floating {
-            output: RIGHT,
-            rect: guide,
-        }
-    );
-    assert_eq!(
-        place(&desk, 2),
-        Placement::Floating {
-            output: RIGHT,
-            rect: notes,
-        }
-    );
-}
-
-#[test]
-fn leaving_free_does_not_tidy_anything() {
-    let mut desk = desk();
-    open(&mut desk, 1, "blender", LEFT);
-    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
-
-    desk.set_layout(LEFT, LayoutKind::Columns).unwrap();
-
-    assert!(matches!(place(&desk, 1), Placement::Floating { .. }));
-    assert_eq!(desk.screen(LEFT).unwrap().slots().len(), 2);
-    assert!(tabs(&desk, LEFT, 0).is_empty());
-}
-
-#[test]
-fn two_thirds_one_third_is_refused_on_a_side_screen() {
-    let mut desk = desk();
-
-    let result = desk.set_layout(LEFT, LayoutKind::TwoThirdsOneThird);
+    desk.set_layout(CENTER, LayoutKind::TwoColumns).unwrap();
 
     assert_eq!(
-        result,
-        Err(ModelError::LayoutNotAllowed {
-            kind: LayoutKind::TwoThirdsOneThird,
-            role: OutputRole::Left,
-        })
+        desk.screen(CENTER).unwrap().layout(),
+        LayoutKind::TwoColumns
     );
-    assert_eq!(desk.screen(LEFT).unwrap().layout(), LayoutKind::Columns);
+    assert!(geo(&desk, 1).anchored);
 }
 
 #[test]
-fn the_center_accepts_two_thirds_one_third() {
+fn main_side_gives_two_thirds_to_the_left_column() {
     let mut desk = desk();
+    desk.set_layout(CENTER, LayoutKind::MainSide).unwrap();
     open_in(&mut desk, 1, "product", CENTER, 0);
+    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 3424, 1384));
 
-    desk.set_layout(CENTER, LayoutKind::TwoThirdsOneThird)
-        .unwrap();
+    open_in(&mut desk, 2, "admin", CENTER, 1);
 
-    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 2277, 1384));
+    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 2278, 1384));
+    assert_eq!(geo(&desk, 2).frame, Rect::new(2294, 48, 1138, 1384));
 }
 
 #[test]
-fn the_ratio_moves_the_separation_and_survives_a_layout_change() {
+fn a_separation_moves_and_its_widths_survive_a_layout_change() {
     let mut desk = desk();
     open_in(&mut desk, 1, "guide", RIGHT, 0);
     open_in(&mut desk, 2, "notes", RIGHT, 1);
 
-    desk.set_ratio(RIGHT, Ratio::from_percent(58)).unwrap();
+    assert_eq!(
+        desk.move_separator(RIGHT, 0, Point::new(1112, 500)),
+        Ok(true)
+    );
     assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 1100, 1024));
     assert_eq!(geo(&desk, 2).frame, Rect::new(1116, 48, 796, 1024));
+    assert_eq!(
+        desk.move_separator(RIGHT, 0, Point::new(1112, 500)),
+        Ok(false)
+    );
 
     desk.set_layout(RIGHT, LayoutKind::Full).unwrap();
-    desk.set_layout(RIGHT, LayoutKind::Columns).unwrap();
-    assert_eq!(desk.screen(RIGHT).unwrap().ratio(), Ratio::from_percent(58));
+    open_in(&mut desk, 3, "chat", LEFT, 0);
+    desk.set_layout(RIGHT, LayoutKind::TwoColumns).unwrap();
+    desk.move_to_slot(WindowId(2), slot(RIGHT, 1)).unwrap();
+    assert_eq!(geo(&desk, 2).frame, Rect::new(1116, 48, 796, 1024));
+}
+
+#[test]
+fn each_number_of_columns_keeps_its_own_widths() {
+    let mut desk = desk();
+    desk.set_layout(RIGHT, LayoutKind::ThreeColumns).unwrap();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    desk.move_separator(RIGHT, 0, Point::new(1112, 500))
+        .unwrap();
+    open_in(&mut desk, 3, "chat", RIGHT, 2);
+
+    assert_eq!(desk.separators(RIGHT).len(), 2);
+    assert_eq!(geo(&desk, 1).frame.w, 629);
+
+    desk.close_window(WindowId(3)).unwrap();
+    assert_eq!(geo(&desk, 1).frame.w, 1100);
+}
+
+#[test]
+fn the_widths_of_the_columns_are_kept_for_the_next_session() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    desk.move_separator(RIGHT, 0, Point::new(1112, 500))
+        .unwrap();
+
+    let mut next = self::desk().with_proportions(&desk.proportions());
+    open_in(&mut next, 1, "guide", RIGHT, 0);
+    open_in(&mut next, 2, "notes", RIGHT, 1);
+
+    assert_eq!(geo(&next, 1).frame, Rect::new(8, 48, 1100, 1024));
 }
 
 // Focus.
@@ -1213,9 +1263,9 @@ fn a_tiled_window_has_a_title_bar_above_its_client_area() {
     let window = geo(&desk, 1);
 
     assert_eq!(window.output, LEFT);
-    assert_eq!(window.frame, Rect::new(8, 48, 948, 1024));
-    assert_eq!(window.titlebar, Some(Rect::new(8, 48, 948, 38)));
-    assert_eq!(window.client, Rect::new(8, 86, 948, 986));
+    assert_eq!(window.frame, Rect::new(8, 48, 1904, 1024));
+    assert_eq!(window.titlebar, Some(Rect::new(8, 48, 1904, 38)));
+    assert_eq!(window.client, Rect::new(8, 86, 1904, 986));
     assert!(!window.floating);
 }
 
@@ -1251,7 +1301,7 @@ fn slots_stay_clear_of_the_reserved_zone() {
     let mut desk = Desk::new(outputs, Metrics::default());
     open_in(&mut desk, 1, "discord", LEFT, 0);
 
-    assert_eq!(geo(&desk, 1).frame, Rect::new(60, 48, 922, 1024));
+    assert_eq!(geo(&desk, 1).frame, Rect::new(60, 48, 1852, 1024));
 }
 
 #[test]
@@ -1268,7 +1318,7 @@ fn reserving_a_zone_moves_slots_and_floating_windows_out_of_it() {
     };
     desk.set_reserved(LEFT, dock).unwrap();
 
-    assert_eq!(geo(&desk, 1).frame, Rect::new(68, 48, 918, 1024));
+    assert_eq!(geo(&desk, 1).frame, Rect::new(68, 48, 1844, 1024));
     assert_eq!(geo(&desk, 2).frame, Rect::new(68, 100, 600, 400));
 }
 
@@ -1284,7 +1334,7 @@ fn a_reserved_zone_given_back_returns_to_the_slots() {
 
     desk.set_reserved(LEFT, Insets::ZERO).unwrap();
 
-    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 948, 1024));
+    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 1904, 1024));
 }
 
 #[test]
@@ -1306,7 +1356,7 @@ fn resizing_an_output_resizes_slots_and_keeps_floating_windows_inside() {
 
     desk.set_output_size(LEFT, Size::new(1280, 720)).unwrap();
 
-    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 628, 664));
+    assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 1264, 664));
     assert_eq!(geo(&desk, 2).frame, Rect::new(672, 312, 600, 400));
 }
 
@@ -1467,25 +1517,53 @@ fn windows_are_listed_from_the_one_focused_last() {
 // Drop zones (rule 2).
 
 #[test]
-fn every_slot_of_every_screen_is_a_drop_zone() {
+fn an_empty_screen_is_a_single_drop_zone() {
     let mut desk = desk();
     open(&mut desk, 1, "notes", LEFT);
 
     let zones = desk.drop_zones(WindowId(1));
 
-    let targets: Vec<_> = zones.iter().map(|zone| zone.target).collect();
-    assert_eq!(
-        targets,
-        [
-            DropTarget::Slot(slot(LEFT, 0)),
-            DropTarget::Slot(slot(LEFT, 1)),
-            DropTarget::Slot(slot(CENTER, 0)),
-            DropTarget::Slot(slot(RIGHT, 0)),
-            DropTarget::Slot(slot(RIGHT, 1)),
-        ]
-    );
-    assert_eq!(zones[0].rect, Rect::new(8, 8, 948, 1064));
+    let slots: Vec<_> = zones.iter().map(|zone| zone.slot).collect();
+    assert_eq!(slots, [slot(LEFT, 0), slot(CENTER, 0), slot(RIGHT, 0)]);
+    assert_eq!(zones[0].rect, Rect::new(8, 8, 1904, 1064));
     assert!(zones.iter().all(|zone| !zone.occupied));
+}
+
+#[test]
+fn a_screen_with_room_shows_its_columns_and_a_new_one_on_the_right() {
+    let mut desk = desk();
+    desk.set_layout(RIGHT, LayoutKind::ThreeColumns).unwrap();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open(&mut desk, 2, "notes", LEFT);
+
+    let zones: Vec<_> = desk
+        .drop_zones(WindowId(2))
+        .into_iter()
+        .filter(|zone| zone.slot.output == RIGHT)
+        .collect();
+
+    assert_eq!(zones.len(), 2);
+    assert_eq!(zones[0].rect, Rect::new(8, 8, 948, 1064));
+    assert!(zones[0].occupied);
+    assert_eq!(zones[1].slot, slot(RIGHT, 1));
+    assert!(!zones[1].occupied);
+}
+
+#[test]
+fn a_full_screen_shows_only_its_columns() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    open(&mut desk, 3, "chat", LEFT);
+
+    let zones = desk.drop_zones(WindowId(3));
+
+    let right: Vec<_> = zones
+        .iter()
+        .filter(|zone| zone.slot.output == RIGHT)
+        .collect();
+    assert_eq!(right.len(), 2);
+    assert!(right.iter().all(|zone| zone.occupied));
 }
 
 #[test]
@@ -1499,33 +1577,15 @@ fn a_zone_is_occupied_when_another_window_is_there() {
     let occupied: Vec<_> = zones
         .iter()
         .filter(|zone| zone.occupied)
-        .map(|zone| zone.target)
+        .map(|zone| zone.slot)
         .collect();
-    assert_eq!(occupied, [DropTarget::Slot(slot(RIGHT, 0))]);
-}
-
-#[test]
-fn a_free_screen_is_a_single_floating_drop_zone() {
-    let mut desk = desk();
-    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
-    open(&mut desk, 1, "notes", RIGHT);
-
-    let zones = desk.drop_zones(WindowId(1));
-
-    assert_eq!(
-        zones[0],
-        DropZone {
-            target: DropTarget::Float(LEFT),
-            rect: Rect::from_size(SIDE_SIZE),
-            occupied: false,
-        }
-    );
+    assert_eq!(occupied, [slot(RIGHT, 0)]);
 }
 
 // Suggestions for the placement bar.
 
 #[test]
-fn the_first_free_slot_of_the_screen_is_suggested() {
+fn a_new_column_is_suggested_while_there_is_room() {
     let mut desk = desk();
     open(&mut desk, 1, "term", LEFT);
     assert_eq!(desk.suggested_slot(WindowId(1)), Some(slot(LEFT, 0)));
@@ -1538,7 +1598,7 @@ fn the_first_free_slot_of_the_screen_is_suggested() {
 }
 
 #[test]
-fn with_every_slot_taken_the_one_focused_last_is_suggested() {
+fn with_every_column_open_the_one_focused_last_is_suggested() {
     let mut desk = desk();
     open_in(&mut desk, 1, "guide", RIGHT, 0);
     open_in(&mut desk, 2, "notes", RIGHT, 1);
@@ -1549,14 +1609,11 @@ fn with_every_slot_taken_the_one_focused_last_is_suggested() {
 }
 
 #[test]
-fn nothing_is_suggested_on_a_screen_without_usable_slot() {
+fn nothing_is_suggested_on_an_anchored_screen() {
     let mut desk = desk();
-    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
-    open(&mut desk, 1, "blender", LEFT);
     open(&mut desk, 2, "notes", CENTER);
     anchor_game(&mut desk, 3);
 
-    assert_eq!(desk.suggested_slot(WindowId(1)), None);
     assert_eq!(desk.suggested_slot(WindowId(2)), None);
     assert_eq!(desk.suggested_slot(WindowId(9)), None);
 }
@@ -1735,27 +1792,33 @@ fn a_stack_never_shows_a_minimized_tab_while_another_one_could_show() {
     assert!(geo(&desk, 2).minimized);
 }
 
-// Moving the separation between two slots.
+// Moving the separations between columns.
 
 #[test]
 fn the_separation_follows_the_pointer() {
     let mut desk = desk();
     open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
 
-    let ratio = desk.ratio_at(RIGHT, Point::new(1112, 500)).unwrap();
-    desk.set_ratio(RIGHT, ratio).unwrap();
+    desk.move_separator(RIGHT, 0, Point::new(1112, 500))
+        .unwrap();
 
     assert_eq!(geo(&desk, 1).frame, Rect::new(8, 48, 1100, 1024));
-    assert_eq!(desk.separator(RIGHT), Some(Rect::new(1108, 8, 8, 1064)));
+    assert_eq!(desk.separators(RIGHT), [Rect::new(1108, 8, 8, 1064)]);
 }
 
 #[test]
 fn a_screen_in_one_piece_has_no_separation() {
-    let desk = desk();
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
 
-    assert_eq!(desk.separator(CENTER), None);
-    assert_eq!(desk.ratio_at(CENTER, Point::new(1000, 500)), None);
-    assert_eq!(desk.separator(OutputId(99)), None);
+    assert!(desk.separators(RIGHT).is_empty());
+    assert!(desk.separators(CENTER).is_empty());
+    assert!(desk.separators(OutputId(99)).is_empty());
+    assert_eq!(
+        desk.move_separator(RIGHT, 0, Point::new(900, 500)),
+        Ok(false)
+    );
 }
 
 // Windows that draw their own title bar.
@@ -1770,7 +1833,7 @@ fn a_window_with_its_own_title_bar_gets_none_from_the_shell() {
     let window = geo(&desk, 1);
     assert_eq!(window.titlebar, None);
     assert_eq!(window.client, window.frame);
-    assert_eq!(window.frame, Rect::new(8, 48, 948, 1024));
+    assert_eq!(window.frame, Rect::new(8, 48, 1904, 1024));
 }
 
 #[test]
@@ -1834,13 +1897,6 @@ impl Lcg {
 #[test]
 fn any_sequence_of_operations_keeps_the_desk_consistent() {
     const OUTPUTS: [OutputId; 3] = [LEFT, CENTER, RIGHT];
-    const LAYOUTS: [LayoutKind; 5] = [
-        LayoutKind::Full,
-        LayoutKind::Columns,
-        LayoutKind::Rows,
-        LayoutKind::Free,
-        LayoutKind::TwoThirdsOneThird,
-    ];
     const APPS: [&str; 4] = ["discord", "browser", "code", "game"];
 
     for seed in 1..=8 {
@@ -1869,8 +1925,11 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                     desk.float_window(window, output, rect)
                 }
                 5 => desk.send_to_center(window),
-                6 => desk.set_layout(output, LAYOUTS[rng.next(5) as usize]),
-                7 => desk.set_ratio(output, Ratio::from_permille(rng.next(1000) as u16)),
+                6 => desk.set_layout(output, LayoutKind::ALL[rng.next(4) as usize]),
+                7 => {
+                    let point = Point::new(rng.next(4000) as i32 - 300, 500);
+                    desk.move_separator(output, index, point).map(drop)
+                }
                 8 => desk.focus(window),
                 9 => desk.set_anchored(window, rng.next(2) == 0),
                 10 => match desk.suggested_slot(window) {
@@ -1959,11 +2018,10 @@ fn every_occupied_slot_has_its_group_of_capsules() {
 }
 
 #[test]
-fn an_empty_slot_and_a_free_screen_have_no_capsules() {
+fn a_screen_without_tidied_window_has_no_capsules() {
     let mut desk = desk();
-    open_in(&mut desk, 1, "guide", LEFT, 1);
+    open_in(&mut desk, 1, "guide", LEFT, 0);
     open(&mut desk, 2, "gimp", RIGHT);
-    desk.set_layout(RIGHT, LayoutKind::Free).unwrap();
 
     let slots: Vec<_> = desk
         .capsule_groups()
@@ -1971,7 +2029,7 @@ fn an_empty_slot_and_a_free_screen_have_no_capsules() {
         .map(|group| group.stack)
         .collect();
 
-    assert_eq!(slots, [StackId::Slot(slot(LEFT, 1))]);
+    assert_eq!(slots, [StackId::Slot(slot(LEFT, 0))]);
 }
 
 #[test]
@@ -1983,20 +2041,6 @@ fn an_anchored_screen_has_no_capsules() {
 
     assert_eq!(group(&desk, CENTER, 0), None);
     assert!(group(&desk, LEFT, 0).is_some());
-}
-
-#[test]
-fn the_capsules_of_the_bottom_row_sit_under_the_separation() {
-    let mut desk = desk();
-    desk.set_layout(LEFT, LayoutKind::Rows).unwrap();
-    open_in(&mut desk, 1, "guide", LEFT, 0);
-    open_in(&mut desk, 2, "notes", LEFT, 1);
-
-    let separation = desk.separator(LEFT).unwrap();
-    let bottom = group(&desk, LEFT, 1).unwrap();
-
-    assert_eq!(bottom.band, Rect::new(8, separation.bottom(), 1904, 32));
-    assert_eq!(geo(&desk, 2).frame.y, bottom.band.bottom() + 8);
 }
 
 #[test]
@@ -2026,6 +2070,7 @@ fn the_capsules_show_which_tab_took_over_from_a_minimized_one() {
 fn a_drop_zone_is_still_the_whole_slot() {
     let mut desk = desk();
     open_in(&mut desk, 1, "guide", LEFT, 0);
+    open_in(&mut desk, 3, "notes", LEFT, 1);
     open(&mut desk, 2, "gimp", RIGHT);
 
     let zones = desk.drop_zones(WindowId(2));
@@ -2062,7 +2107,9 @@ fn a_maximized_window_leaves_its_slot_and_covers_the_screen() {
     desk.maximize(WindowId(1)).unwrap();
 
     assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
-    assert!(tabs(&desk, LEFT, 0).is_empty());
+    // Its column closed behind it.
+    assert_eq!(desk.screen(LEFT).unwrap().slots().len(), 1);
+    assert_eq!(tabs(&desk, LEFT, 0), [2]);
     assert!(covered(&desk, LEFT));
     let maximized = geo(&desk, 1);
     assert!(maximized.maximized && maximized.visible && maximized.focused);
@@ -2088,8 +2135,8 @@ fn the_capsules_of_maximized_windows_sit_at_the_top_of_the_middle() {
         }
     );
     // The slots keep their capsules, nothing shown in them.
-    let notes = group(&desk, LEFT, 1).unwrap();
-    assert_eq!(notes.band, Rect::new(964, 8, 948, 32));
+    let notes = group(&desk, LEFT, 0).unwrap();
+    assert_eq!(notes.band, Rect::new(8, 8, 1904, 32));
     assert_eq!(notes.shown, None);
 }
 
@@ -2098,7 +2145,7 @@ fn a_tab_of_a_slot_brings_the_split_back_and_keeps_the_maximized_window() {
     let mut desk = split_left();
     desk.maximize(WindowId(1)).unwrap();
 
-    desk.activate_tab(slot(LEFT, 1), 0).unwrap();
+    desk.activate_tab(slot(LEFT, 0), 0).unwrap();
 
     assert!(!covered(&desk, LEFT));
     assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
@@ -2113,7 +2160,7 @@ fn a_tab_of_a_slot_brings_the_split_back_and_keeps_the_maximized_window() {
 fn the_capsule_of_a_maximized_window_covers_the_screen_again() {
     let mut desk = split_left();
     desk.maximize(WindowId(1)).unwrap();
-    desk.activate_tab(slot(LEFT, 1), 0).unwrap();
+    desk.activate_tab(slot(LEFT, 0), 0).unwrap();
 
     desk.activate_tab(StackId::Maximized(LEFT), 0).unwrap();
 
@@ -2207,20 +2254,48 @@ fn a_maximized_window_goes_back_to_the_last_slot_when_its_own_is_gone() {
 }
 
 #[test]
-fn a_maximized_window_floats_back_on_a_free_screen() {
+fn a_maximized_window_reopens_its_column_at_its_place() {
     let mut desk = split_left();
-    desk.maximize(WindowId(2)).unwrap();
-    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
+    desk.maximize(WindowId(1)).unwrap();
+    assert_eq!(desk.screen(LEFT).unwrap().slots().len(), 1);
 
-    desk.unmaximize(WindowId(2)).unwrap();
+    desk.unmaximize(WindowId(1)).unwrap();
 
-    assert_eq!(floating_output(place(&desk, 2)), LEFT);
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(tabs(&desk, LEFT, 1), [2]);
 }
 
 #[test]
-fn a_free_screen_takes_maximized_windows_too() {
+fn a_maximized_tab_goes_back_to_its_column_as_a_tab() {
     let mut desk = desk();
-    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
+    desk.set_layout(LEFT, LayoutKind::ThreeColumns).unwrap();
+    open_in(&mut desk, 1, "guide", LEFT, 0);
+    open_in(&mut desk, 2, "wiki", LEFT, 0);
+    desk.maximize(WindowId(2)).unwrap();
+
+    desk.unmaximize(WindowId(2)).unwrap();
+
+    assert_eq!(tabs(&desk, LEFT, 0), [1, 2]);
+    assert_eq!(desk.screen(LEFT).unwrap().slots().len(), 1);
+}
+
+#[test]
+fn a_maximized_window_restored_on_an_empty_screen_opens_a_column() {
+    let mut desk = desk();
+    open(&mut desk, 1, "gimp", LEFT);
+    desk.move_to_slot(WindowId(1), slot(LEFT, 0)).unwrap();
+    open_in(&mut desk, 2, "notes", LEFT, 1);
+    desk.maximize(WindowId(2)).unwrap();
+    desk.close_window(WindowId(1)).unwrap();
+
+    desk.unmaximize(WindowId(2)).unwrap();
+
+    assert_eq!(place(&desk, 2), Placement::Slot(slot(LEFT, 0)));
+}
+
+#[test]
+fn a_screen_without_column_takes_maximized_windows_too() {
+    let mut desk = desk();
     open(&mut desk, 1, "gimp", LEFT);
 
     desk.maximize(WindowId(1)).unwrap();
@@ -2430,27 +2505,6 @@ fn a_maximized_habit_on_an_anchored_screen_opens_floating_elsewhere() {
     let placement = open(&mut desk, 3, "gimp", CENTER);
 
     assert_eq!(floating_output(placement), RIGHT);
-}
-
-#[test]
-fn with_rows_the_capsules_of_both_slots_go_to_the_top_under_a_maximized_window() {
-    let mut desk = split_left();
-    desk.set_layout(LEFT, LayoutKind::Rows).unwrap();
-    open(&mut desk, 3, "gimp", LEFT);
-
-    desk.maximize(WindowId(3)).unwrap();
-
-    assert_eq!(
-        group(&desk, LEFT, 0).unwrap().band,
-        Rect::new(8, 8, 948, 32)
-    );
-    assert_eq!(
-        group(&desk, LEFT, 1).unwrap().band,
-        Rect::new(964, 8, 948, 32)
-    );
-
-    desk.activate_tab(slot(LEFT, 1), 0).unwrap();
-    assert_eq!(group(&desk, LEFT, 1).unwrap().band.y, 544);
 }
 
 #[test]

@@ -1,10 +1,11 @@
-//! One output and what it holds: a layout, its slots, floating windows.
+//! One output and what it holds: a layout, its columns, floating windows.
 
 use crate::geometry::{Insets, Point, Rect, Size};
 use crate::ids::{OutputId, WindowId};
-use crate::layout::{LayoutKind, Ratio};
+use crate::layout::{LayoutKind, Split};
 use crate::metrics::Metrics;
 use crate::output::{OutputInfo, OutputRole};
+use crate::proportions::ScreenProportions;
 use crate::stack::TabStack;
 
 /// A window that is not in a slot.
@@ -20,7 +21,10 @@ pub struct FloatingWindow {
 pub struct Screen {
     info: OutputInfo,
     layout: LayoutKind,
-    ratio: Ratio,
+    /// The widths the user chose, by layout and number of columns.
+    splits: ScreenProportions,
+    /// The columns shown, left to right: never more than the layout allows,
+    /// never an empty one (a column of minimized windows still counts).
     slots: Vec<TabStack>,
     /// Bottom to top.
     floating: Vec<FloatingWindow>,
@@ -35,12 +39,11 @@ pub struct Screen {
 
 impl Screen {
     pub fn new(info: OutputInfo) -> Self {
-        let layout = LayoutKind::default_for(info.role);
         Self {
+            layout: LayoutKind::default_for(info.role),
             info,
-            layout,
-            ratio: Ratio::default(),
-            slots: vec![TabStack::default(); layout.slot_count()],
+            splits: ScreenProportions::new(),
+            slots: Vec::new(),
             floating: Vec::new(),
             maximized: TabStack::default(),
             covered: false,
@@ -64,8 +67,28 @@ impl Screen {
         self.layout
     }
 
-    pub fn ratio(&self) -> Ratio {
-        self.ratio
+    /// The proportions of the columns shown.
+    pub fn split(&self) -> Split {
+        self.split_of(self.slots.len())
+    }
+
+    /// The proportions of `count` columns of the current layout.
+    fn split_of(&self, count: usize) -> Split {
+        self.splits
+            .get(&self.layout)
+            .and_then(|splits| splits.get(&count))
+            .cloned()
+            .unwrap_or_else(|| Split::default_for(self.layout, count))
+    }
+
+    /// The widths the user chose for this screen.
+    pub fn splits(&self) -> &ScreenProportions {
+        &self.splits
+    }
+
+    /// Another column can be opened.
+    pub fn has_room(&self) -> bool {
+        self.slots.len() < self.layout.max_columns()
     }
 
     pub fn slots(&self) -> &[TabStack] {
@@ -91,9 +114,18 @@ impl Screen {
         self.anchored
     }
 
+    /// The columns shown. None on a screen without tidied windows.
     pub fn slot_rects(&self, metrics: &Metrics) -> Vec<Rect> {
-        self.layout
-            .slot_rects(self.info.usable(), self.ratio, metrics.gap)
+        self.columns(self.slots.len(), metrics)
+    }
+
+    /// Where `count` columns would be.
+    pub fn columns(&self, count: usize, metrics: &Metrics) -> Vec<Rect> {
+        if count == 0 {
+            return Vec::new();
+        }
+        self.split_of(count)
+            .column_rects(self.info.usable(), metrics.gap)
     }
 
     /// Each slot from top to bottom: the band of its capsules, then the
@@ -105,42 +137,38 @@ impl Screen {
             .collect()
     }
 
-    /// Where the capsules of each slot go: the band above it. Under
-    /// maximized windows the middle of the screen is hidden: with `Rows`,
-    /// both groups then go to the top, side by side.
+    /// Where the capsules of each slot go: the band above it.
     pub fn slot_bands(&self, metrics: &Metrics) -> Vec<Rect> {
-        let (layout, ratio) = if self.covered && self.layout == LayoutKind::Rows {
-            (LayoutKind::Columns, Ratio::HALF)
-        } else {
-            (self.layout, self.ratio)
-        };
-        layout
-            .slot_rects(self.info.usable(), ratio, metrics.gap)
+        self.slot_parts(metrics)
             .into_iter()
-            .map(|slot| slot.split_rows(metrics.capsule_height, metrics.gap).0)
+            .map(|(band, _)| band)
             .collect()
     }
 
     /// What a maximized window takes: the band of its capsules, the middle
     /// half of the top of the screen, then the frame of the window, as the
-    /// single slot of `Full` would have it.
+    /// single column would have it.
     pub fn maximized_parts(&self, metrics: &Metrics) -> (Rect, Rect) {
-        let whole = LayoutKind::Full.slot_rects(self.info.usable(), self.ratio, metrics.gap);
+        let whole =
+            Split::default_for(self.layout, 1).column_rects(self.info.usable(), metrics.gap);
         let whole = whole.first().copied().unwrap_or_default();
         let (band, frame) = whole.split_rows(metrics.capsule_height, metrics.gap);
         let band = Rect::new(band.x + band.w / 4, band.y, band.w / 2, band.h);
         (band, frame)
     }
 
-    /// The gap between the two slots, if the layout has an adjustable one.
-    pub fn separator(&self, metrics: &Metrics) -> Option<Rect> {
-        self.layout
-            .separator(self.info.usable(), self.ratio, metrics.gap)
+    /// The gaps between the columns shown, left to right.
+    pub fn separators(&self, metrics: &Metrics) -> Vec<Rect> {
+        if self.slots.len() < 2 {
+            return Vec::new();
+        }
+        self.split().separators(self.info.usable(), metrics.gap)
     }
 
-    /// The ratio that puts the separation under `point`.
-    pub fn ratio_at(&self, metrics: &Metrics, point: Point) -> Option<Ratio> {
-        self.layout.ratio_at(self.info.usable(), metrics.gap, point)
+    /// The proportions with separation `index` under `point`.
+    pub fn split_at(&self, metrics: &Metrics, index: usize, point: Point) -> Option<Split> {
+        self.split()
+            .with_separator(index, self.info.usable(), metrics.gap, point)
     }
 
     /// Where floating windows may be: the usable area minus the gap.
@@ -177,6 +205,37 @@ impl Screen {
 
     pub(crate) fn slot_mut(&mut self, index: usize) -> Option<&mut TabStack> {
         self.slots.get_mut(index)
+    }
+
+    /// Puts `id` in column `index`, as a tab if it holds windows already;
+    /// one past the last column opens a new one on the right. `false` when
+    /// there is no such column, or no room for another.
+    pub(crate) fn push_to_slot(&mut self, index: usize, id: WindowId) -> bool {
+        if index == self.slots.len() && self.has_room() {
+            self.slots.push(TabStack::default());
+        }
+        match self.slots.get_mut(index) {
+            Some(stack) => {
+                stack.push(id);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Opens a column holding `id` at `index` (or at the right end), the
+    /// columns from there on moving right. There must be room.
+    pub(crate) fn insert_slot(&mut self, index: usize, id: WindowId) -> usize {
+        let index = index.min(self.slots.len());
+        let mut stack = TabStack::default();
+        stack.push(id);
+        self.slots.insert(index, stack);
+        index
+    }
+
+    /// Closes the columns left without a window; the others widen.
+    pub(crate) fn compact(&mut self) {
+        self.slots.retain(|stack| !stack.is_empty());
     }
 
     /// Takes `id` out of the screen, releasing the anchor if it held it.
@@ -223,8 +282,16 @@ impl Screen {
         self.covered = covered;
     }
 
-    pub(crate) fn set_ratio(&mut self, ratio: Ratio) {
-        self.ratio = ratio;
+    /// Keeps `split` for the current layout and as many columns.
+    pub(crate) fn set_split(&mut self, split: Split) {
+        self.splits
+            .entry(self.layout)
+            .or_default()
+            .insert(split.count(), split);
+    }
+
+    pub(crate) fn set_splits(&mut self, splits: ScreenProportions) {
+        self.splits = splits;
     }
 
     pub(crate) fn set_anchored(&mut self, anchored: Option<WindowId>) {
@@ -248,32 +315,16 @@ impl Screen {
         }
     }
 
-    /// Switches layout, redistributing windows:
-    /// - fewer slots: the slots in excess merge into the last one, as tabs;
-    /// - more slots: the new ones start empty;
-    /// - `Free`: every window floats where it was in its slot;
-    /// - leaving `Free`: floating windows stay floating.
-    pub(crate) fn apply_layout(&mut self, layout: LayoutKind, metrics: &Metrics) {
-        let count = layout.slot_count();
-        if count == 0 {
-            let parts = self.slot_parts(metrics);
-            for (stack, (_, rect)) in std::mem::take(&mut self.slots).into_iter().zip(parts) {
-                let active = stack.active();
-                let hidden = stack.windows().iter().filter(|id| Some(**id) != active);
-                // The shown tab ends up above the ones it was hiding.
-                for id in hidden.chain(active.iter()) {
-                    self.floating.push(FloatingWindow { id: *id, rect });
-                }
+    /// Switches layout. Columns beyond what the new one allows merge into
+    /// the last one it keeps, as tabs; nothing else moves.
+    pub(crate) fn apply_layout(&mut self, layout: LayoutKind) {
+        let count = layout.max_columns();
+        if self.slots.len() > count {
+            let extras = self.slots.split_off(count);
+            let last = &mut self.slots[count - 1];
+            for extra in extras {
+                last.absorb(extra);
             }
-        } else {
-            if self.slots.len() > count {
-                let extras = self.slots.split_off(count);
-                let last = &mut self.slots[count - 1];
-                for extra in extras {
-                    last.absorb(extra);
-                }
-            }
-            self.slots.resize_with(count, TabStack::default);
         }
         self.layout = layout;
     }

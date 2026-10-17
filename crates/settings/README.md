@@ -40,6 +40,7 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 |---|---|---|
 | Apparence | thème clair ou sombre, couleur d'accent (celle du thème, huit pastilles, ou `#rrggbb` saisi) | aussitôt |
 | Écrans et dock | connecteur de chaque écran | **au prochain démarrage** |
+| | disposition de chaque écran : plein écran, 2 colonnes, 3 colonnes, maître / esclave | aussitôt |
 | | dock de chaque écran : à gauche, à droite, en bas, aucun | aussitôt |
 | Mode jeu | bords collants et leur délai, affichage direct, fréquence variable | aussitôt |
 | Souris | vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons | aussitôt |

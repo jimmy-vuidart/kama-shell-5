@@ -7,7 +7,9 @@ use std::process::Command;
 use std::time::Instant;
 
 use coquille_apps::Catalog;
-use coquille_model::{AppMemory, OutputId, OutputRole, Point as ModelPoint, Rect, WindowId};
+use coquille_model::{
+    AppMemory, OutputId, OutputRole, Point as ModelPoint, Proportions, Rect, WindowId,
+};
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
@@ -39,7 +41,7 @@ use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
 
 use crate::backend::Backend;
-use crate::config::{GlassConfig, WallpaperConfig};
+use crate::config::{GlassConfig, LayoutConfig, WallpaperConfig};
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
 use crate::decoration::paint::Painter;
@@ -74,6 +76,8 @@ pub struct Options {
     pub sticky_edges_ms: u64,
     pub glass: GlassConfig,
     pub wallpaper: WallpaperConfig,
+    /// How each screen arranges the windows tidied into it.
+    pub layout: LayoutConfig,
 }
 
 /// A screen as clients see it.
@@ -178,6 +182,8 @@ pub struct State {
     /// Where habits are kept between sessions, and what was written last.
     pub state_dir: Option<PathBuf>,
     pub saved_habits: AppMemory,
+    /// The widths of the columns as written last.
+    pub saved_proportions: Proportions,
 
     /// Something changed: a frame is due.
     pub redraw_needed: bool,
@@ -272,6 +278,11 @@ impl State {
             .map(crate::persist::load)
             .unwrap_or_default();
         info!(habits = habits.len(), "habits loaded");
+        let proportions = options
+            .state_dir
+            .as_deref()
+            .map(crate::persist::load_proportions)
+            .unwrap_or_default();
 
         let mut state = Self {
             start_time: Instant::now(),
@@ -315,9 +326,10 @@ impl State {
             config_path: options.config_path,
             outputs,
             backend,
-            shell: Shell::new(infos, habits.clone()),
+            shell: Shell::new(infos, habits.clone(), &proportions, &options.layout),
             state_dir: options.state_dir,
             saved_habits: habits,
+            saved_proportions: proportions,
             theme: match options.accent {
                 Some(accent) => Theme::new(options.theme).with_accent(accent),
                 None => Theme::new(options.theme),

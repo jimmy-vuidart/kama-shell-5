@@ -56,6 +56,20 @@ right = "DP-1"
 # l'écran et le pilote la proposent. En cas de scintillement, mettre `false`.
 # vrr = true
 
+# Disposition de chaque écran : jusqu'à combien de colonnes les fenêtres
+# rangées se partagent l'écran. Une seule fenêtre rangée prend tout l'écran,
+# deux se le partagent, et ainsi de suite jusqu'au maximum ; au-delà, elles
+# s'empilent en onglets. "full" (plein écran : une colonne), "two-columns"
+# (deux colonnes, moitié-moitié), "three-columns" (trois colonnes, un tiers
+# chacune) ou "main-side" (maître à gauche, deux tiers, et esclave à droite,
+# un tiers). Super + glisser une séparation règle les largeurs, gardées d'une
+# session à l'autre. L'écran « Paramètres » réécrit ces lignes.
+# Sans cette section : deux colonnes sur les côtés, plein écran au centre.
+[layout]
+# left = "two-columns"
+# center = "full"
+# right = "two-columns"
+
 # Le dock, sur l'écran gauche. Les applications de la barre, dans l'ordre :
 # le nom de leur fichier .desktop (sans l'extension) ou ce que leurs fenêtres
 # annoncent. Le menu au clic droit (« Épingler », « Retirer des favoris ») et

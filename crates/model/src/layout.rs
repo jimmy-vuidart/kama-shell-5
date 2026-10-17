@@ -1,4 +1,8 @@
-//! The short list of per-screen layouts and the slots they define.
+//! The short list of per-screen layouts and the columns they make.
+//!
+//! A layout gives a screen its greatest number of columns. The columns shown
+//! are the ones that hold windows: one column takes the whole screen, two
+//! share it, and so on up to the greatest number.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,109 +10,42 @@ use crate::geometry::{Insets, Point, Rect};
 use crate::ids::OutputId;
 use crate::output::OutputRole;
 
-/// Share of a split given to its first slot, in thousandths.
-///
-/// Kept between 20 % and 80 % so that neither slot can vanish.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(from = "u16", into = "u16")]
-pub struct Ratio(u16);
-
-impl Ratio {
-    pub const MIN: Self = Self(200);
-    pub const MAX: Self = Self(800);
-    pub const HALF: Self = Self(500);
-
-    pub fn from_permille(permille: u16) -> Self {
-        Self(permille.clamp(Self::MIN.0, Self::MAX.0))
-    }
-
-    pub fn from_percent(percent: u8) -> Self {
-        Self::from_permille(u16::from(percent) * 10)
-    }
-
-    /// From a fraction such as `0.58`. Not-a-number gives [`Ratio::HALF`].
-    pub fn from_fraction(fraction: f64) -> Self {
-        if fraction.is_nan() {
-            return Self::HALF;
-        }
-        // The clamp keeps the value far inside `u16`, so the cast is exact.
-        Self(
-            (fraction * 1000.0)
-                .round()
-                .clamp(f64::from(Self::MIN.0), f64::from(Self::MAX.0)) as u16,
-        )
-    }
-
-    pub const fn permille(self) -> u16 {
-        self.0
-    }
-
-    pub fn fraction(self) -> f64 {
-        f64::from(self.0) / 1000.0
-    }
-
-    /// Length of the first slot out of `total` pixels, rounded to nearest.
-    pub fn first_len(self, total: i32) -> i32 {
-        let scaled = i64::from(total) * i64::from(self.0);
-        // `scaled / 1000` is no larger than `total`, so it fits back in `i32`.
-        ((scaled + 500) / 1000) as i32
-    }
-}
-
-impl Default for Ratio {
-    fn default() -> Self {
-        Self::HALF
-    }
-}
-
-impl From<u16> for Ratio {
-    fn from(permille: u16) -> Self {
-        Self::from_permille(permille)
-    }
-}
-
-impl From<Ratio> for u16 {
-    fn from(ratio: Ratio) -> Self {
-        ratio.0
-    }
-}
-
-/// How a screen arranges its windows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// How a screen arranges the windows tidied into it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LayoutKind {
-    /// One slot filling the screen.
+    /// One column: the windows of the screen are tabs of the same pile.
     Full,
-    /// Two slots side by side.
-    Columns,
-    /// Two slots, top and bottom.
-    Rows,
-    /// No slot: overlapping floating windows, like a classic desktop.
-    Free,
-    /// Two thirds plus one third; only on the ultra-wide center.
-    TwoThirdsOneThird,
+    /// Up to two columns, half and half.
+    TwoColumns,
+    /// Up to three columns, a third each.
+    ThreeColumns,
+    /// A main column on the left and a side column: two thirds and a third.
+    MainSide,
 }
 
 impl LayoutKind {
-    pub const fn slot_count(self) -> usize {
-        match self {
-            Self::Free => 0,
-            Self::Full => 1,
-            Self::Columns | Self::Rows | Self::TwoThirdsOneThird => 2,
-        }
-    }
+    /// Every layout, in the order the settings show them.
+    pub const ALL: [Self; 4] = [
+        Self::Full,
+        Self::TwoColumns,
+        Self::ThreeColumns,
+        Self::MainSide,
+    ];
 
-    pub const fn allowed_on(self, role: OutputRole) -> bool {
+    /// The greatest number of columns the screen shows.
+    pub const fn max_columns(self) -> usize {
         match self {
-            Self::TwoThirdsOneThird => matches!(role, OutputRole::Center),
-            _ => true,
+            Self::Full => 1,
+            Self::TwoColumns | Self::MainSide => 2,
+            Self::ThreeColumns => 3,
         }
     }
 
     /// Landscape side screens share by default; the center stays whole.
     pub const fn default_for(role: OutputRole) -> Self {
         if role.is_side() {
-            Self::Columns
+            Self::TwoColumns
         } else {
             Self::Full
         }
@@ -117,65 +54,146 @@ impl LayoutKind {
     /// User-visible name.
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Full => "Plein",
-            Self::Columns => "Côte à côte",
-            Self::Rows => "Haut / bas",
-            Self::Free => "Écran libre",
-            Self::TwoThirdsOneThird => "Deux tiers + un tiers",
+            Self::Full => "Plein écran",
+            Self::TwoColumns => "2 colonnes",
+            Self::ThreeColumns => "3 colonnes",
+            Self::MainSide => "Maître / esclave",
         }
     }
 
-    /// The gap between the two slots, where the user grabs to change the
-    /// ratio. `None` for layouts in one piece or with a fixed split.
-    pub fn separator(self, area: Rect, ratio: Ratio, gap: i32) -> Option<Rect> {
-        let first = *self.slot_rects(area, ratio, gap).first()?;
+    /// The name in the configuration file.
+    pub const fn name(self) -> &'static str {
         match self {
-            Self::Columns => Some(Rect::new(first.right(), first.y, gap, first.h)),
-            Self::Rows => Some(Rect::new(first.x, first.bottom(), first.w, gap)),
-            _ => None,
+            Self::Full => "full",
+            Self::TwoColumns => "two-columns",
+            Self::ThreeColumns => "three-columns",
+            Self::MainSide => "main-side",
         }
     }
 
-    /// The ratio that puts the separation under `point`.
-    pub fn ratio_at(self, area: Rect, gap: i32, point: Point) -> Option<Ratio> {
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
+/// The widths of the columns shown, in thousandths of the room they share
+/// (the usable width minus the gaps). They add up to 1000, and each column
+/// keeps at least [`Split::MIN`] so that none can vanish.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Split(Vec<u16>);
+
+impl Split {
+    /// The narrowest a column can be, when there are several: a fifth.
+    pub const MIN: u16 = 200;
+    const WHOLE: u16 = 1000;
+
+    /// The proportions `count` columns of `kind` start with.
+    pub fn default_for(kind: LayoutKind, count: usize) -> Self {
+        Self(match (kind, count) {
+            (_, 0 | 1) => vec![Self::WHOLE],
+            (LayoutKind::MainSide, 2) => vec![667, 333],
+            (_, 2) => vec![500, 500],
+            (_, 3) => vec![333, 334, 333],
+            // No layout has more columns: shared evenly all the same.
+            (_, count) => {
+                let each = Self::WHOLE / count as u16;
+                let mut widths = vec![each; count];
+                widths[count - 1] = Self::WHOLE - each * (count as u16 - 1);
+                widths
+            }
+        })
+    }
+
+    /// `widths` when they are proportions of `count` columns, else those
+    /// `count` columns of `kind` start with. For proportions read back from
+    /// a file.
+    pub fn normalized(widths: Vec<u16>, kind: LayoutKind, count: usize) -> Self {
+        let sum: u32 = widths.iter().map(|width| u32::from(*width)).sum();
+        let wide_enough = count < 2 || widths.iter().all(|width| *width >= Self::MIN);
+        if widths.len() == count.max(1) && sum == u32::from(Self::WHOLE) && wide_enough {
+            Self(widths)
+        } else {
+            Self::default_for(kind, count)
+        }
+    }
+
+    pub fn widths(&self) -> &[u16] {
+        &self.0
+    }
+
+    pub fn count(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The columns inside `area`, left to right, with `gap` between them
+    /// and along the edges of `area`. The last one ends exactly at the gap
+    /// before the right edge.
+    pub fn column_rects(&self, area: Rect, gap: i32) -> Vec<Rect> {
         let inner = area.inset(Insets::uniform(gap));
-        let (offset, room) = match self {
-            Self::Columns => (point.x - inner.x, inner.w - gap),
-            Self::Rows => (point.y - inner.y, inner.h - gap),
-            _ => return None,
-        };
+        let count = self.count() as i32;
+        let room = inner.w - gap * (count - 1);
+        let mut rects = Vec::with_capacity(self.count());
+        let mut reached = 0u32;
+        let mut start = 0;
+        for (index, width) in self.0.iter().enumerate() {
+            reached += u32::from(*width);
+            let end = share(room, reached);
+            let x = inner.x + start + index as i32 * gap;
+            rects.push(Rect::new(x, inner.y, end - start, inner.h));
+            start = end;
+        }
+        rects
+    }
+
+    /// The gaps between the columns, where the user grabs to change their
+    /// widths: one fewer than the columns.
+    pub fn separators(&self, area: Rect, gap: i32) -> Vec<Rect> {
+        let rects = self.column_rects(area, gap);
+        rects
+            .windows(2)
+            .map(|pair| Rect::new(pair[0].right(), pair[0].y, gap, pair[0].h))
+            .collect()
+    }
+
+    /// The proportions with separation `index` under `point`: only the two
+    /// columns on either side of it change, and neither goes below
+    /// [`Split::MIN`]. `None` when there is no such separation.
+    pub fn with_separator(&self, index: usize, area: Rect, gap: i32, point: Point) -> Option<Self> {
+        if index + 1 >= self.count() {
+            return None;
+        }
+        let inner = area.inset(Insets::uniform(gap));
+        let room = inner.w - gap * (self.count() as i32 - 1);
         if room <= 0 {
             return None;
         }
         // The pointer holds the middle of the gap.
-        let first = offset - gap / 2;
-        Some(Ratio::from_fraction(f64::from(first) / f64::from(room)))
-    }
-
-    /// Slot rectangles inside `area`, with `gap` between slots and along the
-    /// edges of `area`. `ratio` only matters to `Columns` and `Rows`.
-    pub fn slot_rects(self, area: Rect, ratio: Ratio, gap: i32) -> Vec<Rect> {
-        let inner = area.inset(Insets::uniform(gap));
-        match self {
-            Self::Free => Vec::new(),
-            Self::Full => vec![inner],
-            Self::Columns => {
-                let (left, right) = inner.split_columns(ratio.first_len(inner.w - gap), gap);
-                vec![left, right]
-            }
-            Self::Rows => {
-                let (top, bottom) = inner.split_rows(ratio.first_len(inner.h - gap), gap);
-                vec![top, bottom]
-            }
-            Self::TwoThirdsOneThird => {
-                let (wide, narrow) = inner.split_columns(((inner.w - gap) * 2 + 1) / 3, gap);
-                vec![wide, narrow]
-            }
-        }
+        let offset = point.x - inner.x - index as i32 * gap - gap / 2;
+        let at = (i64::from(offset) * i64::from(Self::WHOLE) + i64::from(room) / 2)
+            .div_euclid(i64::from(room));
+        let before: i64 = self.0[..index].iter().map(|width| i64::from(*width)).sum();
+        let pair = i64::from(self.0[index]) + i64::from(self.0[index + 1]);
+        let min = i64::from(Self::MIN);
+        // `pair` is at least twice the minimum, so the clamp has room, and
+        // the result is no larger than `pair`, which fits in `u16`.
+        let first = (at - before).clamp(min, pair - min);
+        let mut widths = self.0.clone();
+        widths[index] = first as u16;
+        widths[index + 1] = (pair - first) as u16;
+        Some(Self(widths))
     }
 }
 
-/// A slot of a screen. Slots are numbered left to right, top to bottom.
+/// The part of `room` pixels up to `reached` thousandths, rounded to nearest.
+fn share(room: i32, reached: u32) -> i32 {
+    let scaled = i64::from(room) * i64::from(reached);
+    // No larger than `room` as long as `reached` is at most 1000.
+    ((scaled + 500) / 1000) as i32
+}
+
+/// A slot of a screen: one of the columns it shows. Slots are numbered left
+/// to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SlotId {
     pub output: OutputId,
@@ -218,73 +236,27 @@ mod tests {
     const SIDE: Rect = Rect::new(52, 0, 1868, 1080);
     const ULTRAWIDE: Rect = Rect::new(0, 0, 3440, 1440);
 
-    #[test]
-    fn ratio_is_kept_between_20_and_80_percent() {
-        assert_eq!(Ratio::from_percent(5), Ratio::MIN);
-        assert_eq!(Ratio::from_percent(95), Ratio::MAX);
-        assert_eq!(Ratio::from_fraction(1.5), Ratio::MAX);
-        assert_eq!(Ratio::from_fraction(-3.0), Ratio::MIN);
-        assert_eq!(Ratio::from_percent(58).permille(), 580);
+    fn split(widths: &[u16]) -> Split {
+        Split(widths.to_vec())
     }
 
     #[test]
-    fn ratio_from_not_a_number_is_half() {
-        assert_eq!(Ratio::from_fraction(f64::NAN), Ratio::HALF);
+    fn greatest_numbers_of_columns() {
+        assert_eq!(LayoutKind::Full.max_columns(), 1);
+        assert_eq!(LayoutKind::TwoColumns.max_columns(), 2);
+        assert_eq!(LayoutKind::ThreeColumns.max_columns(), 3);
+        assert_eq!(LayoutKind::MainSide.max_columns(), 2);
     }
 
     #[test]
-    fn ratio_first_len_rounds_to_nearest() {
-        assert_eq!(Ratio::HALF.first_len(1844), 922);
-        assert_eq!(Ratio::from_percent(58).first_len(1844), 1070);
-        assert_eq!(Ratio::HALF.first_len(5), 3);
-    }
-
-    #[test]
-    fn deserialized_ratio_is_clamped() {
-        let ratio: Ratio = serde_json::from_str("950").unwrap();
-
-        assert_eq!(ratio, Ratio::MAX);
-    }
-
-    #[test]
-    fn slot_counts() {
-        assert_eq!(LayoutKind::Full.slot_count(), 1);
-        assert_eq!(LayoutKind::Columns.slot_count(), 2);
-        assert_eq!(LayoutKind::Rows.slot_count(), 2);
-        assert_eq!(LayoutKind::Free.slot_count(), 0);
-        assert_eq!(LayoutKind::TwoThirdsOneThird.slot_count(), 2);
-    }
-
-    #[test]
-    fn two_thirds_one_third_is_only_allowed_on_the_center() {
-        assert!(LayoutKind::TwoThirdsOneThird.allowed_on(OutputRole::Center));
-        assert!(!LayoutKind::TwoThirdsOneThird.allowed_on(OutputRole::Left));
-        assert!(!LayoutKind::TwoThirdsOneThird.allowed_on(OutputRole::Right));
-    }
-
-    #[test]
-    fn every_other_layout_is_allowed_everywhere() {
-        for kind in [
-            LayoutKind::Full,
-            LayoutKind::Columns,
-            LayoutKind::Rows,
-            LayoutKind::Free,
-        ] {
-            for role in [OutputRole::Left, OutputRole::Center, OutputRole::Right] {
-                assert!(kind.allowed_on(role), "{kind:?} on {role:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn side_screens_default_to_columns_and_the_center_to_full() {
+    fn side_screens_default_to_two_columns_and_the_center_to_full() {
         assert_eq!(
             LayoutKind::default_for(OutputRole::Left),
-            LayoutKind::Columns
+            LayoutKind::TwoColumns
         );
         assert_eq!(
             LayoutKind::default_for(OutputRole::Right),
-            LayoutKind::Columns
+            LayoutKind::TwoColumns
         );
         assert_eq!(
             LayoutKind::default_for(OutputRole::Center),
@@ -293,24 +265,78 @@ mod tests {
     }
 
     #[test]
-    fn full_fills_the_area_minus_the_gap() {
+    fn layouts_are_named_as_in_the_file() {
+        for kind in LayoutKind::ALL {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, format!("\"{}\"", kind.name()));
+            assert_eq!(LayoutKind::named(kind.name()), Some(kind));
+        }
+        assert_eq!(LayoutKind::named("rows"), None);
+    }
+
+    #[test]
+    fn default_proportions() {
+        assert_eq!(Split::default_for(LayoutKind::Full, 1), split(&[1000]));
         assert_eq!(
-            LayoutKind::Full.slot_rects(SIDE, Ratio::HALF, 8),
+            Split::default_for(LayoutKind::TwoColumns, 2),
+            split(&[500, 500])
+        );
+        assert_eq!(
+            Split::default_for(LayoutKind::ThreeColumns, 2),
+            split(&[500, 500])
+        );
+        assert_eq!(
+            Split::default_for(LayoutKind::ThreeColumns, 3),
+            split(&[333, 334, 333])
+        );
+        assert_eq!(
+            Split::default_for(LayoutKind::MainSide, 2),
+            split(&[667, 333])
+        );
+        assert_eq!(Split::default_for(LayoutKind::MainSide, 1), split(&[1000]));
+    }
+
+    #[test]
+    fn proportions_read_back_are_repaired() {
+        let kind = LayoutKind::ThreeColumns;
+        assert_eq!(
+            Split::normalized(vec![300, 400, 300], kind, 3),
+            split(&[300, 400, 300])
+        );
+        // Wrong count, wrong sum, a column too narrow.
+        assert_eq!(
+            Split::normalized(vec![500, 500], kind, 3),
+            Split::default_for(kind, 3)
+        );
+        assert_eq!(
+            Split::normalized(vec![300, 300, 300], kind, 3),
+            Split::default_for(kind, 3)
+        );
+        assert_eq!(
+            Split::normalized(vec![100, 450, 450], kind, 3),
+            Split::default_for(kind, 3)
+        );
+    }
+
+    #[test]
+    fn one_column_fills_the_area_minus_the_gap() {
+        assert_eq!(
+            split(&[1000]).column_rects(SIDE, 8),
             vec![Rect::new(60, 8, 1852, 1064)]
         );
     }
 
     #[test]
-    fn columns_split_evenly_by_default() {
+    fn two_columns_split_evenly_by_default() {
         assert_eq!(
-            LayoutKind::Columns.slot_rects(SIDE, Ratio::HALF, 8),
+            split(&[500, 500]).column_rects(SIDE, 8),
             vec![Rect::new(60, 8, 922, 1064), Rect::new(990, 8, 922, 1064)]
         );
     }
 
     #[test]
-    fn columns_follow_the_ratio() {
-        let rects = LayoutKind::Columns.slot_rects(SIDE, Ratio::from_percent(58), 8);
+    fn columns_follow_their_proportions() {
+        let rects = split(&[580, 420]).column_rects(SIDE, 8);
 
         assert_eq!(
             rects,
@@ -320,86 +346,94 @@ mod tests {
     }
 
     #[test]
-    fn rows_split_top_and_bottom() {
-        assert_eq!(
-            LayoutKind::Rows.slot_rects(SIDE, Ratio::HALF, 8),
-            vec![Rect::new(60, 8, 1852, 528), Rect::new(60, 544, 1852, 528)]
-        );
-    }
-
-    #[test]
-    fn two_thirds_one_third_ignores_the_ratio() {
-        let rects = LayoutKind::TwoThirdsOneThird.slot_rects(ULTRAWIDE, Ratio::MIN, 8);
+    fn three_columns_end_at_the_right_edge() {
+        let rects = Split::default_for(LayoutKind::ThreeColumns, 3).column_rects(ULTRAWIDE, 8);
 
         assert_eq!(
             rects,
-            vec![Rect::new(8, 8, 2277, 1424), Rect::new(2293, 8, 1139, 1424)]
+            vec![
+                Rect::new(8, 8, 1135, 1424),
+                Rect::new(1151, 8, 1138, 1424),
+                Rect::new(2297, 8, 1135, 1424),
+            ]
         );
-        assert_eq!(rects[1].right(), 3440 - 8);
+        assert_eq!(rects[2].right(), 3440 - 8);
     }
 
     #[test]
-    fn the_separation_of_columns_is_the_gap_between_them() {
+    fn main_side_gives_two_thirds_to_the_main_column() {
+        let rects = Split::default_for(LayoutKind::MainSide, 2).column_rects(ULTRAWIDE, 8);
+
+        assert_eq!(
+            rects,
+            vec![Rect::new(8, 8, 2278, 1424), Rect::new(2294, 8, 1138, 1424)]
+        );
+    }
+
+    #[test]
+    fn separators_are_the_gaps_between_columns() {
         let area = Rect::new(0, 0, 1920, 1080);
 
         assert_eq!(
-            LayoutKind::Columns.separator(area, Ratio::HALF, 8),
-            Some(Rect::new(956, 8, 8, 1064))
+            split(&[500, 500]).separators(area, 8),
+            vec![Rect::new(956, 8, 8, 1064)]
         );
-        assert_eq!(
-            LayoutKind::Rows.separator(area, Ratio::HALF, 8),
-            Some(Rect::new(8, 536, 1904, 8))
-        );
+        assert_eq!(split(&[333, 334, 333]).separators(area, 8).len(), 2);
+        assert!(split(&[1000]).separators(area, 8).is_empty());
     }
 
     #[test]
-    fn layouts_with_a_fixed_or_no_split_have_no_separation() {
-        let area = Rect::new(0, 0, 3440, 1440);
-        for kind in [
-            LayoutKind::Full,
-            LayoutKind::Free,
-            LayoutKind::TwoThirdsOneThird,
-        ] {
-            assert_eq!(kind.separator(area, Ratio::HALF, 8), None, "{kind:?}");
-            assert_eq!(
-                kind.ratio_at(area, 8, Point::new(900, 700)),
-                None,
-                "{kind:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_ratio_puts_the_separation_under_the_pointer() {
+    fn a_separation_follows_the_pointer() {
         let area = Rect::new(0, 0, 1920, 1080);
 
         assert_eq!(
-            LayoutKind::Columns.ratio_at(area, 8, Point::new(1112, 500)),
-            Some(Ratio::from_percent(58))
-        );
-        assert_eq!(
-            LayoutKind::Rows.ratio_at(area, 8, Point::new(900, 540)),
-            Some(Ratio::HALF)
+            split(&[500, 500]).with_separator(0, area, 8, Point::new(1112, 500)),
+            Some(split(&[580, 420]))
         );
     }
 
     #[test]
-    fn the_ratio_under_the_pointer_stays_within_bounds() {
-        let area = Rect::new(52, 0, 1868, 1080);
+    fn moving_a_separation_only_changes_its_two_columns() {
+        let area = Rect::new(0, 0, 1920, 1080);
+        let three = split(&[333, 334, 333]);
+        let moved = three
+            .with_separator(1, area, 8, Point::new(1500, 500))
+            .unwrap();
 
+        assert_eq!(moved.widths()[0], 333);
         assert_eq!(
-            LayoutKind::Columns.ratio_at(area, 8, Point::new(0, 500)),
-            Some(Ratio::MIN)
+            moved.widths().iter().map(|w| u32::from(*w)).sum::<u32>(),
+            1000
         );
-        assert_eq!(
-            LayoutKind::Columns.ratio_at(area, 8, Point::new(5000, 500)),
-            Some(Ratio::MAX)
-        );
+        assert!(moved.widths()[1] > 334);
+        let separation = moved.separators(area, 8)[1];
+        assert!((separation.x + 4 - 1500).abs() <= 2, "{separation:?}");
     }
 
     #[test]
-    fn free_has_no_slot() {
-        assert!(LayoutKind::Free.slot_rects(SIDE, Ratio::HALF, 8).is_empty());
+    fn a_separation_keeps_both_columns_wide_enough() {
+        let three = split(&[333, 334, 333]);
+
+        let far_left = three
+            .with_separator(1, SIDE, 8, Point::new(0, 500))
+            .unwrap();
+        assert_eq!(far_left, split(&[333, 200, 467]));
+        let far_right = three
+            .with_separator(1, SIDE, 8, Point::new(5000, 500))
+            .unwrap();
+        assert_eq!(far_right, split(&[333, 467, 200]));
+    }
+
+    #[test]
+    fn there_is_no_separation_past_the_last_column() {
+        assert_eq!(
+            split(&[500, 500]).with_separator(1, SIDE, 8, Point::new(900, 500)),
+            None
+        );
+        assert_eq!(
+            split(&[1000]).with_separator(0, SIDE, 8, Point::new(900, 500)),
+            None
+        );
     }
 
     #[test]
@@ -407,7 +441,7 @@ mod tests {
         let area = Rect::new(0, 0, 100, 100).inset(Insets::uniform(10));
 
         assert_eq!(
-            LayoutKind::Full.slot_rects(area, Ratio::HALF, 0),
+            split(&[1000]).column_rects(area, 0),
             vec![Rect::new(10, 10, 80, 80)]
         );
     }

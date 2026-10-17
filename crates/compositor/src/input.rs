@@ -1,7 +1,7 @@
 //! Input events: shortcuts, focus on click, title bar buttons.
 
 use coquille_model::{
-    DropTarget, Insets, OutputId, Placement, Point as ModelPoint, Rect, Size, StackId, WindowId,
+    Insets, OutputId, Placement, Point as ModelPoint, Rect, Size, StackId, WindowId,
 };
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
@@ -135,9 +135,9 @@ pub enum Gesture {
         from: Point<f64, Logical>,
         frame: Rect,
     },
-    /// Dragging the separation between the two slots of a screen, with the
-    /// shell modifier.
-    Splitting { output: OutputId },
+    /// Dragging separation `index` between the columns of a screen, with
+    /// the shell modifier.
+    Splitting { output: OutputId, index: usize },
     /// Dragging a window with the shell modifier, or by its capsule: drop
     /// zones are shown, and releasing on one places the window.
     Placing { window: WindowId },
@@ -290,7 +290,6 @@ impl State {
                     shift: modifiers.shift,
                     ctrl: modifiers.ctrl,
                     alt: modifiers.alt,
-                    keycode,
                     syms: &handle.raw_syms(),
                     modified: handle.modified_sym(),
                 };
@@ -345,11 +344,6 @@ impl State {
                 self.backend.switch_vt(vt);
                 return;
             }
-            // Layouts apply to the screen the pointer is on.
-            Action::SetLayout(kind) => match screen {
-                Some(screen) => desk.set_layout(screen.id, kind),
-                None => Ok(()),
-            },
             Action::CycleTab { forward } => {
                 match desk.focused().and_then(|id| desk.placement(id)) {
                     Some(Placement::Slot(slot)) => desk.cycle_tab(slot, forward),
@@ -692,11 +686,11 @@ impl State {
         if hit.surface.is_none() && !pointer.is_grabbed() {
             let shape = match self.gesture {
                 Some(Gesture::Resizing { edges, .. }) => edges.cursor(),
-                Some(Gesture::Splitting { output }) => self.split_cursor(output),
+                Some(Gesture::Splitting { .. }) => CursorIcon::ColResize,
                 Some(_) => CursorIcon::Default,
                 None => match (hit.resize, self.separator_at(location)) {
                     (Some(edges), _) => edges.cursor(),
-                    (None, Some(output)) if self.mod_held() => self.split_cursor(output),
+                    (None, Some(_)) if self.mod_held() => CursorIcon::ColResize,
                     _ => CursorIcon::Default,
                 },
             };
@@ -769,7 +763,9 @@ impl State {
                     edges.apply(frame, moved.x, moved.y, self.min_size()),
                 );
             }
-            Some(Gesture::Splitting { output }) => self.move_separation(output, location),
+            Some(Gesture::Splitting { output, index }) => {
+                self.move_separation(output, index, location)
+            }
             _ => {}
         }
     }
@@ -800,46 +796,34 @@ impl State {
         }
     }
 
-    /// The screen whose separation is close enough to `location` to be
-    /// grabbed.
-    fn separator_at(&self, location: Point<f64, Logical>) -> Option<OutputId> {
+    /// The screen and the separation between its columns close enough to
+    /// `location` to be grabbed.
+    fn separator_at(&self, location: Point<f64, Logical>) -> Option<(OutputId, usize)> {
         let point = model_point(location);
         let screen = self.shell.screen_at(point)?;
-        let gap = self
-            .shell
-            .desk
-            .separator(screen.id)?
-            .translated(screen.rect.origin());
-        let reach = Rect::new(
-            gap.x - SEPARATOR_REACH,
-            gap.y - SEPARATOR_REACH,
-            gap.w + 2 * SEPARATOR_REACH,
-            gap.h + 2 * SEPARATOR_REACH,
-        );
-        reach.contains(point).then_some(screen.id)
+        let gaps = self.shell.desk.separators(screen.id);
+        let index = gaps.iter().position(|gap| {
+            let gap = gap.translated(screen.rect.origin());
+            let reach = Rect::new(
+                gap.x - SEPARATOR_REACH,
+                gap.y - SEPARATOR_REACH,
+                gap.w + 2 * SEPARATOR_REACH,
+                gap.h + 2 * SEPARATOR_REACH,
+            );
+            reach.contains(point)
+        })?;
+        Some((screen.id, index))
     }
 
-    /// The pointer shape for the separation of a screen: sideways between
-    /// columns, up and down between rows.
-    fn split_cursor(&self, output: OutputId) -> CursorIcon {
-        match self.shell.desk.separator(output) {
-            Some(gap) if gap.w > gap.h => CursorIcon::RowResize,
-            _ => CursorIcon::ColResize,
-        }
-    }
-
-    /// Puts the separation of a screen under the pointer.
-    fn move_separation(&mut self, output: OutputId, location: Point<f64, Logical>) {
+    /// Puts separation `index` of a screen under the pointer.
+    fn move_separation(&mut self, output: OutputId, index: usize, location: Point<f64, Logical>) {
         let Some(origin) = self.shell.screen(output).map(|screen| screen.rect.origin()) else {
             return;
         };
         let point = model_point(location);
         let local = ModelPoint::new(point.x - origin.x, point.y - origin.y);
-        let desk = &mut self.shell.desk;
-        if let Some(ratio) = desk.ratio_at(output, local) {
-            if desk.set_ratio(output, ratio).is_ok() {
-                self.apply_arrangement();
-            }
+        if self.shell.desk.move_separator(output, index, local) == Ok(true) {
+            self.apply_arrangement();
         }
     }
 
@@ -912,30 +896,10 @@ impl State {
     fn drop_window(&mut self, window: WindowId, location: Point<f64, Logical>) {
         let point = model_point(location);
         let zones = self.shell.drop_zones(window);
-        let Some((zone, target, _)) = zones.into_iter().find(|(rect, ..)| rect.contains(point))
-        else {
+        let Some((_, slot, _)) = zones.into_iter().find(|(rect, ..)| rect.contains(point)) else {
             return;
         };
-        let result = match target {
-            DropTarget::Slot(slot) => self.shell.desk.move_to_slot(window, slot),
-            // On a free screen the window lands with its title bar under the
-            // pointer.
-            DropTarget::Float(output) => {
-                let bar = self.shell.desk.metrics().titlebar_height;
-                let size = self
-                    .shell
-                    .by_id(window)
-                    .map_or_else(|| zone.size(), |managed| managed.frame().size());
-                let rect = Rect::new(
-                    point.x - zone.x - size.w / 2,
-                    point.y - zone.y - bar / 2,
-                    size.w,
-                    size.h,
-                );
-                self.shell.desk.float_window(window, output, rect)
-            }
-        };
-        if let Err(error) = result {
+        if let Err(error) = self.shell.desk.move_to_slot(window, slot) {
             warn!(%error, "cannot place the window there");
         }
         self.apply_arrangement();
@@ -1215,10 +1179,11 @@ impl State {
                             self.follow_client_size(&surface);
                         }
                     }
+                    // Its widths are kept once the separation is let go.
+                    Some(Gesture::Splitting { .. }) => self.save_proportions(),
                     Some(
                         Gesture::Pressed { .. }
                         | Gesture::Moving { .. }
-                        | Gesture::Splitting { .. }
                         | Gesture::BarPressed { button: None },
                     )
                     | None => {}
@@ -1255,8 +1220,8 @@ impl State {
         }
         let mod_held = self.mod_held();
         // With the modifier, the separation wins over the windows next to it.
-        if let Some(output) = self.separator_at(location).filter(|_| mod_held) {
-            self.gesture = Some(Gesture::Splitting { output });
+        if let Some((output, index)) = self.separator_at(location).filter(|_| mod_held) {
+            self.gesture = Some(Gesture::Splitting { output, index });
             return true;
         }
         if let Some(capsule) = hit.capsule {
