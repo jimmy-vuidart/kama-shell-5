@@ -57,6 +57,15 @@ impl XdgShellHandler for State {
         }
     }
 
+    /// Maximized over the slots of its screen.
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.maximize_toplevel(&surface, true);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.maximize_toplevel(&surface, false);
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         self.unmap_window(surface.wl_surface());
     }
@@ -145,6 +154,20 @@ impl State {
         if after == Some(before) && toplevel.is_initial_configure_sent() {
             toplevel.send_configure();
         }
+    }
+
+    /// A mapped toplevel asks to be maximized or restored; it is answered
+    /// even when nothing changes. While it sets itself up, it only repeats
+    /// how it was last closed: the habits of its application decide instead.
+    fn maximize_toplevel(&mut self, surface: &ToplevelSurface, maximized: bool) {
+        let Some(managed) = self.shell.by_surface(surface.wl_surface()) else {
+            return;
+        };
+        let before = managed.geometry;
+        if !managed.setting_up() {
+            self.set_maximized(before.id, maximized);
+        }
+        self.answer(surface, before);
     }
 
     /// Keeps a popup inside the screen of its window, or of its panel.

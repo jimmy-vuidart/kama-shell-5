@@ -14,6 +14,8 @@ const TEXT_RIGHT_GAP: i32 = 8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TitlebarButton {
     Minimize,
+    /// Maximizes the window over the slots of its screen.
+    Maximize,
     Close,
 }
 
@@ -29,11 +31,15 @@ pub struct TitlebarLayout {
 
 impl TitlebarLayout {
     /// Buttons are right-aligned. When the bar is too narrow, the leftmost
-    /// one is dropped; the close button always stays.
+    /// ones are dropped; the close button always stays.
     pub fn new(size: Size, with_buttons: bool) -> Self {
-        let wanted = [TitlebarButton::Close, TitlebarButton::Minimize]
-            .into_iter()
-            .filter(|_| with_buttons);
+        let wanted = [
+            TitlebarButton::Close,
+            TitlebarButton::Maximize,
+            TitlebarButton::Minimize,
+        ]
+        .into_iter()
+        .filter(|_| with_buttons);
 
         // Laid out from the right edge; the first one (close) is never dropped.
         let mut buttons = Vec::new();
@@ -80,7 +86,8 @@ mod tests {
         assert_eq!(
             layout.buttons,
             vec![
-                (TitlebarButton::Minimize, Rect::new(320, 0, 38, 38)),
+                (TitlebarButton::Minimize, Rect::new(282, 0, 38, 38)),
+                (TitlebarButton::Maximize, Rect::new(320, 0, 38, 38)),
                 (TitlebarButton::Close, Rect::new(358, 0, 38, 38)),
             ]
         );
@@ -105,7 +112,7 @@ mod tests {
     fn the_text_fills_the_room_between_the_icon_and_the_buttons() {
         let layout = TitlebarLayout::new(BAR, true);
 
-        assert_eq!(layout.text, Rect::new(40, 0, 272, 38));
+        assert_eq!(layout.text, Rect::new(40, 0, 234, 38));
     }
 
     #[test]
@@ -134,6 +141,10 @@ mod tests {
         );
         assert_eq!(
             layout.button_at(Point::new(320, 0)),
+            Some(TitlebarButton::Maximize)
+        );
+        assert_eq!(
+            layout.button_at(Point::new(282, 0)),
             Some(TitlebarButton::Minimize)
         );
     }

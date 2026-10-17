@@ -249,7 +249,8 @@ impl State {
         let habits = desk.memory().iter().map(|(app, place)| Habit {
             app: app.as_str().to_owned(),
             screen: place.role,
-            slot: place.slot,
+            // A maximized habit tells the slot it goes back to, if any.
+            slot: place.slot.unwrap_or(0),
         });
         Snapshot {
             theme: self.theme.kind.into(),

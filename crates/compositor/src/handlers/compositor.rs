@@ -82,6 +82,9 @@ impl CompositorHandler for State {
                 managed.window.on_commit();
                 let covered = managed.window.bbox().size;
                 covers_anew = std::mem::replace(&mut managed.covered, covered) != covered;
+                if covered.w > 0 && covered.h > 0 && managed.drawn_at.is_none() {
+                    managed.drawn_at = Some(std::time::Instant::now());
+                }
             }
         }
 

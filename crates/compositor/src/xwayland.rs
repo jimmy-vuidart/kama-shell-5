@@ -194,6 +194,19 @@ impl State {
         }
     }
 
+    /// An X11 window asks to be maximized or restored.
+    fn maximize_x11(&mut self, window: &X11Surface, maximized: bool) {
+        let Some(managed) = self.shell.by_x11(window) else {
+            return;
+        };
+        if managed.setting_up() {
+            // Told again what it is.
+            self.apply_arrangement();
+        } else {
+            self.set_maximized(managed.id, maximized);
+        }
+    }
+
     fn x11_id(&self, window: &X11Surface) -> Option<WindowId> {
         self.shell.by_x11(window).map(|managed| managed.id)
     }
@@ -364,6 +377,16 @@ impl XwmHandler for State {
         if let Some(id) = self.x11_id(&window) {
             self.leave_fullscreen(id);
         }
+    }
+
+    /// Maximized over the slots of its screen, as for Wayland windows, and
+    /// with the same patience while the window sets itself up.
+    fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.maximize_x11(&window, true);
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.maximize_x11(&window, false);
     }
 
     /// Games ask to be minimized when they lose the focus; a fullscreen one

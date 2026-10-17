@@ -5,7 +5,7 @@
 
 use coquille_model::{
     AppKey, AppMemory, CapsuleGroup, Desk, DropTarget, Metrics, OpenRequest, OutputId, OutputInfo,
-    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, SlotId, WindowGeometry,
+    OutputRole, Placement, Point as ModelPoint, Rect, Size as ModelSize, StackId, WindowGeometry,
     WindowId,
 };
 use smithay::backend::allocator::Fourcc;
@@ -18,6 +18,8 @@ use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::xwayland::X11Surface;
+use std::time::{Duration, Instant};
+
 use tracing::{debug, info, warn};
 
 use crate::decoration::capsules::{CapsuleButton, GroupLayout};
@@ -62,10 +64,23 @@ pub struct ManagedWindow {
     pub user_sized: bool,
     /// How much room its surfaces took at their last commit.
     pub covered: Size<i32, Logical>,
+    /// When it first drew something.
+    pub drawn_at: Option<Instant>,
     pub chrome: Chrome,
 }
 
+/// How long after a window first draws its client is taken to be setting
+/// itself up as it was last closed rather than answering the user.
+const SETTING_UP: Duration = Duration::from_secs(1);
+
 impl ManagedWindow {
+    /// The window has just appeared, or not yet: what its client asks for
+    /// now is how it was last closed. Maximized or not, its habits decide.
+    pub fn setting_up(&self) -> bool {
+        self.drawn_at
+            .is_none_or(|drawn| drawn.elapsed() < SETTING_UP)
+    }
+
     /// The whole decorated window, in the global space.
     pub fn frame(&self) -> Rect {
         self.geometry.frame.translated(self.origin)
@@ -86,7 +101,8 @@ impl ManagedWindow {
     }
 }
 
-/// The capsules of one slot, as they are drawn above it.
+/// The capsules of one stack, as they are drawn: above a slot, or at the
+/// top of the middle of the screen for maximized windows.
 pub struct CapsuleGroupView {
     pub group: CapsuleGroup,
     /// Top-left corner of its screen in the global space.
@@ -110,8 +126,8 @@ impl CapsuleGroupView {
 /// A capsule under a point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapsuleHit {
-    pub slot: SlotId,
-    /// Its position in the stack of the slot.
+    pub stack: StackId,
+    /// Its position in the stack.
     pub index: usize,
     pub window: WindowId,
     /// The button of the capsule there, if any.
@@ -262,7 +278,7 @@ impl Shell {
             // lost windows since.
             let window = *view.group.windows.get(index)?;
             Some(CapsuleHit {
-                slot: view.group.slot,
+                stack: view.group.stack,
                 index,
                 window,
                 button: view.layout.button_at(local).map(|(_, button)| button),
@@ -271,7 +287,7 @@ impl Shell {
     }
 
     /// Takes the model's capsules, keeping what is already painted for the
-    /// slots that still have some.
+    /// stacks that still have some.
     fn sync_capsules(&mut self) {
         let mut painted = std::mem::take(&mut self.capsules);
         let groups = self.desk.capsule_groups();
@@ -279,11 +295,11 @@ impl Shell {
             .into_iter()
             .map(|group| {
                 let origin = self
-                    .screen(group.slot.output)
+                    .screen(group.stack.output())
                     .map_or_else(ModelPoint::default, |screen| screen.rect.origin());
                 let known = painted
                     .iter()
-                    .position(|view| view.group.slot == group.slot)
+                    .position(|view| view.group.stack == group.stack)
                     .map(|index| painted.swap_remove(index));
                 match known {
                     Some(view) => CapsuleGroupView {
@@ -321,7 +337,9 @@ impl Shell {
         }
     }
 
-    /// Repaints the capsules whose look changed.
+    /// Repaints the capsules whose look changed. The group of the maximized
+    /// windows of a screen comes first: the groups of its slots keep clear
+    /// of it.
     fn refresh_capsules(
         &mut self,
         painter: &mut Painter,
@@ -331,7 +349,18 @@ impl Shell {
         let Self {
             windows, capsules, ..
         } = self;
+        // The box of each group of maximized windows, relative to its screen.
+        let mut maximized: Vec<(OutputId, Rect)> = Vec::new();
         for view in capsules {
+            let band = view.group.band;
+            let output = view.group.stack.output();
+            let is_maximized = matches!(view.group.stack, StackId::Maximized(_));
+            let avoid = maximized
+                .iter()
+                .find(|(screen, rect)| {
+                    *screen == output && rect.y < band.bottom() && rect.bottom() > band.y
+                })
+                .map(|(_, rect)| rect.translated(ModelPoint::new(-band.x, -band.y)));
             let capsule = |id: &WindowId| {
                 let managed = windows.iter().find(|managed| managed.id == *id)?;
                 Some(CapsuleSpec {
@@ -344,21 +373,26 @@ impl Shell {
                 })
             };
             let spec = GroupSpec {
-                size: view.group.band.size(),
+                size: band.size(),
                 capsules: view.group.windows.iter().filter_map(capsule).collect(),
                 hovered: hover
-                    .filter(|hit| hit.slot == view.group.slot)
+                    .filter(|hit| hit.stack == view.group.stack)
                     .map(|hit| (hit.index, hit.button)),
                 theme: theme.kind,
                 accent: theme.accent,
+                maximized: is_maximized,
+                avoid,
             };
-            if view.spec.as_ref() == Some(&spec) {
-                continue;
+            if view.spec.as_ref() != Some(&spec) {
+                let painted = painter.capsule_group(&spec);
+                view.buffer = painted.as_ref().map(|group| texture(&group.pixmap));
+                view.layout = painted.map(|group| group.layout).unwrap_or_default();
+                view.spec = Some(spec);
             }
-            let painted = painter.capsule_group(&spec);
-            view.buffer = painted.as_ref().map(|group| texture(&group.pixmap));
-            view.layout = painted.map(|group| group.layout).unwrap_or_default();
-            view.spec = Some(spec);
+            if is_maximized && !view.layout.capsules.is_empty() {
+                let rect = view.layout.rect.translated(band.origin());
+                maximized.push((output, rect));
+            }
         }
     }
 
@@ -557,6 +591,7 @@ impl State {
             oversized: false,
             user_sized: false,
             covered: Size::default(),
+            drawn_at: None,
             chrome: Chrome::default(),
         });
         // It opens fullscreen: its screen is anchored from the start.
@@ -587,6 +622,29 @@ impl State {
         }
         self.apply_arrangement();
         self.refresh_pointer_focus();
+    }
+
+    /// A window asks to be maximized or restored, or the user does it for
+    /// it: it covers the slots of its screen, or goes back where it was.
+    pub fn set_maximized(&mut self, id: WindowId, maximized: bool) {
+        let desk = &mut self.shell.desk;
+        let result = if maximized {
+            desk.maximize(id)
+        } else {
+            desk.unmaximize(id)
+        };
+        match result {
+            Ok(()) => debug!(?id, maximized, "maximized state asked"),
+            Err(error) => warn!(%error, "cannot change whether the window is maximized"),
+        }
+        self.apply_arrangement();
+        self.refresh_pointer_focus();
+    }
+
+    /// The shell's own title bar or capsule asks for the other state.
+    pub fn toggle_maximized(&mut self, id: WindowId) {
+        let maximized = self.shell.desk.is_maximized(id);
+        self.set_maximized(id, !maximized);
     }
 
     /// A window leaves fullscreen, by itself or because the user asked: its
@@ -705,8 +763,9 @@ impl State {
                 };
                 set(ToplevelState::Activated, geometry.focused);
                 set(ToplevelState::Fullscreen, geometry.anchored);
+                set(ToplevelState::Maximized, geometry.maximized);
                 // Tiled clients drop their own shadows and rounded corners.
-                let tiled = !geometry.floating && !geometry.anchored;
+                let tiled = !geometry.floating && !geometry.anchored && !geometry.maximized;
                 for edge in [
                     ToplevelState::TiledLeft,
                     ToplevelState::TiledRight,
@@ -880,6 +939,9 @@ fn configure_x11(window: &X11Surface, managed: &ManagedWindow) {
     let mut done = Ok(());
     if window.is_fullscreen() != geometry.anchored {
         done = done.and(window.set_fullscreen(geometry.anchored));
+    }
+    if window.is_maximized() != geometry.maximized {
+        done = done.and(window.set_maximized(geometry.maximized));
     }
     if window.is_activated() != geometry.focused {
         done = done.and(window.set_activated(geometry.focused));

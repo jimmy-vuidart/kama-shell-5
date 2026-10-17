@@ -58,9 +58,15 @@ pub struct GroupSpec {
     pub hovered: Option<(usize, Option<CapsuleButton>)>,
     pub theme: ThemeKind,
     pub accent: Rgba,
+    /// The group of the maximized windows of a screen: its buttons restore
+    /// them instead of maximizing.
+    pub maximized: bool,
+    /// The box of the group of maximized windows in the same band, relative
+    /// to it: this group keeps clear of it.
+    pub avoid: Option<Rect>,
 }
 
-/// One window of a slot.
+/// One window of a stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapsuleSpec {
     pub label: String,
@@ -236,7 +242,10 @@ impl Painter {
             .iter()
             .map(|capsule| self.shaped(&capsule.label, capsule.weight()).1.ceil() as i32)
             .collect();
-        let layout = GroupLayout::new(spec.size, &label_widths);
+        let layout = match spec.avoid {
+            Some(avoid) => GroupLayout::beside(spec.size, &label_widths, avoid),
+            None => GroupLayout::new(spec.size, &label_widths),
+        };
         if layout.capsules.is_empty() {
             return None;
         }
@@ -249,14 +258,13 @@ impl Painter {
             outline(&mut pixmap, &rim_path, theme.rim, 1.0);
         }
         for (index, (capsule, cell)) in spec.capsules.iter().zip(&layout.capsules).enumerate() {
-            let hovered = spec.hovered.filter(|(under, _)| *under == index);
-            let button = hovered.and_then(|(_, button)| button);
+            let hover = spec.hovered.filter(|(under, _)| *under == index);
             self.capsule(
                 &mut pixmap,
                 capsule,
                 cell,
-                hovered.is_some(),
-                button,
+                hover.map(|(_, button)| button),
+                spec.maximized,
                 &theme,
             );
         }
@@ -270,10 +278,12 @@ impl Painter {
         pixmap: &mut Pixmap,
         capsule: &CapsuleSpec,
         cell: &CapsuleCell,
-        hovered: bool,
-        hovered_button: Option<CapsuleButton>,
+        hover: Option<Option<CapsuleButton>>,
+        maximized: bool,
         theme: &Theme,
     ) {
+        // The capsule is under the pointer, on this button of it if any.
+        let (hovered, hovered_button) = (hover.is_some(), hover.flatten());
         let background = match (capsule.shown, hovered) {
             (true, _) => Some(theme.glass_strong),
             (false, true) => Some(theme.hover),
@@ -323,7 +333,7 @@ impl Painter {
             let under = hovered_button == Some(*button);
             let highlight = match (button, under) {
                 (CapsuleButton::Close, true) => Some(theme.close_hover),
-                (CapsuleButton::Minimize, true) => Some(theme.hover),
+                (_, true) => Some(theme.hover),
                 (_, false) => None,
             };
             if let (Some(highlight), Some(path)) = (highlight, pill(*place, 0.0)) {
@@ -332,8 +342,13 @@ impl Painter {
             // White on the colored highlight, the text color otherwise.
             let on_color = under && *button == CapsuleButton::Close;
             let color = if on_color { Rgba::WHITE } else { theme.text };
-            let cross = *button == CapsuleButton::Close;
-            if let Some(icon) = line_icon(cross, *place, 3.5) {
+            let glyph = match button {
+                CapsuleButton::Minimize => Glyph::Dash,
+                CapsuleButton::Maximize if maximized => Glyph::Restore,
+                CapsuleButton::Maximize => Glyph::Square,
+                CapsuleButton::Close => Glyph::Cross,
+            };
+            if let Some(icon) = line_icon(glyph, *place, 3.5) {
                 stroke(pixmap, &icon, color);
             }
         }
@@ -620,23 +635,68 @@ fn titlebar_rim(w: f32, _h: f32, radius: f32) -> Option<Path> {
 
 /// The line icon of a title bar button, centered in its cell.
 fn button_icon(button: TitlebarButton, cell: Rect) -> Option<Path> {
-    line_icon(button == TitlebarButton::Close, cell, 5.0)
+    let glyph = match button {
+        TitlebarButton::Minimize => Glyph::Dash,
+        TitlebarButton::Maximize => Glyph::Square,
+        TitlebarButton::Close => Glyph::Cross,
+    };
+    line_icon(glyph, cell, 5.0)
 }
 
-/// A cross, or else a dash, `reach` pixels around the center of `cell`.
-fn line_icon(cross: bool, cell: Rect, reach: f32) -> Option<Path> {
+/// What a button shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Glyph {
+    /// Minimize.
+    Dash,
+    /// Maximize.
+    Square,
+    /// Put a maximized window back: two squares, one behind the other.
+    Restore,
+    /// Close.
+    Cross,
+}
+
+/// The line drawing of `glyph`, `reach` pixels around the center of `cell`.
+fn line_icon(glyph: Glyph, cell: Rect, reach: f32) -> Option<Path> {
     let cx = cell.x as f32 + cell.w as f32 / 2.0;
     let cy = cell.y as f32 + cell.h as f32 / 2.0;
     let mut path = PathBuilder::new();
-    let mut line = |from: (f32, f32), to: (f32, f32)| {
-        path.move_to(cx + from.0, cy + from.1);
-        path.line_to(cx + to.0, cy + to.1);
+    let mut lines = |points: &[(f32, f32)]| {
+        for (index, (x, y)) in points.iter().enumerate() {
+            if index == 0 {
+                path.move_to(cx + x, cy + y);
+            } else {
+                path.line_to(cx + x, cy + y);
+            }
+        }
     };
-    if cross {
-        line((-reach, -reach), (reach, reach));
-        line((reach, -reach), (-reach, reach));
-    } else {
-        line((-reach - 0.5, 0.0), (reach + 0.5, 0.0));
+    let r = reach;
+    match glyph {
+        Glyph::Dash => lines(&[(-r - 0.5, 0.0), (r + 0.5, 0.0)]),
+        Glyph::Cross => {
+            lines(&[(-r, -r), (r, r)]);
+            lines(&[(r, -r), (-r, r)]);
+        }
+        Glyph::Square => lines(&[(-r, -r), (r, -r), (r, r), (-r, r), (-r, -r)]),
+        Glyph::Restore => {
+            // The front square, low on the left, and what shows of the one
+            // behind it, high on the right.
+            let s = (r * 0.5).round();
+            lines(&[
+                (-r, -r + s),
+                (r - s, -r + s),
+                (r - s, r),
+                (-r, r),
+                (-r, -r + s),
+            ]);
+            lines(&[
+                (-r + s, -r + s),
+                (-r + s, -r),
+                (r, -r),
+                (r, r - s),
+                (r - s, r - s),
+            ]);
+        }
     }
     path.finish()
 }
@@ -755,7 +815,11 @@ mod tests {
     #[test]
     fn every_button_has_an_icon_inside_its_cell() {
         let cell = Rect::new(100, 0, 38, 38);
-        for button in [TitlebarButton::Minimize, TitlebarButton::Close] {
+        for button in [
+            TitlebarButton::Minimize,
+            TitlebarButton::Maximize,
+            TitlebarButton::Close,
+        ] {
             let bounds = button_icon(button, cell).unwrap().bounds();
 
             assert!(
@@ -773,6 +837,8 @@ mod tests {
             hovered: None,
             theme: ThemeKind::Light,
             accent: Theme::new(ThemeKind::Light).accent,
+            maximized: false,
+            avoid: None,
         }
     }
 

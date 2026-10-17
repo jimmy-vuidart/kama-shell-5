@@ -165,6 +165,8 @@ pub struct State {
     pub panel_focus: Option<LayerSurface>,
     /// What the left mouse button is doing since it went down.
     pub gesture: Option<Gesture>,
+    /// The last press on a title bar of the shell, for double-clicks.
+    pub last_bar_press: Option<crate::input::BarPress>,
     /// An interactive screenshot selection in progress.
     pub screenshot_mode: Option<ScreenshotMode>,
     /// Pre-captured screen freeze for interactive region screenshot.
@@ -331,6 +333,7 @@ impl State {
             bar_hover: None,
             panel_focus: None,
             gesture: None,
+            last_bar_press: None,
             screenshot_mode: None,
             screenshot_freeze: None,
             swallowed_press: false,

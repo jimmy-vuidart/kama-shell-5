@@ -59,10 +59,7 @@ mod tests {
         let mut memory = AppMemory::default();
         memory.remember(
             AppKey::new("discord"),
-            RememberedPlace {
-                role: OutputRole::Left,
-                slot: 0,
-            },
+            RememberedPlace::in_slot(OutputRole::Left, 0),
         );
         memory
     }

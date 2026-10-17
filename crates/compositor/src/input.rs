@@ -1,7 +1,7 @@
 //! Input events: shortcuts, focus on click, title bar buttons.
 
 use coquille_model::{
-    DropTarget, Insets, OutputId, Placement, Point as ModelPoint, Rect, Size, WindowId,
+    DropTarget, Insets, OutputId, Placement, Point as ModelPoint, Rect, Size, StackId, WindowId,
 };
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
@@ -47,6 +47,30 @@ const SEPARATOR_REACH: i32 = 8;
 /// How far the pointer must travel, button held, before a press on a
 /// window or on a capsule becomes a drag.
 const DRAG_THRESHOLD: f64 = 8.0;
+/// The longest a second press on a title bar may come after the first for
+/// both to make a double-click.
+const DOUBLE_CLICK_MS: u32 = 400;
+
+/// A press on the shell's title bar of a window, kept to recognize a
+/// double-click.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BarPress {
+    pub window: WindowId,
+    /// Input time, in milliseconds.
+    pub time: u32,
+    pub at: Point<f64, Logical>,
+}
+
+impl BarPress {
+    /// `next` follows this press closely enough, on the same window and
+    /// about the same place, to make a double-click with it.
+    fn doubled_by(&self, next: &Self) -> bool {
+        let travelled = next.at - self.at;
+        let near = travelled.x.hypot(travelled.y) <= DRAG_THRESHOLD;
+        let soon = next.time.wrapping_sub(self.time) <= DOUBLE_CLICK_MS;
+        self.window == next.window && near && soon
+    }
+}
 
 /// What lies under a point of the global space.
 #[derive(Debug, Default)]
@@ -329,6 +353,9 @@ impl State {
             Action::CycleTab { forward } => {
                 match desk.focused().and_then(|id| desk.placement(id)) {
                     Some(Placement::Slot(slot)) => desk.cycle_tab(slot, forward),
+                    Some(Placement::Maximized(output)) => {
+                        desk.cycle_tab(StackId::Maximized(output), forward)
+                    }
                     _ => Ok(()),
                 }
             }
@@ -1147,7 +1174,7 @@ impl State {
                     self.sync_keyboard_focus();
                 }
                 if button == BTN_LEFT {
-                    for_clients = !self.start_gesture(&hit, location);
+                    for_clients = !self.start_gesture(&hit, location, time);
                     self.swallowed_press = !for_clients;
                 }
             }
@@ -1221,7 +1248,7 @@ impl State {
 
     /// Decides what a left press starts. Returns whether the shell keeps the
     /// press for itself.
-    fn start_gesture(&mut self, hit: &Hit, location: Point<f64, Logical>) -> bool {
+    fn start_gesture(&mut self, hit: &Hit, location: Point<f64, Logical>, time: InputTime) -> bool {
         if let Some(button) = hit.bar {
             self.gesture = Some(Gesture::BarPressed { button });
             return true;
@@ -1264,6 +1291,20 @@ impl State {
                 drag: Drag::Place,
             });
             return true;
+        }
+        if hit.titlebar && hit.button.is_none() {
+            // Twice on its title bar: maximized, or back in its place.
+            let press = BarPress {
+                window,
+                time: time.millis(),
+                at: location,
+            };
+            let previous = self.last_bar_press.replace(press);
+            if previous.is_some_and(|previous| previous.doubled_by(&press)) {
+                self.last_bar_press = None;
+                self.toggle_maximized(window);
+                return true;
+            }
         }
         if hit.titlebar {
             // Dragged by its title bar, it floats and follows the pointer.
@@ -1320,9 +1361,10 @@ impl State {
             Some(_) if released != Some(pressed) => {}
             Some(CapsuleButton::Close) => self.close_window(pressed.window),
             Some(CapsuleButton::Minimize) => self.minimize_window(pressed.window),
+            Some(CapsuleButton::Maximize) => self.toggle_maximized(pressed.window),
             None => {
                 let desk = &mut self.shell.desk;
-                if let Err(error) = desk.activate_tab(pressed.slot, pressed.index) {
+                if let Err(error) = desk.activate_tab(pressed.stack, pressed.index) {
                     warn!(%error, "cannot show the window of this capsule");
                 }
                 self.apply_arrangement();
@@ -1334,6 +1376,7 @@ impl State {
         match button {
             TitlebarButton::Close => self.close_window(window),
             TitlebarButton::Minimize => self.minimize_window(window),
+            TitlebarButton::Maximize => self.toggle_maximized(window),
         }
     }
 
@@ -1564,5 +1607,35 @@ mod tests {
         state.update_key(num_lock_kc, xkb::KeyDirection::Up);
 
         assert!(!state.mod_index_is_active(num_mod, xkb::STATE_MODS_LOCKED));
+    }
+
+    fn bar_press(window: u64, time: u32, x: f64) -> BarPress {
+        BarPress {
+            window: WindowId(window),
+            time,
+            at: Point::from((x, 20.0)),
+        }
+    }
+
+    #[test]
+    fn two_quick_presses_at_the_same_place_make_a_double_click() {
+        let first = bar_press(1, 1000, 300.0);
+
+        assert!(first.doubled_by(&bar_press(1, 1350, 304.0)));
+    }
+
+    #[test]
+    fn a_slow_second_press_is_a_new_click() {
+        let first = bar_press(1, 1000, 300.0);
+
+        assert!(!first.doubled_by(&bar_press(1, 1401, 300.0)));
+    }
+
+    #[test]
+    fn a_second_press_elsewhere_or_on_another_window_is_a_new_click() {
+        let first = bar_press(1, 1000, 300.0);
+
+        assert!(!first.doubled_by(&bar_press(1, 1100, 320.0)));
+        assert!(!first.doubled_by(&bar_press(2, 1100, 300.0)));
     }
 }

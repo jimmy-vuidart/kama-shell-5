@@ -25,7 +25,7 @@ pub use desk::{
 };
 pub use geometry::{Insets, Point, Rect, Size};
 pub use ids::{AppKey, OutputId, WindowId};
-pub use layout::{LayoutKind, Ratio, SlotId};
+pub use layout::{LayoutKind, Ratio, SlotId, StackId};
 pub use memory::{AppMemory, RememberedPlace};
 pub use metrics::Metrics;
 pub use output::{OutputInfo, OutputRole};

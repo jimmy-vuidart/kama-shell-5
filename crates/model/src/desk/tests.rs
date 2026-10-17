@@ -70,7 +70,7 @@ fn active_tab(desk: &Desk, output: OutputId, index: usize) -> Option<u64> {
 fn floating_output(placement: Placement) -> OutputId {
     match placement {
         Placement::Floating { output, .. } => output,
-        Placement::Slot(slot) => panic!("expected a floating window, got {slot:?}"),
+        other => panic!("expected a floating window, got {other:?}"),
     }
 }
 
@@ -339,10 +339,7 @@ fn memory_loaded_from_disk_places_the_app() {
     let mut memory = AppMemory::default();
     memory.remember(
         AppKey::new("code"),
-        RememberedPlace {
-            role: OutputRole::Right,
-            slot: 0,
-        },
+        RememberedPlace::in_slot(OutputRole::Right, 0),
     );
     let mut desk = desk().with_memory(memory);
 
@@ -356,10 +353,7 @@ fn a_habit_on_a_screen_that_is_not_plugged_opens_floating() {
     let mut memory = AppMemory::default();
     memory.remember(
         AppKey::new("code"),
-        RememberedPlace {
-            role: OutputRole::Right,
-            slot: 0,
-        },
+        RememberedPlace::in_slot(OutputRole::Right, 0),
     );
     let only_center = vec![OutputInfo::new(CENTER, OutputRole::Center, CENTER_SIZE)];
     let mut desk = Desk::new(only_center, Metrics::default()).with_memory(memory);
@@ -537,10 +531,7 @@ fn an_app_remembered_at_the_center_is_deflected_and_keeps_its_habit() {
     assert_eq!(floating_output(placement), RIGHT);
     assert_eq!(
         desk.memory().get(&AppKey::new("browser")),
-        Some(RememberedPlace {
-            role: OutputRole::Center,
-            slot: 0,
-        })
+        Some(RememberedPlace::in_slot(OutputRole::Center, 0))
     );
 }
 
@@ -1183,7 +1174,7 @@ fn activating_a_tab_that_does_not_exist_is_refused() {
     assert_eq!(
         desk.activate_tab(slot(RIGHT, 0), 3),
         Err(ModelError::UnknownTab {
-            slot: slot(RIGHT, 0),
+            stack: StackId::Slot(slot(RIGHT, 0)),
             index: 3,
         })
     );
@@ -1863,7 +1854,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
             let index = rng.next(3) as usize;
 
             // Refusals are part of the contract; only consistency matters here.
-            let _outcome: Result<(), ModelError> = match rng.next(18) {
+            let _outcome: Result<(), ModelError> = match rng.next(22) {
                 0 | 1 => {
                     next_id += 1;
                     let app = AppKey::new(APPS[rng.next(4) as usize]);
@@ -1903,6 +1894,14 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                     Ok(())
                 }
                 16 => desk.set_own_titlebar(window, rng.next(2) == 0),
+                17 => desk.maximize(window),
+                18 => desk.unmaximize(window),
+                19 => desk.toggle_maximized(window),
+                20 => {
+                    let stack = StackId::Maximized(output);
+                    desk.activate_tab(stack, index)
+                        .or_else(|_| desk.cycle_tab(stack, rng.next(2) == 0))
+                }
                 _ => desk.cycle_tab(slot(output, index), rng.next(2) == 0),
             };
 
@@ -1918,7 +1917,7 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
 fn group(desk: &Desk, output: OutputId, index: usize) -> Option<CapsuleGroup> {
     desk.capsule_groups()
         .into_iter()
-        .find(|group| group.slot == slot(output, index))
+        .find(|group| group.stack == StackId::Slot(slot(output, index)))
 }
 
 #[test]
@@ -1944,13 +1943,13 @@ fn every_occupied_slot_has_its_group_of_capsules() {
         desk.capsule_groups(),
         [
             CapsuleGroup {
-                slot: slot(LEFT, 0),
+                stack: StackId::Slot(slot(LEFT, 0)),
                 band: Rect::new(8, 8, 948, 32),
                 windows: vec![WindowId(1), WindowId(2)],
                 shown: Some(WindowId(2)),
             },
             CapsuleGroup {
-                slot: slot(LEFT, 1),
+                stack: StackId::Slot(slot(LEFT, 1)),
                 band: Rect::new(964, 8, 948, 32),
                 windows: vec![WindowId(3)],
                 shown: Some(WindowId(3)),
@@ -1969,10 +1968,10 @@ fn an_empty_slot_and_a_free_screen_have_no_capsules() {
     let slots: Vec<_> = desk
         .capsule_groups()
         .iter()
-        .map(|group| group.slot)
+        .map(|group| group.stack)
         .collect();
 
-    assert_eq!(slots, [slot(LEFT, 1)]);
+    assert_eq!(slots, [StackId::Slot(slot(LEFT, 1))]);
 }
 
 #[test]
@@ -2033,4 +2032,435 @@ fn a_drop_zone_is_still_the_whole_slot() {
 
     assert_eq!(zones[0].rect, Rect::new(8, 8, 948, 1064));
     assert!(zones[0].occupied);
+}
+
+// Maximized windows: over the slots of their screen, with capsules of their
+// own at the top of the middle.
+
+fn maximized_group(desk: &Desk, output: OutputId) -> Option<CapsuleGroup> {
+    desk.capsule_groups()
+        .into_iter()
+        .find(|group| group.stack == StackId::Maximized(output))
+}
+
+fn covered(desk: &Desk, output: OutputId) -> bool {
+    desk.screen(output).unwrap().covered()
+}
+
+/// Left in columns: a guide on the left, notes on the right.
+fn split_left() -> Desk {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", LEFT, 0);
+    open_in(&mut desk, 2, "notes", LEFT, 1);
+    desk
+}
+
+#[test]
+fn a_maximized_window_leaves_its_slot_and_covers_the_screen() {
+    let mut desk = split_left();
+
+    desk.maximize(WindowId(1)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
+    assert!(tabs(&desk, LEFT, 0).is_empty());
+    assert!(covered(&desk, LEFT));
+    let maximized = geo(&desk, 1);
+    assert!(maximized.maximized && maximized.visible && maximized.focused);
+    assert!(!maximized.floating);
+    assert_eq!(maximized.frame, Rect::new(8, 48, 1904, 1024));
+    assert!(!geo(&desk, 2).visible);
+}
+
+#[test]
+fn the_capsules_of_maximized_windows_sit_at_the_top_of_the_middle() {
+    let mut desk = split_left();
+
+    desk.maximize(WindowId(1)).unwrap();
+
+    let groups = desk.capsule_groups();
+    assert_eq!(
+        groups[0],
+        CapsuleGroup {
+            stack: StackId::Maximized(LEFT),
+            band: Rect::new(484, 8, 952, 32),
+            windows: vec![WindowId(1)],
+            shown: Some(WindowId(1)),
+        }
+    );
+    // The slots keep their capsules, nothing shown in them.
+    let notes = group(&desk, LEFT, 1).unwrap();
+    assert_eq!(notes.band, Rect::new(964, 8, 948, 32));
+    assert_eq!(notes.shown, None);
+}
+
+#[test]
+fn a_tab_of_a_slot_brings_the_split_back_and_keeps_the_maximized_window() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.activate_tab(slot(LEFT, 1), 0).unwrap();
+
+    assert!(!covered(&desk, LEFT));
+    assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
+    assert!(!geo(&desk, 1).visible);
+    assert!(geo(&desk, 2).visible && geo(&desk, 2).focused);
+    let group = maximized_group(&desk, LEFT).unwrap();
+    assert_eq!(group.windows, [WindowId(1)]);
+    assert_eq!(group.shown, None);
+}
+
+#[test]
+fn the_capsule_of_a_maximized_window_covers_the_screen_again() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+    desk.activate_tab(slot(LEFT, 1), 0).unwrap();
+
+    desk.activate_tab(StackId::Maximized(LEFT), 0).unwrap();
+
+    assert!(covered(&desk, LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert!(geo(&desk, 1).visible);
+}
+
+#[test]
+fn minimizing_the_only_maximized_window_brings_the_split_back() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.minimize(WindowId(1)).unwrap();
+
+    assert!(!covered(&desk, LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    assert!(geo(&desk, 2).visible);
+    let group = maximized_group(&desk, LEFT).unwrap();
+    assert_eq!(group.windows, [WindowId(1)]);
+    assert_eq!(group.shown, None);
+}
+
+#[test]
+fn minimizing_one_of_two_maximized_windows_shows_the_other() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+    desk.maximize(WindowId(2)).unwrap();
+
+    desk.minimize(WindowId(2)).unwrap();
+
+    assert!(covered(&desk, LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert_eq!(
+        maximized_group(&desk, LEFT).unwrap().shown,
+        Some(WindowId(1))
+    );
+}
+
+#[test]
+fn restoring_a_minimized_maximized_window_covers_the_screen_again() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+    desk.minimize(WindowId(1)).unwrap();
+
+    assert_eq!(desk.restore_last(), Some(WindowId(1)));
+
+    assert!(covered(&desk, LEFT));
+    assert!(geo(&desk, 1).visible);
+}
+
+#[test]
+fn unmaximizing_puts_a_window_back_in_its_slot() {
+    let mut desk = split_left();
+    open_in(&mut desk, 3, "wiki", LEFT, 0);
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.unmaximize(WindowId(1)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(tabs(&desk, LEFT, 0), [3, 1]);
+    assert_eq!(active_tab(&desk, LEFT, 0), Some(1));
+    assert!(!covered(&desk, LEFT));
+    assert!(maximized_group(&desk, LEFT).is_none());
+    assert!(!geo(&desk, 1).maximized);
+}
+
+#[test]
+fn unmaximizing_a_window_that_floated_puts_it_back_where_it_floated() {
+    let mut desk = split_left();
+    open(&mut desk, 3, "gimp", LEFT);
+    let rect = Rect::new(200, 150, 700, 500);
+    desk.float_window(WindowId(3), LEFT, rect).unwrap();
+
+    desk.maximize(WindowId(3)).unwrap();
+    desk.unmaximize(WindowId(3)).unwrap();
+
+    assert_eq!(place(&desk, 3), Placement::Floating { output: LEFT, rect });
+    assert_eq!(desk.memory().get(&AppKey::new("gimp")), None);
+}
+
+#[test]
+fn a_maximized_window_goes_back_to_the_last_slot_when_its_own_is_gone() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(2)).unwrap();
+    desk.set_layout(LEFT, LayoutKind::Full).unwrap();
+
+    desk.unmaximize(WindowId(2)).unwrap();
+
+    assert_eq!(place(&desk, 2), Placement::Slot(slot(LEFT, 0)));
+}
+
+#[test]
+fn a_maximized_window_floats_back_on_a_free_screen() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(2)).unwrap();
+    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
+
+    desk.unmaximize(WindowId(2)).unwrap();
+
+    assert_eq!(floating_output(place(&desk, 2)), LEFT);
+}
+
+#[test]
+fn a_free_screen_takes_maximized_windows_too() {
+    let mut desk = desk();
+    desk.set_layout(LEFT, LayoutKind::Free).unwrap();
+    open(&mut desk, 1, "gimp", LEFT);
+
+    desk.maximize(WindowId(1)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
+    let groups = desk.capsule_groups();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].stack, StackId::Maximized(LEFT));
+}
+
+#[test]
+fn a_window_alone_in_the_slot_of_a_full_screen_already_has_it_all() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "product", CENTER, 0);
+
+    desk.maximize(WindowId(1)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
+    assert!(!covered(&desk, CENTER));
+}
+
+#[test]
+fn unmaximizing_a_window_that_is_not_maximized_changes_nothing() {
+    let mut desk = split_left();
+
+    desk.unmaximize(WindowId(1)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 0)));
+}
+
+#[test]
+fn toggling_maximizes_then_restores() {
+    let mut desk = split_left();
+
+    desk.toggle_maximized(WindowId(2)).unwrap();
+    assert!(desk.is_maximized(WindowId(2)));
+
+    desk.toggle_maximized(WindowId(2)).unwrap();
+    assert_eq!(place(&desk, 2), Placement::Slot(slot(LEFT, 1)));
+}
+
+#[test]
+fn dragging_a_maximized_window_to_a_slot_takes_it_out() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.move_to_slot(WindowId(1), slot(RIGHT, 0)).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(RIGHT, 0)));
+    assert!(!covered(&desk, LEFT));
+    assert_eq!(
+        desk.memory().get(&AppKey::new("guide")),
+        Some(RememberedPlace::in_slot(OutputRole::Right, 0))
+    );
+}
+
+#[test]
+fn a_maximized_window_dragged_by_its_title_bar_floats_without_habit() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.float_window(WindowId(1), LEFT, Rect::new(100, 100, 600, 400))
+        .unwrap();
+
+    assert_eq!(floating_output(place(&desk, 1)), LEFT);
+    assert!(!covered(&desk, LEFT));
+    assert_eq!(desk.memory().get(&AppKey::new("guide")), None);
+}
+
+#[test]
+fn closing_the_maximized_window_brings_the_split_back() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.close_window(WindowId(1)).unwrap();
+
+    assert!(!covered(&desk, LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+}
+
+#[test]
+fn closing_one_of_two_maximized_windows_shows_the_other() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+    desk.maximize(WindowId(2)).unwrap();
+
+    desk.close_window(WindowId(2)).unwrap();
+
+    assert!(covered(&desk, LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn a_maximized_window_can_go_fullscreen_and_come_back() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    desk.set_anchored(WindowId(1), true).unwrap();
+    assert!(geo(&desk, 1).anchored && !geo(&desk, 1).maximized);
+    desk.set_anchored(WindowId(1), false).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
+    assert!(geo(&desk, 1).maximized);
+}
+
+#[test]
+fn maximizing_on_an_anchored_screen_is_refused() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "game", LEFT, 0);
+    open_in(&mut desk, 2, "notes", LEFT, 1);
+    desk.set_anchored(WindowId(1), true).unwrap();
+
+    assert_eq!(desk.maximize(WindowId(2)), Err(ModelError::Anchored(LEFT)));
+}
+
+#[test]
+fn floating_windows_stay_above_a_maximized_one() {
+    let mut desk = split_left();
+    open(&mut desk, 3, "gimp", LEFT);
+    desk.maximize(WindowId(1)).unwrap();
+
+    let order: Vec<_> = desk.arrangement().iter().map(|g| g.id.0).collect();
+    let rank = |id| order.iter().position(|window| *window == id).unwrap();
+
+    assert!(rank(1) < rank(3));
+    assert!(geo(&desk, 3).visible);
+}
+
+#[test]
+fn maximizing_is_remembered_with_the_slot_to_go_back_to() {
+    let mut desk = split_left();
+
+    desk.maximize(WindowId(2)).unwrap();
+
+    assert_eq!(
+        desk.memory().get(&AppKey::new("notes")),
+        Some(RememberedPlace::maximized(OutputRole::Left, Some(1)))
+    );
+
+    desk.unmaximize(WindowId(2)).unwrap();
+
+    assert_eq!(
+        desk.memory().get(&AppKey::new("notes")),
+        Some(RememberedPlace::in_slot(OutputRole::Left, 1))
+    );
+}
+
+#[test]
+fn an_app_closed_maximized_reopens_maximized_and_restores_to_its_slot() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(2)).unwrap();
+    desk.close_window(WindowId(2)).unwrap();
+
+    let placement = open(&mut desk, 3, "notes", RIGHT);
+
+    assert_eq!(placement, Placement::Maximized(LEFT));
+    assert!(covered(&desk, LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+
+    desk.unmaximize(WindowId(3)).unwrap();
+    assert_eq!(place(&desk, 3), Placement::Slot(slot(LEFT, 1)));
+}
+
+#[test]
+fn an_app_that_floated_before_maximizing_reopens_maximized_then_floats() {
+    let mut desk = desk();
+    open(&mut desk, 1, "gimp", RIGHT);
+    desk.maximize(WindowId(1)).unwrap();
+    desk.close_window(WindowId(1)).unwrap();
+
+    assert_eq!(
+        open(&mut desk, 2, "gimp", LEFT),
+        Placement::Maximized(RIGHT)
+    );
+    desk.unmaximize(WindowId(2)).unwrap();
+
+    assert_eq!(floating_output(place(&desk, 2)), RIGHT);
+    assert_eq!(desk.memory().get(&AppKey::new("gimp")), None);
+}
+
+#[test]
+fn an_app_reopening_maximized_during_a_game_shows_without_the_focus() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(2)).unwrap();
+    desk.close_window(WindowId(2)).unwrap();
+    anchor_game(&mut desk, 3);
+
+    assert_eq!(
+        open(&mut desk, 4, "notes", CENTER),
+        Placement::Maximized(LEFT)
+    );
+
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+    assert!(geo(&desk, 4).visible);
+}
+
+#[test]
+fn a_maximized_habit_on_an_anchored_screen_opens_floating_elsewhere() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "notes", CENTER, 0);
+    open(&mut desk, 2, "gimp", CENTER);
+    desk.maximize(WindowId(2)).unwrap();
+    desk.close_window(WindowId(2)).unwrap();
+    desk.set_anchored(WindowId(1), true).unwrap();
+    desk.note_output_used(RIGHT);
+
+    let placement = open(&mut desk, 3, "gimp", CENTER);
+
+    assert_eq!(floating_output(placement), RIGHT);
+}
+
+#[test]
+fn with_rows_the_capsules_of_both_slots_go_to_the_top_under_a_maximized_window() {
+    let mut desk = split_left();
+    desk.set_layout(LEFT, LayoutKind::Rows).unwrap();
+    open(&mut desk, 3, "gimp", LEFT);
+
+    desk.maximize(WindowId(3)).unwrap();
+
+    assert_eq!(
+        group(&desk, LEFT, 0).unwrap().band,
+        Rect::new(8, 8, 948, 32)
+    );
+    assert_eq!(
+        group(&desk, LEFT, 1).unwrap().band,
+        Rect::new(964, 8, 948, 32)
+    );
+
+    desk.activate_tab(slot(LEFT, 1), 0).unwrap();
+    assert_eq!(group(&desk, LEFT, 1).unwrap().band.y, 544);
+}
+
+#[test]
+fn cycling_maximized_tabs_shows_each_in_turn() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+    desk.maximize(WindowId(2)).unwrap();
+
+    desk.cycle_tab(StackId::Maximized(LEFT), true).unwrap();
+
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert!(geo(&desk, 1).visible && !geo(&desk, 2).visible);
 }

@@ -24,6 +24,12 @@ pub struct Screen {
     slots: Vec<TabStack>,
     /// Bottom to top.
     floating: Vec<FloatingWindow>,
+    /// Windows that take the whole screen, over its slots: a pile of tabs
+    /// of their own.
+    maximized: TabStack,
+    /// The maximized windows are shown and hide the slots; otherwise the
+    /// slots show.
+    covered: bool,
     anchored: Option<WindowId>,
 }
 
@@ -36,6 +42,8 @@ impl Screen {
             ratio: Ratio::default(),
             slots: vec![TabStack::default(); layout.slot_count()],
             floating: Vec::new(),
+            maximized: TabStack::default(),
+            covered: false,
             anchored: None,
         }
     }
@@ -68,6 +76,16 @@ impl Screen {
         &self.floating
     }
 
+    /// The windows maximized over the slots.
+    pub fn maximized(&self) -> &TabStack {
+        &self.maximized
+    }
+
+    /// The maximized windows are shown, hiding the slots.
+    pub fn covered(&self) -> bool {
+        self.covered
+    }
+
     /// The fullscreen window that anchors this screen, if any.
     pub fn anchored(&self) -> Option<WindowId> {
         self.anchored
@@ -85,6 +103,33 @@ impl Screen {
             .into_iter()
             .map(|slot| slot.split_rows(metrics.capsule_height, metrics.gap))
             .collect()
+    }
+
+    /// Where the capsules of each slot go: the band above it. Under
+    /// maximized windows the middle of the screen is hidden: with `Rows`,
+    /// both groups then go to the top, side by side.
+    pub fn slot_bands(&self, metrics: &Metrics) -> Vec<Rect> {
+        let (layout, ratio) = if self.covered && self.layout == LayoutKind::Rows {
+            (LayoutKind::Columns, Ratio::HALF)
+        } else {
+            (self.layout, self.ratio)
+        };
+        layout
+            .slot_rects(self.info.usable(), ratio, metrics.gap)
+            .into_iter()
+            .map(|slot| slot.split_rows(metrics.capsule_height, metrics.gap).0)
+            .collect()
+    }
+
+    /// What a maximized window takes: the band of its capsules, the middle
+    /// half of the top of the screen, then the frame of the window, as the
+    /// single slot of `Full` would have it.
+    pub fn maximized_parts(&self, metrics: &Metrics) -> (Rect, Rect) {
+        let whole = LayoutKind::Full.slot_rects(self.info.usable(), self.ratio, metrics.gap);
+        let whole = whole.first().copied().unwrap_or_default();
+        let (band, frame) = whole.split_rows(metrics.capsule_height, metrics.gap);
+        let band = Rect::new(band.x + band.w / 4, band.y, band.w / 2, band.h);
+        (band, frame)
     }
 
     /// The gap between the two slots, if the layout has an adjustable one.
@@ -116,14 +161,17 @@ impl Screen {
     }
 
     pub fn contains(&self, id: WindowId) -> bool {
-        self.slot_of(id).is_some() || self.floating_rect(id).is_some()
+        self.slot_of(id).is_some()
+            || self.floating_rect(id).is_some()
+            || self.maximized.contains(id)
     }
 
-    /// Every window of the screen, slots first.
+    /// Every window of the screen: slots, then maximized, then floating.
     pub fn windows(&self) -> impl Iterator<Item = WindowId> + '_ {
         self.slots
             .iter()
             .flat_map(|stack| stack.windows().iter().copied())
+            .chain(self.maximized.windows().iter().copied())
             .chain(self.floating.iter().map(|window| window.id))
     }
 
@@ -133,7 +181,9 @@ impl Screen {
 
     /// Takes `id` out of the screen, releasing the anchor if it held it.
     pub(crate) fn remove(&mut self, id: WindowId) -> bool {
-        let removed = self.remove_floating(id) || self.slots.iter_mut().any(|s| s.remove(id));
+        let removed = self.remove_floating(id)
+            || self.maximized.remove(id)
+            || self.slots.iter_mut().any(|s| s.remove(id));
         if removed && self.anchored == Some(id) {
             self.anchored = None;
         }
@@ -163,6 +213,14 @@ impl Screen {
             let window = self.floating.remove(index);
             self.floating.push(window);
         }
+    }
+
+    pub(crate) fn maximized_mut(&mut self) -> &mut TabStack {
+        &mut self.maximized
+    }
+
+    pub(crate) fn set_covered(&mut self, covered: bool) {
+        self.covered = covered;
     }
 
     pub(crate) fn set_ratio(&mut self, ratio: Ratio) {

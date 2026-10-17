@@ -188,6 +188,29 @@ impl SlotId {
     }
 }
 
+/// A pile of tabs: the one of a slot, or the one of the windows maximized
+/// over the slots of a screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StackId {
+    Slot(SlotId),
+    Maximized(OutputId),
+}
+
+impl StackId {
+    pub const fn output(self) -> OutputId {
+        match self {
+            Self::Slot(slot) => slot.output,
+            Self::Maximized(output) => output,
+        }
+    }
+}
+
+impl From<SlotId> for StackId {
+    fn from(slot: SlotId) -> Self {
+        Self::Slot(slot)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

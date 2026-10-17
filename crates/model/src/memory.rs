@@ -7,11 +7,38 @@ use serde::{Deserialize, Serialize};
 use crate::ids::AppKey;
 use crate::output::OutputRole;
 
-/// The screen and slot an application reopens in.
+/// The screen and slot an application reopens in, or the screen it reopens
+/// maximized on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RememberedPlace {
     pub role: OutputRole,
-    pub slot: usize,
+    /// Its slot. Maximized, the slot it goes back to once restored: `None`
+    /// when it floated before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<usize>,
+    /// It reopens maximized over the slots of its screen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
+}
+
+impl RememberedPlace {
+    pub const fn in_slot(role: OutputRole, slot: usize) -> Self {
+        Self {
+            role,
+            slot: Some(slot),
+            maximized: false,
+        }
+    }
+
+    /// Maximized on `role`, going back to slot `back` (or floating) once
+    /// restored.
+    pub const fn maximized(role: OutputRole, back: Option<usize>) -> Self {
+        Self {
+            role,
+            slot: back,
+            maximized: true,
+        }
+    }
 }
 
 /// Habits created by the user tidying windows. Windows left floating never
@@ -57,10 +84,7 @@ mod tests {
         AppKey::new("discord")
     }
 
-    const LEFT_FIRST: RememberedPlace = RememberedPlace {
-        role: OutputRole::Left,
-        slot: 0,
-    };
+    const LEFT_FIRST: RememberedPlace = RememberedPlace::in_slot(OutputRole::Left, 0);
 
     #[test]
     fn an_unknown_application_has_no_place() {
@@ -79,10 +103,7 @@ mod tests {
     #[test]
     fn remembering_again_replaces_the_place() {
         let mut memory = AppMemory::default();
-        let right_second = RememberedPlace {
-            role: OutputRole::Right,
-            slot: 1,
-        };
+        let right_second = RememberedPlace::in_slot(OutputRole::Right, 1);
 
         memory.remember(discord(), LEFT_FIRST);
         memory.remember(discord(), right_second);
@@ -107,10 +128,7 @@ mod tests {
         memory.remember(discord(), LEFT_FIRST);
         memory.remember(
             AppKey::new("org.mozilla.firefox"),
-            RememberedPlace {
-                role: OutputRole::Right,
-                slot: 1,
-            },
+            RememberedPlace::in_slot(OutputRole::Right, 1),
         );
 
         let json = serde_json::to_string(&memory).unwrap();
@@ -120,6 +138,34 @@ mod tests {
         assert!(
             json.contains(r#""discord":{"role":"left","slot":0}"#),
             "{json}"
+        );
+    }
+
+    #[test]
+    fn a_maximized_place_survives_serialization() {
+        let mut memory = AppMemory::default();
+        let maximized = RememberedPlace::maximized(OutputRole::Right, None);
+        memory.remember(discord(), maximized);
+
+        let json = serde_json::to_string(&memory).unwrap();
+        let restored: AppMemory = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.get(&discord()), Some(maximized));
+        assert!(
+            json.contains(r#""discord":{"role":"right","maximized":true}"#),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn habits_saved_before_maximizing_existed_are_read_as_they_were() {
+        let json = r#"{"discord":{"role":"left","slot":1}}"#;
+
+        let memory: AppMemory = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            memory.get(&discord()),
+            Some(RememberedPlace::in_slot(OutputRole::Left, 1))
         );
     }
 }
