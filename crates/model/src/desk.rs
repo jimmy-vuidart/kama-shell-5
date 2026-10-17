@@ -622,6 +622,23 @@ impl Desk {
         Ok(())
     }
 
+    /// An application asks to be brought forward (its tray icon, a second
+    /// launch, a notification): the window shows, minimized or behind another
+    /// tab, and takes the focus. While a game is being played, the game keeps
+    /// it, and the window is next in line, as one that opens then.
+    pub fn activate(&mut self, id: WindowId) -> Result<(), ModelError> {
+        if !self.windows.contains_key(&id) {
+            return Err(ModelError::UnknownWindow(id));
+        }
+        let game = self.game_in_play().and_then(|_| self.focused());
+        self.mark_focused(id);
+        if let Some(game) = game.filter(|game| *game != id) {
+            self.focus_order.retain(|window| *window != game);
+            self.focus_order.push(game);
+        }
+        Ok(())
+    }
+
     /// The user acted on `output` (pointer, click). Only side screens are
     /// recorded: rule 7 sends new windows to the one used last.
     pub fn note_output_used(&mut self, output: OutputId) {

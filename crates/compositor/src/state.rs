@@ -36,6 +36,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::viewporter::ViewporterState;
+use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
@@ -104,6 +105,7 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub popups: PopupManager,
     pub xwayland_shell_state: XWaylandShellState,
+    pub xdg_activation_state: XdgActivationState,
     /// The X11 window manager, once XWayland runs. Never taken out again:
     /// X11 events rely on it.
     pub xwm: Option<X11Wm>,
@@ -232,6 +234,9 @@ impl State {
         // Lets a client stretch a small buffer over its surface: how
         // XWayland shows a game that asked for a lower resolution.
         let viewporter_state = ViewporterState::new::<Self>(dh);
+        // An application asks to come forward: its tray icon, a second
+        // launch, a notification.
+        let xdg_activation_state = XdgActivationState::new::<Self>(dh);
         let (dmabuf_state, dmabuf_global) = init_dmabuf(dh, renderer);
 
         let mut seat_state = SeatState::new();
@@ -301,6 +306,7 @@ impl State {
             dmabuf_state,
             popups: PopupManager::default(),
             xwayland_shell_state,
+            xdg_activation_state,
             xwm: None,
             xdisplay: None,
             _dmabuf_global: dmabuf_global,

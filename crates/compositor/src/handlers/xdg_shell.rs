@@ -13,6 +13,8 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
 
+use tracing::info;
+
 use crate::shell::Unmapped;
 use crate::state::State;
 
@@ -77,8 +79,10 @@ impl XdgShellHandler for State {
         }
     }
 
+    /// Its application brings it back by xdg-activation (`handlers::xdg_activation`).
     fn minimize_request(&mut self, surface: ToplevelSurface) {
         if let Some(id) = self.shell.by_surface(surface.wl_surface()).map(|m| m.id) {
+            info!(?id, "a window asked to be minimized");
             self.minimize_window(id);
         }
     }

@@ -1733,6 +1733,58 @@ fn the_window_minimized_last_is_restored_first() {
     assert_eq!(desk.restore_last(), None);
 }
 
+// An application asks to come forward (xdg-activation).
+
+#[test]
+fn an_activated_floating_window_comes_back_from_minimized_with_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", RIGHT, 0);
+    open(&mut desk, 2, "claude", LEFT);
+    desk.minimize(WindowId(2)).unwrap();
+
+    desk.activate(WindowId(2)).unwrap();
+
+    assert!(geo(&desk, 2).visible);
+    assert!(!geo(&desk, 2).minimized);
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    assert_eq!(floating_output(place(&desk, 2)), LEFT);
+}
+
+#[test]
+fn an_activated_tab_is_shown_in_its_slot() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 0);
+
+    desk.activate(WindowId(1)).unwrap();
+
+    assert_eq!(active_tab(&desk, RIGHT, 0), Some(1));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn an_activated_window_shows_but_the_game_being_played_keeps_the_focus() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", RIGHT, 0);
+    desk.minimize(WindowId(1)).unwrap();
+    anchor_game(&mut desk, 2);
+
+    desk.activate(WindowId(1)).unwrap();
+
+    assert!(geo(&desk, 1).visible);
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    // Next in line: it has the focus once the game is gone.
+    desk.close_window(WindowId(2)).unwrap();
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn activating_an_unknown_window_is_refused() {
+    let mut desk = desk();
+
+    assert!(desk.activate(WindowId(9)).is_err());
+}
+
 #[test]
 fn showing_a_minimized_tab_restores_it() {
     let mut desk = desk();
