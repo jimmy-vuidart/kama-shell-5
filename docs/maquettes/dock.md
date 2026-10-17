@@ -145,10 +145,10 @@ Les volumes par appli sont mémorisés dans `~/.local/state/coquille/`.
   **Applications** (grille 6 × 3, « 47 · de A à Z · page 1 sur 3 », flèches et numéros de page) ;
   **Jeux** (une rangée de jaquettes, lien « Toute la ludothèque ») ; **pas de section « récents »**.
 - Pied = **centre de contrôle** dans un bloc de carte (`palette.card`) : cinq bascules (Réseau, Bluetooth, Ne pas déranger,
-  Éclairage nocturne, Thème sombre ; tuiles éteintes en `palette.glass_strong` avec liseré `palette.rim`, activée = fond d'accent), curseurs Volume (bouton « Par appli »)
+  Éclairage nocturne, Thème sombre ; tuiles éteintes en `palette.glass_strong` avec liseré `palette.rim`, activée = fond d'accent), curseurs Volume (flèche vers le mixeur, sans choix de la sortie audio)
   et Luminosité (« 3 écrans »), puis utilisateur à gauche et Paramètres, Se déconnecter, Redémarrer,
   Éteindre (rouge) à droite.
-- **Mixeur** : panneau ~**290** de large à droite du tiroir, pointant vers le bouton « Par appli » :
+- **Mixeur** : panneau ~**290** de large à droite du tiroir, pointant vers la flèche du volume :
   fond en `palette.glass_strong` avec liseré `palette.rim`, bloc intérieur en `palette.card`, sortie audio, volume général, une ligne par appli (icône, nom, état, curseur, niveau en direct en vert,
   bouton couper le son rouge quand coupé), note sur la mémorisation des volumes.
 
@@ -170,7 +170,7 @@ Thèmes clair et sombre (anthracite translucide), accent depuis la config (perve
   optionnelle en fin de liste.
 - **Centre de contrôle** : bascules et curseurs agissent sur les backends réels quand ils sont actifs.
   Molette sur un curseur pour le régler.
-- **Mixeur** : ouvert / fermé par « Par appli » ; liste mise à jour en direct quand une appli commence
+- **Mixeur** : ouvert / fermé par la flèche du volume ; liste mise à jour en direct quand une appli commence
   ou arrête de jouer du son ; chaque appli retrouve son volume à sa prochaine ouverture.
 - **Sécurité** : Redémarrer, Éteindre et Se déconnecter demandent une **confirmation** et restent
   **simulés** (journalisés seulement) tant que je n'ai pas activé `--backends session`.

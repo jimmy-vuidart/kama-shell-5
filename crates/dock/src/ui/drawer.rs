@@ -733,28 +733,13 @@ fn control_center<'a>(
     } else {
         (palette.card, palette.text)
     };
-    let mixer_toggle: Element<'_, Message> = if narrow {
-        button(
-            row![
-                icons::glyph(Glyph::Sliders, 14.0, mixer_fg),
-                text("Mixeur ›")
-                    .size(12)
-                    .font(style::SEMIBOLD)
-                    .color(mixer_fg)
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .padding(Padding::from([6.0, 10.0]))
-        .on_press(Message::ToggleMixer)
-        .style(style::tinted(
-            mixer_idle,
-            style::mix(mixer_idle, palette.text, 0.08),
-            8.0,
-        ))
-        .into()
-    } else {
-        button(container(icons::glyph(Glyph::Sliders, 16.0, mixer_fg)).center(Length::Fill))
+    // The mixer opens on the side away from the bar: the arrow points to it.
+    let towards = match drawer.orientation {
+        Orientation::Vertical(Side::Right) => Glyph::ChevronLeft,
+        Orientation::Vertical(Side::Left) | Orientation::Horizontal => Glyph::ChevronRight,
+    };
+    let mixer_toggle =
+        button(container(icons::glyph(towards, 14.0, mixer_fg)).center(Length::Fill))
             .width(30)
             .height(30)
             .padding(0)
@@ -763,9 +748,7 @@ fn control_center<'a>(
                 mixer_idle,
                 style::mix(mixer_idle, palette.text, 0.08),
                 8.0,
-            ))
-            .into()
-    };
+            ));
     let screens = dock.snapshot.screens.len();
     let screens_label = match (dock.brightness, screens) {
         (None, _) => "indisponible".to_owned(),
@@ -787,7 +770,6 @@ fn control_center<'a>(
     let volume = row![
         mute,
         level(dock.audio.volume, palette, Message::Volume),
-        output_picker(dock, palette),
         mixer_toggle
     ]
     .spacing(8)

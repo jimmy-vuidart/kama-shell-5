@@ -132,7 +132,8 @@ n'est jamais réécrit.
   laisser de place au mixeur), le bord haut du lanceur horizontal
   (`[drawer] height`, jamais moins de 480 px).
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
-  curseur pour le régler), « Par appli » ouvre le mixeur. Le bouton aux
+  curseur pour le régler) ; la flèche au bout du volume ouvre le mixeur, seul
+  endroit où choisir la sortie audio. Le bouton aux
   curseurs, à côté de la déconnexion, ouvre l'écran « Paramètres »
   (`coquille-settings`, voir `crates/settings/README.md`) : c'est là que se
   règle le sens du dock sur chaque écran, que les barres suivent aussitôt.
