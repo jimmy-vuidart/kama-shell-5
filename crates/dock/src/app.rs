@@ -30,7 +30,7 @@ use crate::model::tray::TrayItem;
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
-use crate::ui::icons::Icons;
+use crate::ui::icons::{self, IconStyle, Icons};
 use crate::ui::style::{Palette, parse_color};
 use coquille_apps::{App, Catalog};
 
@@ -235,6 +235,8 @@ pub struct Dock {
     pub apps: Vec<App>,
     pub games: Vec<Game>,
     pub icons: Icons,
+    /// What the icons last asked for were chosen from.
+    icon_style: IconStyle,
     pub snapshot: Snapshot,
     link: Option<UnboundedSender<Command>>,
     links: HashMap<Backend, UnboundedSender<Request>>,
@@ -276,6 +278,7 @@ impl Dock {
         apps.retain(|app| steam::game_of_command(&app.command).is_none());
         drawer::sort_by_name(&mut apps, |app| &app.name);
         let theme = config.theme.unwrap_or_default();
+        let icon_style = icons::style(theme, config.accent.as_deref().unwrap_or_default());
         let simulated = |backend| !options.is_real(backend);
         let snapshot = if simulated(Backend::Compositor) {
             let mut snapshot = mock::snapshot(theme, &config.favorites);
@@ -320,6 +323,7 @@ impl Dock {
             apps,
             games,
             icons: Icons::default(),
+            icon_style,
             snapshot,
             link: None,
             links: HashMap::new(),
@@ -336,24 +340,7 @@ impl Dock {
             night_light: false,
             ticks: 0,
         };
-        // Looking icons up reads many directories: off the interface.
-        let mut names: Vec<String> = dock
-            .catalog
-            .apps()
-            .iter()
-            .filter_map(|app| app.icon.clone())
-            .collect();
-        let favorites = dock.config.favorites.iter();
-        names.extend(favorites.filter_map(|name| dock.identify(name).icon));
-        let icons = Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || Icons::load(names))
-                    .await
-                    .unwrap_or_default()
-            },
-            Message::IconsLoaded,
-        );
-        let mut tasks = vec![icons, dock.show_bars()];
+        let mut tasks = vec![dock.load_icons(), dock.show_bars()];
         if dock.options.drawer || dock.options.mixer {
             tasks.push(Task::done(Message::Launcher(None)));
         }
@@ -361,6 +348,39 @@ impl Dock {
             tasks.push(Task::done(Message::ToggleMixer));
         }
         (dock, Task::batch(tasks))
+    }
+
+    /// Looks the icons of the applications up again, in the icon theme that
+    /// goes with `icon_style`. This reads many directories: off the
+    /// interface.
+    fn load_icons(&self) -> Task<Message> {
+        let mut names: Vec<String> = self
+            .catalog
+            .apps()
+            .iter()
+            .filter_map(|app| app.icon.clone())
+            .collect();
+        let favorites = self.config.favorites.iter();
+        names.extend(favorites.filter_map(|name| self.identify(name).icon));
+        let style = self.icon_style;
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || Icons::load(names, style))
+                    .await
+                    .unwrap_or_default()
+            },
+            Message::IconsLoaded,
+        )
+    }
+
+    /// The theme or the accent changed: the icons follow.
+    fn follow_icon_style(&mut self) -> Task<Message> {
+        let style = icons::style(self.snapshot.theme, &self.snapshot.accent);
+        if style == self.icon_style {
+            return Task::none();
+        }
+        self.icon_style = style;
+        self.load_icons()
     }
 
     pub fn palette(&self) -> Palette {
@@ -902,7 +922,10 @@ impl Dock {
             Message::Compositor(update) => self.compositor(update),
             Message::Backend(update) => self.backend(update),
             Message::IconsLoaded(icons) => {
-                self.icons = icons;
+                // Icons asked for before the theme changed again are stale.
+                if icons.style() == Some(self.icon_style) {
+                    self.icons = icons;
+                }
                 Task::none()
             }
             Message::Window(id, window::Event::Opened { size, .. }) => {
@@ -1317,7 +1340,8 @@ impl Dock {
                         self.save_config(move |text| config::with_theme(text, theme));
                     }
                 }
-                Task::none()
+                // Simulated, the theme already changed.
+                self.follow_icon_style()
             }
             Message::Volume(volume) => {
                 self.request(Request::Volume(mixer::clamp(volume)));
@@ -1486,7 +1510,8 @@ impl Dock {
                 } else {
                     Task::none()
                 };
-                Task::batch([close, show, self.fit_bars()])
+                let icons = self.follow_icon_style();
+                Task::batch([close, show, self.fit_bars(), icons])
             }
         }
     }

@@ -5,6 +5,9 @@
 #   scripts/install.sh --session     same, and add coquille to the login screen
 #   scripts/install.sh --uninstall   remove everything that was installed
 #
+# The icons come from the AUR package reversal-icon-theme-git: the script
+# says when it is missing, and never installs it.
+#
 # Only --session needs root, for the two files of the login screen; it never
 # changes the default session. PREFIX (default ~/.local) chooses where the
 # rest goes; TERMINAL chooses the terminal opened inside the compositor.
@@ -84,6 +87,18 @@ if [[ ! -e "$config" ]]; then
     config_note="créée (rôles des écrans : à vérifier)"
 else
     config_note="conservée"
+fi
+
+# The icons of the shell come from a package, never installed from here.
+icons_package=reversal-icon-theme-git
+if command -v pacman >/dev/null && pacman -Q "$icons_package" >/dev/null 2>&1; then
+    icons_note="paquet $icons_package"
+elif compgen -G "/usr/share/icons/Reversal*/index.theme" >/dev/null \
+    || compgen -G "${XDG_DATA_HOME:-$HOME/.local/share}/icons/Reversal*/index.theme" >/dev/null \
+    || compgen -G "$HOME/.icons/Reversal*/index.theme" >/dev/null; then
+    icons_note="Reversal trouvé, hors du paquet $icons_package"
+else
+    icons_note="ABSENTES : paru -S $icons_package (AUR), sinon le thème d'icônes du système"
 fi
 
 # Started from the menu there is no terminal to read: the log goes to a file.
@@ -182,6 +197,7 @@ coquille est installé :
   menu             $entry
   configuration    $config  ($config_note)
   fonds d'écran    $wallpapers_dir/
+  icônes           $icons_note
   écran de connexion  $session_note
   journaux         $log_dir/
   terminal         $terminal

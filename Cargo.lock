@@ -810,6 +810,7 @@ dependencies = [
 name = "coquille-apps"
 version = "0.1.0"
 dependencies = [
+ "coquille-theme",
  "freedesktop-icons",
 ]
 

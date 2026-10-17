@@ -52,6 +52,7 @@ en garde la trace), et sa ligne retirée de ce tableau.
 | 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) | évolution | matériel |
 | 23 | [Verrouillage de la session](23-verrouillage-de-session.md) | évolution | imbriqué |
 | 24 | [Protocole `wp_presentation`](24-presentation-time.md) | évolution | matériel |
+| 25 | [Installer coquille comme paquet AUR](25-paquet-aur.md) | évolution | chroot, session |
 
 ## Ordre conseillé
 
@@ -60,4 +61,5 @@ en garde la trace), et sa ligne retirée de ce tableau.
 2. **07, 09, 10** : courts, sans dépendance.
 3. **05**, qui profite des drapeaux par écran du 01, puis **06**.
 4. **03 et 04** : demandent des essais sur le matériel avec Jimmy.
-5. Le reste selon l'envie ; **22 à 24** attendent des décisions de Jimmy.
+5. Le reste selon l'envie ; **22 à 24** attendent des décisions de Jimmy ;
+   **25** quand coquille sera prête à être distribuée.

@@ -746,8 +746,7 @@ pub fn tray_icon_element<'a, Message: 'a>(
                     .into(),
             };
         }
-        let theme = coquille_apps::icon_theme();
-        if let Some(path) = coquille_apps::find_icon(icon_name, &theme) {
+        if let Some(path) = coquille_apps::find_icon(icon_name, dock.icons.theme()) {
             let is_svg = path.extension().is_some_and(|ext| ext == "svg");
             if is_svg {
                 return svg(svg::Handle::from_path(path))

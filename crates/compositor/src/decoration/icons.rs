@@ -1,28 +1,50 @@
 //! The icons of applications in title bars: found in the icon theme of the
-//! system, drawn once at the size a title bar needs, and kept.
+//! shell, drawn once at the size a title bar needs, and kept until the theme
+//! or the accent changes.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use tiny_skia::{FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
 
+use crate::theme::{Rgba, ThemeKind};
+
 /// Icons already drawn, by name and size. A name that led nowhere is kept
 /// too, so that it is not looked up again for each frame.
 #[derive(Default)]
 pub struct IconCache {
-    /// The icon theme of the user, asked once.
-    theme: Option<String>,
+    /// The theme and the accent the icon theme was chosen for, and its name.
+    theme: Option<((ThemeKind, Rgba), String)>,
     drawn: HashMap<(String, u32), Option<Pixmap>>,
 }
 
 impl IconCache {
+    /// Takes the icon theme that goes with a theme and an accent. When it is
+    /// another one, the icons drawn so far are forgotten.
+    pub fn follow(&mut self, kind: ThemeKind, accent: Rgba) {
+        let style = (kind, accent);
+        if self
+            .theme
+            .as_ref()
+            .is_some_and(|(chosen, _)| *chosen == style)
+        {
+            return;
+        }
+        let name = coquille_apps::icon_theme_for(kind.into(), accent);
+        if self.theme.as_ref().is_none_or(|(_, used)| *used != name) {
+            tracing::info!(theme = name, "icon theme");
+            self.drawn.clear();
+        }
+        self.theme = Some((style, name));
+    }
+
     /// The icon `name` (as a desktop entry names it) as a square of `size`
     /// pixels; `None` when the theme has none, or not in a format that can
-    /// be drawn.
+    /// be drawn. The theme is the one `follow` took.
     pub fn get(&mut self, name: &str, size: u32) -> Option<&Pixmap> {
         let key = (name.to_owned(), size);
         if !self.drawn.contains_key(&key) {
-            let theme = self.theme.get_or_insert_with(coquille_apps::icon_theme);
+            let theme = self.theme.as_ref().map_or("hicolor", |(_, name)| name);
             let icon =
                 coquille_apps::find_icon(name, theme).and_then(|path| rasterize(&path, size));
             if icon.is_none() {

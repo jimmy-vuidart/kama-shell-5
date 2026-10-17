@@ -141,7 +141,8 @@ n'est jamais réécrit.
 
 - `model/` : toutes les règles (barre, tiroir, mixeur), sans interface,
   testées. La crate `coquille-apps` lit les fichiers `.desktop` et trouve les
-  icônes (le compositeur s'en sert aussi, pour ses barres de titre),
+  icônes, dans le thème Reversal qui va avec le thème et l'accent (le
+  compositeur s'en sert aussi, pour ses barres de titre),
   `steam.rs` lit la ludothèque, `config.rs` lit et réécrit la configuration.
 - `ui/` : les vues, avec [iced](https://iced.rs) et `iced_layershell`.
 - `backend/` : le lien avec le compositeur (crate `coquille-ipc`) et les

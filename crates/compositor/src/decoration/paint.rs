@@ -143,6 +143,7 @@ impl Painter {
     /// buttons. Returns `None` for an empty size.
     pub fn titlebar(&mut self, spec: &TitlebarSpec) -> Option<Pixmap> {
         let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        self.icons.follow(spec.theme, spec.accent);
         let (width, height) = (spec.size.w as f32, spec.size.h as f32);
         let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
         let layout = TitlebarLayout::new(spec.size, spec.buttons);
@@ -237,6 +238,7 @@ impl Painter {
     /// per window. Returns `None` when there is nothing to show.
     pub fn capsule_group(&mut self, spec: &GroupSpec) -> Option<PaintedGroup> {
         let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        self.icons.follow(spec.theme, spec.accent);
         let label_widths: Vec<i32> = spec
             .capsules
             .iter()

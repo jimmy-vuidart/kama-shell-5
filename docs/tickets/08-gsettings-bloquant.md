@@ -19,6 +19,14 @@ du thème, lecture du fichier, rendu du SVG (`decoration/icons.rs:27`).
 Le compositeur n'a qu'un fil : pendant ce temps, rien n'est dessiné et aucune
 entrée n'est traitée.
 
+**Depuis le 17 octobre 2026** : le thème d'icônes est Reversal
+(`coquille_apps::icon_theme_for`, `apps/src/reversal.rs`). Quand il est
+installé, `gsettings` n'est plus appelé : le compositeur lit seulement
+quelques dossiers d'icônes à la première barre dessinée et à chaque
+changement de thème ou d'accent (`IconCache::follow`). `gsettings` reste le
+repli sans Reversal, et la recherche et le rendu de chaque icône restent dans
+le chemin de rendu.
+
 ## Conséquence
 
 - Si D-Bus ou dconf ne répond pas (début de session, session lancée depuis

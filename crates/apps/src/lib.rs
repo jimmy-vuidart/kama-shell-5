@@ -4,6 +4,8 @@
 
 mod catalog;
 mod icons;
+mod reversal;
 
 pub use catalog::{App, Catalog, command_of, data_directories, languages, parse_entry};
-pub use icons::{find_icon, icon_theme};
+pub use icons::find_icon;
+pub use reversal::{PACKAGE as ICON_PACKAGE, icon_theme_for};

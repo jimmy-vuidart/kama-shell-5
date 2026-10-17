@@ -127,6 +127,7 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
 - **Un accent or métallique a été essayé, puis abandonné** : dégradés, lingots, filets et gris chauds n'étaient pas jolis à l'usage (commits `18374c1` à `1ad7eaa`, annulés). Ne pas y revenir sans que je le demande.
 - Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, cahier des charges `docs/maquettes/dock.md`) a une taille d'icônes configurable (`[dock]` `icon_size`, défaut 24 px ; barre de 44 px à 8 px du bord et zone réservée de 60 px par défaut, qui s'ajustent à la taille choisie). Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche.
 - Police d'interface : Figtree (repli : police système sans-serif).
+- **Icônes des applis : thème Reversal**, carrés arrondis comme sous macOS, sans détourner les marques (paquet AUR `reversal-icon-theme-git`, qui n'installe que la variante par défaut, `Reversal` et `Reversal-dark`). Le dock et le compositeur prennent la variante claire ou sombre selon le thème, et la couleur la plus proche de l'accent si sa variante est installée (`Reversal-purple-dark`…), sinon la variante par défaut ; sans Reversal, le thème d'icônes de GNOME (`gsettings`). Le choix (`crates/apps/src/reversal.rs`) suit les changements de thème et d'accent en cours de session. Les applis lancées, elles, gardent le thème d'icônes du système.
 
 ## Architecture visée
 
@@ -138,7 +139,7 @@ coquille/
 │  ├─ model/        # logique pure : écrans, dispositions, emplacements, règles, mémoire.
 │  │                # AUCUNE dépendance Wayland. Entièrement testé unitairement.
 │  ├─ ipc/          # ce que le compositeur et le dock se disent (JSON par lignes).
-│  ├─ apps/         # les applis installées (fichiers .desktop, icônes du thème).
+│  ├─ apps/         # les applis installées (fichiers .desktop, icônes Reversal).
 │  ├─ config/       # le fichier de configuration : le lire, en réécrire un réglage à la fois.
 │  ├─ theme/        # jetons d'apparence purs (couleurs, accents, repli), sans dépendance graphique.
 │  ├─ ui/           # ce que partagent les programmes du shell dessinés avec iced :
@@ -230,7 +231,7 @@ Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les régl
 
 ### Installer
 
-`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`).
+`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`). Il vérifie aussi que le thème d'icônes Reversal est là et, sinon, donne la commande pour installer le paquet (`paru -S reversal-icon-theme-git`) sans l'installer lui-même. À terme, coquille s'installera comme paquet AUR qui en dépendra (ticket 25).
 
 Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options. Ses boutons Se déconnecter, Redémarrer et Éteindre sont **réels** (après confirmation) partout sauf avec `--mock` : en imbriqué aussi, Redémarrer redémarre la machine.
 
