@@ -4,14 +4,15 @@
 
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    Column, Row, button, column, container, image, mouse_area, opaque, pick_list, progress_bar,
-    row, slider, space, stack, text, text_input,
+    Column, Row, button, column, container, image, mouse_area, pick_list, progress_bar, row,
+    slider, space, stack, text, text_input,
 };
 use iced::{
     Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, border, mouse,
 };
 
 use super::icons::{self, Glyph};
+use super::opaque::opaque;
 use super::style::{self, Palette};
 use crate::app::{Dock, Drawer, Message, OutputChoice, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};

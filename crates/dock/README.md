@@ -152,6 +152,9 @@ n'est jamais réécrit.
 - Couleurs, symboles, lien au compositeur et police Figtree (licence OFL,
   embarquée dans le binaire) viennent de la crate `coquille-ui`, partagée
   avec l'écran « Paramètres ».
+- Les panneaux du lanceur retiennent les clics avec leur propre `opaque`
+  (`ui/opaque.rs`) : celui d'iced demande le curseur `Idle`, dont
+  `iced_layershell` 0.19.1 fait le curseur d'attente.
 
 ## Limites
 
