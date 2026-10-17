@@ -28,8 +28,6 @@ if [ -f "$state/session.log" ]; then
     mv -f "$state/session.log" "$state/session.previous.log"
 fi
 
-# A display manager does not read the shell's PATH: the terminal started with
-# the session is named in full by the installer.
 here="$(dirname "$(readlink -f "$0")")"
 exec "$here/coquille" --backend hardware --log-file "$state/session.log" \
-    --spawn "exec \"$here/coquille-dock-watch\"" --spawn "@TERMINAL@" "$@"
+    --spawn "exec \"$here/coquille-dock-watch\"" "$@"

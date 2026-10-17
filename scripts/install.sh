@@ -10,7 +10,7 @@
 #
 # Only --session needs root, for the two files of the login screen; it never
 # changes the default session. PREFIX (default ~/.local) chooses where the
-# rest goes; TERMINAL chooses the terminal opened inside the compositor.
+# rest goes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -56,27 +56,12 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     exit 0
 fi
 
-terminal="${TERMINAL:-}"
-if [[ -z "$terminal" ]]; then
-    for candidate in kitty alacritty foot; do
-        if command -v "$candidate" >/dev/null; then
-            terminal="$(command -v "$candidate")"
-            break
-        fi
-    done
-fi
-if [[ -z "$terminal" ]]; then
-    echo "Aucun terminal trouvé : relancez avec TERMINAL=<commande>." >&2
-    exit 1
-fi
-
 cargo build --release --locked -p coquille -p coquille-dock -p coquille-settings
 install -Dm755 target/release/coquille "$bin"
 install -Dm755 target/release/coquille-dock "$dock_bin"
 install -Dm755 target/release/coquille-settings "$settings_bin"
 install -Dm755 scripts/coquille-dock-watch "$dock_watch"
-sed "s|@TERMINAL@|$terminal|" scripts/coquille-session >"$session_bin"
-chmod 755 "$session_bin"
+install -Dm755 scripts/coquille-session "$session_bin"
 mkdir -p "$wallpapers_dir"
 if compgen -G "assets/wallpapers/*.png" > /dev/null; then
     install -Dm644 -t "$wallpapers_dir" assets/wallpapers/*.png
@@ -104,8 +89,8 @@ fi
 # Started from the menu there is no terminal to read: the log goes to a file.
 # The dock comes along, as in the real session.
 launch() {
-    printf '"%s" --backend nested --log-file "%s/coquille.log" --spawn "exec %s" --spawn "%s" %s' \
-        "$bin" "$log_dir" "$dock_watch" "$terminal" "$1"
+    printf '"%s" --backend nested --log-file "%s/coquille.log" --spawn "exec %s" %s' \
+        "$bin" "$log_dir" "$dock_watch" "$1"
 }
 
 mkdir -p "$(dirname "$entry")"
@@ -200,9 +185,8 @@ coquille est installé :
   icônes           $icons_note
   écran de connexion  $session_note
   journaux         $log_dir/
-  terminal         $terminal
 
-Dans la session actuelle (fenêtre) :   coquille --three-screens --spawn $terminal
+Dans la session actuelle (fenêtre) :   coquille --three-screens
 Sur les vrais écrans, depuis un TTY :  coquille-session --exit-after 60
 Quitter : Super+Maj+E (Alt+Maj+E en fenêtre) ou Ctrl+Alt+Retour arrière.
 Sans le dock : COQUILLE_NO_DOCK=1 coquille-session

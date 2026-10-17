@@ -29,7 +29,7 @@ use crate::outputs::constrain;
 use crate::render::scene::Shape;
 use crate::resize::Edges;
 use crate::shell::{CapsuleHit, ManagedWindow};
-use crate::shortcuts::{Action, KeyPress, action_for};
+use crate::shortcuts::{Action, KeyPress, action_for, settings_command};
 use crate::state::State;
 use crate::theme::Rgba;
 
@@ -325,6 +325,13 @@ impl State {
             Action::SpawnTerminal => {
                 let terminal = self.terminal.clone();
                 self.spawn(&terminal);
+                return;
+            }
+            Action::OpenSettings => {
+                let beside = std::env::current_exe().ok();
+                let beside = beside.as_deref().and_then(std::path::Path::parent);
+                let command = settings_command(beside, self.config_path.as_deref());
+                self.spawn(&command);
                 return;
             }
             Action::RestoreWindow => {

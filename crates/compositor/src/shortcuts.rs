@@ -1,5 +1,7 @@
 //! Keyboard shortcuts of the compositor.
 
+use std::path::Path;
+
 use smithay::input::keyboard::{Keysym, ModifiersState};
 
 /// The modifier that marks a shortcut as meant for the shell.
@@ -46,6 +48,8 @@ pub enum Action {
     },
     /// Opens a terminal: the way to start anything until the launcher exists.
     SpawnTerminal,
+    /// Opens the settings screen of the shell.
+    OpenSettings,
     /// Brings back the window minimized last.
     RestoreWindow,
     /// Puts the fullscreen window (the game) back in a window.
@@ -91,6 +95,8 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
         Some(Action::Quit)
     } else if has(Keysym::Return) {
         Some(Action::SpawnTerminal)
+    } else if has(Keysym::s) {
+        Some(Action::OpenSettings)
     } else if has(Keysym::r) {
         Some(Action::RestoreWindow)
     } else if has(Keysym::Escape) {
@@ -102,6 +108,28 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     } else {
         None
     }
+}
+
+/// The command of the settings screen: the program installed next to the
+/// compositor (`beside`), else the one of the `PATH`, on the configuration
+/// file the compositor reads, if it was given one.
+pub fn settings_command(beside: Option<&Path>, config: Option<&Path>) -> String {
+    const PROGRAM: &str = "coquille-settings";
+    let program = beside
+        .map(|dir| dir.join(PROGRAM))
+        .filter(|program| program.is_file())
+        .map_or_else(|| PROGRAM.to_owned(), |path| path.display().to_string());
+    let mut command = quoted(&program);
+    if let Some(config) = config {
+        command.push_str(" --config ");
+        command.push_str(&quoted(&config.display().to_string()));
+    }
+    command
+}
+
+/// A text as one word of a shell command.
+fn quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -134,6 +162,23 @@ mod tests {
             Some(Action::RestoreWindow)
         );
         assert_eq!(press(false, false, &[Keysym::r]), None);
+    }
+
+    #[test]
+    fn mod_s_opens_the_settings() {
+        assert_eq!(press(true, false, &[Keysym::s]), Some(Action::OpenSettings));
+        assert_eq!(press(false, false, &[Keysym::s]), None);
+    }
+
+    #[test]
+    fn the_settings_open_on_the_file_of_the_compositor() {
+        let nowhere = Path::new("/nonexistent/coquille");
+
+        assert_eq!(settings_command(Some(nowhere), None), "'coquille-settings'");
+        assert_eq!(
+            settings_command(None, Some(Path::new("/tmp/l'essai/config.toml"))),
+            "'coquille-settings' --config '/tmp/l'\\''essai/config.toml'"
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@
 //! `wheel` turns the wheel by notches, down when positive.
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
-const KEYS: [(&str, u32); 13] = [
+const KEYS: [(&str, u32); 14] = [
     ("alt", 64),
     ("ctrl", 37),
     ("shift", 50),
@@ -28,6 +28,7 @@ const KEYS: [(&str, u32); 13] = [
     ("2", 11),
     ("e", 26),
     ("r", 27),
+    ("s", 39),
     ("pageup", 112),
     ("pagedown", 117),
 ];
