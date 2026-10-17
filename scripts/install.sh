@@ -150,13 +150,22 @@ else
     session_note="non installée (scripts/install.sh --session)"
 fi
 if [[ "${1:-}" == "--session" ]]; then
+    # The display managers derived from SDDM (plasmalogin among them) hand
+    # Exec to a shell script that runs it unquoted (`exec $@`): quotes would
+    # stay part of the program name, and a space would cut it in two. The
+    # path is therefore written bare, and must have no blank in it.
+    if [[ "$session_bin" =~ [[:space:]] ]]; then
+        echo "Le chemin $session_bin contient un espace : l'écran de connexion ne saurait pas le lancer." >&2
+        echo "Choisissez un PREFIX sans espace." >&2
+        exit 1
+    fi
     staging="$(mktemp -d)"
     cat >"$staging/coquille.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=coquille
 Comment=Compositeur « Centre + compagnons »
-Exec="$session_bin"
+Exec=$session_bin
 DesktopNames=coquille
 DESKTOP
     cat >"$staging/coquille-essai.desktop" <<DESKTOP
@@ -164,7 +173,7 @@ DESKTOP
 Type=Application
 Name=coquille (essai, 60 secondes)
 Comment=Se ferme tout seul après une minute : pour un premier essai
-Exec="$session_bin" --exit-after 60
+Exec=$session_bin --exit-after 60
 DesktopNames=coquille
 DESKTOP
     echo "Ajout de coquille à l'écran de connexion (droits administrateur) :"
