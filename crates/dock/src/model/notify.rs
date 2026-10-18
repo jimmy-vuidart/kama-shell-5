@@ -283,63 +283,76 @@ impl NotifyState {
     }
 }
 
-/// Gap between the toast stack and the dock / screen edge. The compositor
-/// already keeps the surface out of the dock's reserved zone.
-pub const TOAST_EDGE_GAP: i32 = 8;
-pub const TOAST_STACK_GAP: u32 = 8;
-pub const TOAST_CARD_W_VERTICAL: u32 = 260;
-pub const TOAST_CARD_H_VERTICAL: u32 = 108;
-pub const TOAST_CARD_W_HORIZONTAL: u32 = 220;
-pub const TOAST_CARD_H_HORIZONTAL: u32 = 96;
+/// Toasts are capsules of the dock's matter and thickness, in the bottom
+/// corner of the screen on the dock's side: under an upright bar, beside a
+/// lying one (which lies centered). They pile up from that corner.
+pub const TOAST_WIDTH: u32 = 360;
+/// Between two capsules, and between the pile and an upright bar.
+pub const TOAST_GAP: u32 = 8;
+/// From the screen's edges: the dock's own margin.
+pub const TOAST_EDGE: u32 = 8;
+/// Room left around the pile, inside the surface, for its shadow.
+pub const TOAST_SHADOW: u32 = 24;
 
-/// Which corner of the screen the overlay is glued to.
+/// Which bottom corner of the screen the pile sits in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToastAnchor {
-    /// Upright dock on the left: pile grows up from the bottom.
-    LeftBottom,
-    /// Upright dock on the right.
-    RightBottom,
-    /// Lying dock: row grows left from the bottom-right.
+    BottomLeft,
     BottomRight,
 }
 
-/// Overlay size, anchors and layer-shell margins (`top, right, bottom, left`).
+/// The overlay: its size, its corner, and where the pile is inside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToastGeometry {
     pub width: u32,
     pub height: u32,
     pub anchor: ToastAnchor,
-    pub margin: (i32, i32, i32, i32),
+    /// Room around the pile (`top, right, bottom, left`): the screen's
+    /// margin on the corner's sides, the shadow's on the others.
+    pub padding: (u32, u32, u32, u32),
+    /// The pile itself (`x, y, width, height`): what takes the pointer.
+    pub pile: (u32, u32, u32, u32),
 }
 
-/// Surface that holds `count` cards at the end of a dock of `orientation`.
-pub fn toast_geometry(orientation: Orientation, count: usize) -> ToastGeometry {
+/// The overlay holding `count` capsules `thickness` high, for a bar of
+/// `orientation`.
+pub fn toast_geometry(orientation: Orientation, count: usize, thickness: u32) -> ToastGeometry {
     let count = count.clamp(1, MAX_VISIBLE) as u32;
-    let along_dock = TOAST_EDGE_GAP;
-    match orientation {
-        Orientation::Vertical(Side::Left) => ToastGeometry {
-            width: TOAST_CARD_W_VERTICAL,
-            height: stack_len(TOAST_CARD_H_VERTICAL, count),
-            anchor: ToastAnchor::LeftBottom,
-            margin: (0, 0, TOAST_EDGE_GAP, along_dock),
-        },
-        Orientation::Vertical(Side::Right) => ToastGeometry {
-            width: TOAST_CARD_W_VERTICAL,
-            height: stack_len(TOAST_CARD_H_VERTICAL, count),
-            anchor: ToastAnchor::RightBottom,
-            margin: (0, along_dock, TOAST_EDGE_GAP, 0),
-        },
-        Orientation::Horizontal => ToastGeometry {
-            width: stack_len(TOAST_CARD_W_HORIZONTAL, count),
-            height: TOAST_CARD_H_HORIZONTAL,
-            anchor: ToastAnchor::BottomRight,
-            margin: (0, TOAST_EDGE_GAP, along_dock, 0),
-        },
+    let pile_height = thickness * count + TOAST_GAP * (count - 1);
+    let anchor = match orientation {
+        Orientation::Vertical(Side::Left) => ToastAnchor::BottomLeft,
+        Orientation::Vertical(Side::Right) | Orientation::Horizontal => ToastAnchor::BottomRight,
+    };
+    let (left, right) = match anchor {
+        ToastAnchor::BottomLeft => (TOAST_EDGE, TOAST_SHADOW),
+        ToastAnchor::BottomRight => (TOAST_SHADOW, TOAST_EDGE),
+    };
+    let (top, bottom) = (TOAST_SHADOW, TOAST_EDGE);
+    ToastGeometry {
+        width: left + TOAST_WIDTH + right,
+        height: top + pile_height + bottom,
+        anchor,
+        padding: (top, right, bottom, left),
+        pile: (left, top, TOAST_WIDTH, pile_height),
     }
 }
 
-fn stack_len(card: u32, count: u32) -> u32 {
-    card * count + TOAST_STACK_GAP * count.saturating_sub(1)
+/// How many capsules fit under an upright bar of `bar_height`, centered on
+/// a screen of `screen_height`, without touching it; at least one, at most
+/// `MAX_VISIBLE`. Beside a lying bar, the corner is free: all of them.
+pub fn toasts_that_fit(
+    orientation: Orientation,
+    screen_height: Option<u32>,
+    bar_height: u32,
+    thickness: u32,
+) -> usize {
+    let (Orientation::Vertical(_), Some(screen)) = (orientation, screen_height) else {
+        return MAX_VISIBLE;
+    };
+    let below = screen.saturating_sub(bar_height) / 2;
+    let room = below.saturating_sub(TOAST_GAP + TOAST_EDGE) + TOAST_GAP;
+    let fit = room / (thickness + TOAST_GAP);
+    (fit as usize).clamp(1, MAX_VISIBLE)
 }
 
 /// What `sync_toasts` should do to the overlay surface.
@@ -354,28 +367,20 @@ pub enum ToastSurfacePlan {
 
 /// Pure overlay lifecycle: open, resize, relocate, or close.
 ///
-/// `open` is the bar, orientation and last geometry of an existing surface.
-/// `wanted` is the bar that should host toasts (`None` when DND, anchoring,
-/// or no visible bar).
+/// `open` is the screen and geometry of an existing surface; `wanted`, the
+/// ones toasts should have now (`None` when none is to show).
 pub fn toast_surface_plan(
-    open: Option<(OutputRole, Orientation, ToastGeometry)>,
-    wanted: Option<(OutputRole, Orientation)>,
-    visible: usize,
+    open: Option<(OutputRole, ToastGeometry)>,
+    wanted: Option<(OutputRole, ToastGeometry)>,
 ) -> ToastSurfacePlan {
-    match (wanted, open) {
+    match (open, wanted) {
         (None, None) => ToastSurfacePlan::Keep,
-        (None, Some(_)) | (Some(_), Some(_)) if visible == 0 => ToastSurfacePlan::Close,
-        (None, Some(_)) => ToastSurfacePlan::Close,
-        (Some(_), None) => ToastSurfacePlan::Open,
-        (Some((screen, orientation)), Some((open_screen, open_orientation, geo))) => {
-            let next = toast_geometry(orientation, visible);
-            if screen != open_screen
-                || orientation != open_orientation
-                || next.anchor != geo.anchor
-                || next.margin != geo.margin
-            {
+        (Some(_), None) => ToastSurfacePlan::Close,
+        (None, Some(_)) => ToastSurfacePlan::Open,
+        (Some((open_screen, open)), Some((screen, next))) => {
+            if screen != open_screen || next.anchor != open.anchor {
                 ToastSurfacePlan::Relocate
-            } else if (next.width, next.height) != (geo.width, geo.height) {
+            } else if (next.width, next.height) != (open.width, open.height) {
                 ToastSurfacePlan::Resize {
                     size: (next.width, next.height),
                 }
@@ -945,67 +950,89 @@ mod tests {
     }
 
     #[test]
-    fn toast_geometry_follows_bar_orientation() {
-        let left = toast_geometry(Orientation::Vertical(Side::Left), 2);
-        assert_eq!(left.anchor, ToastAnchor::LeftBottom);
-        assert_eq!(left.width, TOAST_CARD_W_VERTICAL);
-        assert_eq!(left.height, TOAST_CARD_H_VERTICAL * 2 + TOAST_STACK_GAP);
-        assert_eq!(left.margin, (0, 0, TOAST_EDGE_GAP, TOAST_EDGE_GAP));
-
-        let right = toast_geometry(Orientation::Vertical(Side::Right), 1);
-        assert_eq!(right.anchor, ToastAnchor::RightBottom);
-        assert_eq!(right.margin, (0, TOAST_EDGE_GAP, TOAST_EDGE_GAP, 0));
-
-        let bottom = toast_geometry(Orientation::Horizontal, 3);
-        assert_eq!(bottom.anchor, ToastAnchor::BottomRight);
-        assert_eq!(bottom.height, TOAST_CARD_H_HORIZONTAL);
+    fn toasts_sit_in_the_bottom_corner_on_the_dock_side() {
+        let left = toast_geometry(Orientation::Vertical(Side::Left), 2, 44);
+        assert_eq!(left.anchor, ToastAnchor::BottomLeft);
+        // The pile keeps the dock's margin from the edges, the shadow room
+        // on the inner sides.
         assert_eq!(
-            bottom.width,
-            TOAST_CARD_W_HORIZONTAL * 3 + TOAST_STACK_GAP * 2
+            left.padding,
+            (TOAST_SHADOW, TOAST_SHADOW, TOAST_EDGE, TOAST_EDGE)
         );
-        assert_eq!(bottom.margin, (0, TOAST_EDGE_GAP, TOAST_EDGE_GAP, 0));
+        assert_eq!(
+            left.pile,
+            (TOAST_EDGE, TOAST_SHADOW, TOAST_WIDTH, 44 * 2 + TOAST_GAP)
+        );
+        assert_eq!(left.width, TOAST_EDGE + TOAST_WIDTH + TOAST_SHADOW);
+        assert_eq!(left.height, TOAST_SHADOW + 96 + TOAST_EDGE);
 
-        let capped = toast_geometry(Orientation::Horizontal, 9);
-        assert_eq!(capped.width, bottom.width);
+        let right = toast_geometry(Orientation::Vertical(Side::Right), 1, 44);
+        assert_eq!(right.anchor, ToastAnchor::BottomRight);
+        assert_eq!(
+            right.padding,
+            (TOAST_SHADOW, TOAST_EDGE, TOAST_EDGE, TOAST_SHADOW)
+        );
+        assert_eq!(right.pile.0, TOAST_SHADOW);
+
+        let lying = toast_geometry(Orientation::Horizontal, 1, 44);
+        assert_eq!(lying.anchor, ToastAnchor::BottomRight);
+        assert_eq!(lying, right);
+
+        let capped = toast_geometry(Orientation::Horizontal, 9, 44);
+        assert_eq!(
+            capped,
+            toast_geometry(Orientation::Horizontal, MAX_VISIBLE, 44)
+        );
+    }
+
+    #[test]
+    fn only_the_toasts_that_fit_under_an_upright_bar_show() {
+        let upright = Orientation::Vertical(Side::Left);
+        // 1080 high, a 500 bar: 290 below it, room for three.
+        assert_eq!(toasts_that_fit(upright, Some(1080), 500, 44), 3);
+        // 900 high, a 600 bar: 150 below, minus 16 of margins: two.
+        assert_eq!(toasts_that_fit(upright, Some(900), 600, 44), 2);
+        // No room at all: one anyway, rather than nothing.
+        assert_eq!(toasts_that_fit(upright, Some(900), 900, 44), 1);
+        // Screen unknown, or a lying bar: all of them.
+        assert_eq!(toasts_that_fit(upright, None, 500, 44), MAX_VISIBLE);
+        assert_eq!(
+            toasts_that_fit(Orientation::Horizontal, Some(900), 900, 44),
+            MAX_VISIBLE
+        );
     }
 
     #[test]
     fn toast_surface_plan_opens_resizes_relocates_and_closes() {
-        let left = (OutputRole::Left, Orientation::Vertical(Side::Left));
-        let right = (OutputRole::Right, Orientation::Vertical(Side::Right));
-        let geo = toast_geometry(left.1, 1);
-        assert_eq!(toast_surface_plan(None, None, 0), ToastSurfacePlan::Keep);
+        let one = toast_geometry(Orientation::Vertical(Side::Left), 1, 44);
+        let two = toast_geometry(Orientation::Vertical(Side::Left), 2, 44);
+        let mirrored = toast_geometry(Orientation::Vertical(Side::Right), 1, 44);
+        let left = OutputRole::Left;
+        assert_eq!(toast_surface_plan(None, None), ToastSurfacePlan::Keep);
         assert_eq!(
-            toast_surface_plan(None, Some(left), 1),
+            toast_surface_plan(None, Some((left, one))),
             ToastSurfacePlan::Open
         );
         assert_eq!(
-            toast_surface_plan(Some((left.0, left.1, geo)), None, 1),
+            toast_surface_plan(Some((left, one)), None),
             ToastSurfacePlan::Close
         );
         assert_eq!(
-            toast_surface_plan(Some((left.0, left.1, geo)), Some(left), 0),
-            ToastSurfacePlan::Close
-        );
-
-        let two = toast_geometry(left.1, 2);
-        assert_eq!(
-            toast_surface_plan(Some((left.0, left.1, geo)), Some(left), 2),
+            toast_surface_plan(Some((left, one)), Some((left, two))),
             ToastSurfacePlan::Resize {
                 size: (two.width, two.height)
             }
         );
         assert_eq!(
-            toast_surface_plan(Some((left.0, left.1, geo)), Some(right), 1),
-            ToastSurfacePlan::Relocate
-        );
-        let lying = (OutputRole::Left, Orientation::Horizontal);
-        assert_eq!(
-            toast_surface_plan(Some((left.0, left.1, geo)), Some(lying), 1),
+            toast_surface_plan(Some((left, one)), Some((OutputRole::Right, one))),
             ToastSurfacePlan::Relocate
         );
         assert_eq!(
-            toast_surface_plan(Some((left.0, left.1, geo)), Some(left), 1),
+            toast_surface_plan(Some((left, one)), Some((left, mirrored))),
+            ToastSurfacePlan::Relocate
+        );
+        assert_eq!(
+            toast_surface_plan(Some((left, one)), Some((left, one))),
             ToastSurfacePlan::Keep
         );
     }

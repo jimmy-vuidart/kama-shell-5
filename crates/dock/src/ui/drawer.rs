@@ -798,14 +798,19 @@ fn control_center<'a>(
         (None, true, _) => screenshot_selector(narrow, palette),
         (None, false, note) => session(dock, note.as_deref(), narrow, palette),
     };
-    let mut parts: Column<'_, Message> = column![switches, sliders].spacing(12);
+    // The notices waiting come first, over the switches and the sliders.
+    let mut parts: Column<'_, Message> = column![].spacing(12);
     if !dock.notify.history.is_empty() {
         parts = parts
-            .push(rule(palette))
-            .push(notification_history(dock, palette));
+            .push(notification_history(dock, palette))
+            .push(rule(palette));
     }
-    parts = parts.push(rule(palette)).push(foot);
-    container(parts.spacing(12))
+    parts = parts
+        .push(switches)
+        .push(sliders)
+        .push(rule(palette))
+        .push(foot);
+    container(parts)
         .padding(12)
         .style(move |_| style::fill(palette.card, 14.0))
         .into()

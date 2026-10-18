@@ -28,7 +28,7 @@ use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
 use crate::model::notify::{
     CloseReason, Notice, NotifyState, ToastAnchor, ToastGeometry, ToastSurfacePlan, toast_geometry,
-    toast_surface_plan,
+    toast_surface_plan, toasts_that_fit,
 };
 use crate::model::tray::TrayItem;
 use crate::model::{Identity, Orientation, Side, identify};
@@ -129,13 +129,15 @@ pub struct Drawer {
     pub surface: Option<Size>,
 }
 
-/// Overlay of visible toasts, glued to the end of one bar.
+/// Overlay of the toasts on screen, in the bottom corner on one bar's side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToastSurface {
     pub id: window::Id,
     pub screen: OutputRole,
     pub orientation: Orientation,
     pub geometry: ToastGeometry,
+    /// How many capsules it shows: the newest that fit.
+    pub shown: usize,
 }
 
 impl Drawer {
@@ -969,20 +971,51 @@ impl Dock {
         }
     }
 
-    fn open_toasts(&mut self, screen: OutputRole, orientation: Orientation) -> Task<Message> {
-        let geo = toast_geometry(orientation, self.notify.visible.len());
-        let anchor = match geo.anchor {
-            ToastAnchor::LeftBottom => Anchor::Left | Anchor::Bottom,
-            ToastAnchor::RightBottom => Anchor::Right | Anchor::Bottom,
-            ToastAnchor::BottomRight => Anchor::Bottom | Anchor::Right,
+    /// Where toasts go now: the bar's screen, its orientation, how many
+    /// capsules show and the overlay that holds them. `None` when none is
+    /// to show.
+    fn toast_layout(&self) -> Option<(OutputRole, Orientation, usize, ToastGeometry)> {
+        if self.notify.visible.is_empty() {
+            return None;
+        }
+        let (screen, orientation) = self.toast_target()?;
+        let metrics = self.metrics();
+        let thickness = metrics.width.round() as u32;
+        let bar_height = self.bar_on(screen).map_or(0.0, |bar| {
+            let pinned = bar.pinned();
+            let others = bar.entries.len() - pinned;
+            metrics.bar_height(pinned, others, self.tray.len())
+        });
+        let screen_height = self.screen(screen).map(|known| known.height.max(0) as u32);
+        let fit = toasts_that_fit(
+            orientation,
+            screen_height,
+            bar_height.ceil() as u32,
+            thickness,
+        );
+        let shown = self.notify.visible.len().min(fit);
+        let geometry = toast_geometry(orientation, shown, thickness);
+        Some((screen, orientation, shown, geometry))
+    }
+
+    fn open_toasts(
+        &mut self,
+        screen: OutputRole,
+        orientation: Orientation,
+        shown: usize,
+        geometry: ToastGeometry,
+    ) -> Task<Message> {
+        let anchor = match geometry.anchor {
+            ToastAnchor::BottomLeft => Anchor::Left | Anchor::Bottom,
+            ToastAnchor::BottomRight => Anchor::Right | Anchor::Bottom,
         };
-        let size = (geo.width, geo.height);
         let (id, task) = Message::layershell_open(NewLayerShellSettings {
-            size: Some(size),
+            size: Some((geometry.width, geometry.height)),
             layer: Layer::Overlay,
             anchor,
-            exclusive_zone: Some(0),
-            margin: Some(geo.margin),
+            // In the corner itself, like the dock: not beside its zone.
+            exclusive_zone: Some(-1),
+            margin: None,
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: self.output_for_bar(screen),
             events_transparent: false,
@@ -992,9 +1025,24 @@ impl Dock {
             id,
             screen,
             orientation,
-            geometry: geo,
+            geometry,
+            shown,
         });
-        task
+        task.chain(self.toast_input_region())
+    }
+
+    /// The overlay takes the pointer on its capsules only: the shadow
+    /// around them lets clicks through to the windows.
+    fn toast_input_region(&self) -> Task<Message> {
+        let Some(surface) = self.toasts else {
+            return Task::none();
+        };
+        let (x, y, width, height) = surface.geometry.pile;
+        let (x, y, width, height) = (x as i32, y as i32, width as i32, height as i32);
+        Task::done(Message::SetInputRegion {
+            id: surface.id,
+            callback: ActionCallback::new(move |region| region.add(x, y, width, height)),
+        })
     }
 
     fn sync_toasts(&mut self) -> Task<Message> {
@@ -1003,30 +1051,37 @@ impl Dock {
         if self.notify.effective_dnd(!anchored.is_empty()) {
             self.notify.hide_toasts();
         }
-        let wanted = self
-            .toast_target()
-            .filter(|_| !self.notify.visible.is_empty());
+        let layout = self.toast_layout();
         let open = self
             .toasts
-            .map(|surface| (surface.screen, surface.orientation, surface.geometry));
-        match toast_surface_plan(open, wanted, self.notify.visible.len()) {
-            ToastSurfacePlan::Keep => Task::none(),
+            .map(|surface| (surface.screen, surface.geometry));
+        let wanted = layout.map(|(screen, _, _, geometry)| (screen, geometry));
+        match toast_surface_plan(open, wanted) {
             ToastSurfacePlan::Close => self.close_toasts(),
             ToastSurfacePlan::Open | ToastSurfacePlan::Relocate => {
-                let (screen, orientation) = wanted.expect("plan opens a wanted bar");
+                let (screen, orientation, shown, geometry) =
+                    layout.expect("the plan opens a wanted overlay");
                 let close = self.close_toasts();
-                close.chain(self.open_toasts(screen, orientation))
+                close.chain(self.open_toasts(screen, orientation, shown, geometry))
             }
-            ToastSurfacePlan::Resize { size } => {
-                if let Some(surface) = &mut self.toasts {
-                    surface.geometry.width = size.0;
-                    surface.geometry.height = size.1;
-                    Task::done(Message::SizeChange {
-                        id: surface.id,
-                        size,
-                    })
-                } else {
-                    Task::none()
+            plan @ (ToastSurfacePlan::Keep | ToastSurfacePlan::Resize { .. }) => {
+                let (Some(surface), Some((_, orientation, shown, geometry))) =
+                    (&mut self.toasts, layout)
+                else {
+                    return Task::none();
+                };
+                // The same corner: a lying bar and an upright one on the
+                // right share it.
+                surface.orientation = orientation;
+                surface.shown = shown;
+                surface.geometry = geometry;
+                let id = surface.id;
+                match plan {
+                    ToastSurfacePlan::Resize { size } => {
+                        Task::done(Message::SizeChange { id, size })
+                            .chain(self.toast_input_region())
+                    }
+                    _ => Task::none(),
                 }
             }
         }
@@ -1978,7 +2033,7 @@ impl Dock {
             return ui::drawer::view(self, drawer);
         }
         if let Some(surface) = self.toasts.as_ref().filter(|surface| surface.id == id) {
-            return ui::toasts::view(self, surface.orientation);
+            return ui::toasts::view(self, surface);
         }
         iced::widget::space().into()
     }

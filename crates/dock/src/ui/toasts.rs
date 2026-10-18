@@ -1,8 +1,6 @@
-//! Overlay toast cards glued to the end of a dock bar.
-//!
-//! Their geometry is in the model (`toast_geometry`): along an upright bar
-//! the cards pile up from its bottom end, along a lying bar they line up
-//! leftwards from its right end.
+//! Toasts: capsules of the dock's matter, thickness and roundness, piled up
+//! in the bottom corner of the screen on the dock's side (geometry in the
+//! model, `toast_geometry`). The newest sits in the corner.
 
 use iced::widget::text::Wrapping;
 use iced::widget::{Column, Row, button, column, container, image, mouse_area, row, text};
@@ -10,112 +8,84 @@ use iced::{Alignment, ContentFit, Element, Length, Padding};
 
 use super::icons::{self, Glyph, Icon as ThemeIcon};
 use super::style::{self, Palette};
-use crate::app::{Dock, Message};
-use crate::model::Orientation;
+use crate::app::{Dock, Message, ToastSurface};
 use crate::model::notify::{self, Icon, Notice};
 
-pub fn view<'a>(dock: &'a Dock, orientation: Orientation) -> Element<'a, Message> {
+/// Buttons a capsule shows besides its cross; the others wait for the app.
+const ACTIONS: usize = 2;
+
+pub fn view<'a>(dock: &'a Dock, surface: &ToastSurface) -> Element<'a, Message> {
     let palette = dock.palette();
-    let notices = dock.notify.visible_notices();
-    let cards: Vec<Element<'a, Message>> = notices
+    let mut notices = dock.notify.visible_notices();
+    notices.truncate(surface.shown);
+    // Newest first in the model; the newest goes at the bottom, in the corner.
+    let capsules = notices
         .into_iter()
-        .map(|notice| card(dock, notice, palette, orientation))
-        .collect();
-    let stack: Element<'a, Message> = match orientation {
-        Orientation::Vertical(_) => Column::with_children(cards)
-            .spacing(notify::TOAST_STACK_GAP as f32)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Start)
-            .into(),
-        Orientation::Horizontal => Row::with_children(cards)
-            .spacing(notify::TOAST_STACK_GAP as f32)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_y(Alignment::End)
-            .into(),
-    };
-    let aligned = match orientation {
-        Orientation::Vertical(_) => container(stack)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_y(Alignment::End),
-        Orientation::Horizontal => container(stack)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::End)
-            .align_y(Alignment::End),
-    };
-    aligned.padding(0).into()
+        .rev()
+        .map(|notice| capsule(dock, notice, palette));
+    let pile = Column::with_children(capsules).spacing(notify::TOAST_GAP as f32);
+    let (top, right, bottom, left) = surface.geometry.padding;
+    container(pile)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding {
+            top: top as f32,
+            right: right as f32,
+            bottom: bottom as f32,
+            left: left as f32,
+        })
+        .align_y(Alignment::End)
+        .into()
 }
 
-fn card<'a>(
-    dock: &'a Dock,
-    notice: &'a Notice,
-    palette: Palette,
-    orientation: Orientation,
-) -> Element<'a, Message> {
-    let (card_w, card_h) = match orientation {
-        Orientation::Vertical(_) => (
-            notify::TOAST_CARD_W_VERTICAL as f32,
-            notify::TOAST_CARD_H_VERTICAL as f32,
-        ),
-        Orientation::Horizontal => (
-            notify::TOAST_CARD_W_HORIZONTAL as f32,
-            notify::TOAST_CARD_H_HORIZONTAL as f32,
-        ),
-    };
+/// One notice, as the dock bar looks: its icon where a dock icon would be,
+/// the summary over a line of body, its buttons and a cross.
+fn capsule<'a>(dock: &'a Dock, notice: &'a Notice, palette: Palette) -> Element<'a, Message> {
+    let metrics = dock.metrics();
     let id = notice.id;
-    let picture = notice_icon(dock, notice, 32.0);
-    let summary = text(if notice.summary.is_empty() {
+    let picture = notice_icon(dock, notice, metrics.icon_size);
+
+    let title = if notice.summary.is_empty() {
+        &notice.app
+    } else {
+        &notice.summary
+    };
+    let body = notify::plain_text(&notice.body).replace('\n', " ");
+    let detail = if body.trim().is_empty() {
         notice.app.clone()
     } else {
-        notice.summary.clone()
-    })
-    .size(13)
-    .font(style::SEMIBOLD)
-    .color(palette.text)
-    .wrapping(Wrapping::None)
-    .line_height(1.2);
-    let summary = container(summary).width(Length::Fill).height(16).clip(true);
-    let body = if notice.body.is_empty() {
-        None
-    } else {
-        let lines = match orientation {
-            Orientation::Vertical(_) => 32.0,
-            Orientation::Horizontal => 16.0,
-        };
-        Some(
-            container(
-                text(notify::plain_text(&notice.body))
-                    .size(12)
-                    .color(palette.muted)
-                    .wrapping(Wrapping::Word)
-                    .line_height(1.2),
-            )
-            .width(Length::Fill)
-            .height(lines)
-            .clip(true),
-        )
+        body
     };
-    let mut words: Column<'a, Message> = column![summary].spacing(2);
-    if let Some(body) = body {
-        words = words.push(body);
-    }
-    let actions: Vec<Element<'a, Message>> = notice
+    let words = column![
+        text(title.as_str())
+            .size(13)
+            .font(style::SEMIBOLD)
+            .color(palette.text)
+            .wrapping(Wrapping::None),
+        text(detail)
+            .size(12)
+            .color(palette.muted)
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(1);
+    let words = mouse_area(container(words).width(Length::Fill).clip(true))
+        .on_press(Message::NoticeOpen(id));
+
+    let actions = notice
         .actions
         .iter()
         .filter(|(key, _)| key != "default")
+        .take(ACTIONS)
         .map(|(key, label)| {
             button(
                 container(
-                    text(label.clone())
+                    text(label.as_str())
                         .size(12)
                         .font(style::MEDIUM)
                         .color(palette.accent)
                         .wrapping(Wrapping::None),
                 )
-                .max_width(72.0)
+                .max_width(80.0)
                 .clip(true),
             )
             .padding(Padding::from([4.0, 8.0]))
@@ -123,40 +93,35 @@ fn card<'a>(
                 id,
                 key: key.clone(),
             })
-            .style(style::flat(palette.hover, 8.0))
+            .style(style::flat(palette.hover, metrics.tile_radius))
             .into()
-        })
-        .collect();
-    if !actions.is_empty() {
-        words = words.push(
-            container(Row::with_children(actions).spacing(4).wrap())
-                .width(Length::Fill)
-                .height(24)
-                .clip(true),
-        );
-    }
+        });
+    let actions = Row::with_children(actions).spacing(2);
 
     let close = button(icons::glyph(Glyph::Close, 12.0, palette.muted))
-        .padding(4)
+        .padding(6)
         .on_press(Message::NoticeDismiss(id))
-        .style(style::flat(palette.hover, 8.0));
+        .style(style::flat(palette.hover, metrics.tile_radius));
 
-    let body_hit = mouse_area(words.width(Length::Fill).height(Length::Fill))
-        .on_press(Message::NoticeOpen(id));
-    let inner = row![picture, body_hit, close]
+    // The icon sits where the dock's icons do, as far from the edges.
+    let inset = (metrics.width - metrics.icon_size) / 2.0;
+    let inner = row![picture, words, actions, close]
         .spacing(10)
-        .align_y(Alignment::Start)
-        .height(Length::Fill);
-
+        .align_y(Alignment::Center);
     container(inner)
-        .padding(12)
-        .width(card_w)
-        .height(card_h)
+        .width(notify::TOAST_WIDTH as f32)
+        .height(metrics.width)
+        .padding(Padding {
+            top: 0.0,
+            right: inset / 2.0,
+            bottom: 0.0,
+            left: inset,
+        })
+        .center_y(metrics.width)
         .clip(true)
-        .style(move |_| {
-            let mut fill = style::outlined(palette.glass, palette.rim, 12.0);
-            fill.shadow = palette.shadow();
-            fill
+        .style(move |_| iced::widget::container::Style {
+            shadow: palette.shadow(),
+            ..style::outlined(palette.glass, palette.rim, metrics.radius)
         })
         .into()
 }

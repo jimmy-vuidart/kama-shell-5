@@ -162,20 +162,26 @@ n'est jamais réécrit.
 Le dock sert `org.freedesktop.Notifications` sur le bus de session
 (`backend/notify.rs`) ; les règles sont dans `model/notify.rs`, testées.
 
-- **Bulles** : une surface layer-shell à part (`coquille-toasts`, calque
-  `Overlay`, `ui/toasts.rs`), à 8 px du bout de la première barre visible
-  (gauche, puis centre, puis droite) : empilées vers le haut depuis le bas
-  d'une barre verticale, en rang vers la gauche depuis la droite d'une barre
-  horizontale. Trois au plus, la plus récente en premier. Icône (image de la
-  notification, sinon son icône, sinon celle de l'appli), résumé, corps sans
-  balises, boutons d'action, croix.
+- **Bulles** : des capsules de la matière, de l'épaisseur et de l'arrondi
+  de la barre (`ui/toasts.rs`), dans une surface layer-shell à part
+  (`coquille-toasts`, calque `Overlay`). Elles se posent dans le coin bas de
+  l'écran de la première barre visible (gauche, puis centre, puis droite), à
+  la marge du dock : **sous une barre verticale** (coin gauche, ou droit pour
+  une barre à droite), **à droite d'une barre horizontale**, sur sa ligne.
+  Elles s'empilent vers le haut, la plus récente dans le coin ; trois au
+  plus, et sous une barre verticale seulement celles qui tiennent sans la
+  toucher. Icône à la place de celles du dock (image de la notification,
+  sinon son icône, sinon celle de l'appli), résumé, une ligne du corps sans
+  balises, deux boutons d'action au plus, croix. Seules les capsules
+  prennent le pointeur, pas l'ombre autour.
 - **Délai** : celui de l'appli, 5 s par défaut ; `0` ou l'urgence critique
   la gardent jusqu'à ce qu'on s'en occupe. Une bulle qui expire disparaît
   mais **la notification reste ouverte**, dans l'historique (le serveur
   annonce `persistence`) ; seule une notification `transient` est fermée
   avec elle.
-- **Historique** : les notifications encore ouvertes, dans le centre de
-  contrôle (deux lignes visibles, le reste en défilement). Un clic sur une
+- **Historique** : les notifications encore ouvertes, en tête du centre de
+  contrôle, au-dessus des bascules (deux lignes visibles, le reste en
+  défilement). Un clic sur une
   ligne ou sur une bulle déclenche son action `default` s'il y en a une et
   amène la fenêtre de l'appli (trouvée par `desktop-entry`, sinon par le nom
   de l'appli), puis la ferme. La croix la ferme, « Tout effacer » les ferme
@@ -207,8 +213,8 @@ Le dock sert `org.freedesktop.Notifications` sur le bus de session
   pas encore d'éclairage nocturne.
 - **Notifications** : ni son, ni réponse dans la bulle, ni jeton
   d'activation (`ActivationToken`) : le dock amène lui-même la fenêtre de
-  l'appli, ce qui suffit tant qu'elle en a une ouverte. Le corps d'une bulle
-  est coupé à deux lignes (une le long d'une barre horizontale). Avec
+  l'appli, ce qui suffit tant qu'elle en a une ouverte. Une capsule ne montre
+  qu'une ligne du corps. Avec
   `--mock`, pas de notifications.
 - **Icônes X11 de la zone de notification** (Wine, Proton : Ubisoft
   Connect…) : le dock est la zone de notification XEmbed du serveur X
