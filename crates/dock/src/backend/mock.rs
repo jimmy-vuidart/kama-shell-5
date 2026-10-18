@@ -18,6 +18,9 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
         height,
         layout,
         anchored,
+        scale: Default::default(),
+        pixel_width: width,
+        pixel_height: height,
     };
     let window = |id, app: &str, title: &str, screen, slot, active| Window {
         id,
@@ -113,6 +116,7 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
                 slot: 0,
             },
         ],
+        x11_scale: Default::default(),
     }
 }
 

@@ -229,6 +229,9 @@ impl State {
                 height: info.rect.h,
                 layout: model.layout(),
                 anchored: model.anchored().is_some(),
+                scale: info.scale,
+                pixel_width: screen.output.current_mode().map_or(0, |mode| mode.size.w),
+                pixel_height: screen.output.current_mode().map_or(0, |mode| mode.size.h),
             })
         });
         let windows = desk.recent_windows().filter_map(|id| {
@@ -261,6 +264,7 @@ impl State {
             screens: screens.collect(),
             windows: windows.collect(),
             habits: habits.collect(),
+            x11_scale: self.x11_scale,
         }
     }
 

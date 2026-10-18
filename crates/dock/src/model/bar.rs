@@ -310,6 +310,9 @@ mod tests {
             height: 1080,
             layout: coquille_model::LayoutKind::TwoColumns,
             anchored,
+            scale: Default::default(),
+            pixel_width: 1920,
+            pixel_height: 1080,
         }
     }
 

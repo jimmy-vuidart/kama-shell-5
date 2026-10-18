@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use coquille_model::{LayoutKind, OutputRole};
+use coquille_model::{LayoutKind, OutputRole, Scale};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -41,6 +41,10 @@ pub struct Snapshot {
     pub windows: Vec<Window>,
     /// Where the user tidied each application.
     pub habits: Vec<Habit>,
+    /// X11 applications count in real pixels: a place on the desktop is
+    /// this many times larger for them.
+    #[serde(default)]
+    pub x11_scale: Scale,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,17 +52,25 @@ pub struct Screen {
     /// The name clients know the output by (its connector).
     pub name: String,
     pub role: OutputRole,
-    /// Where its top left corner is on the whole desktop, which is also
-    /// where X11 sees it.
+    /// Where its top left corner is on the whole desktop, in logical
+    /// pixels (X11 sees it `x11_scale` times further).
     #[serde(default)]
     pub x: i32,
     #[serde(default)]
     pub y: i32,
+    /// Its logical size.
     pub width: i32,
     pub height: i32,
     pub layout: LayoutKind,
     /// Held by a fullscreen window (game mode): it shows no panel.
     pub anchored: bool,
+    #[serde(default)]
+    pub scale: Scale,
+    /// Its real size, in pixels; 0 when not told (as large as logical).
+    #[serde(default)]
+    pub pixel_width: i32,
+    #[serde(default)]
+    pub pixel_height: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +231,9 @@ mod tests {
                 height: 1080,
                 layout: LayoutKind::TwoColumns,
                 anchored: false,
+                scale: Scale::new(1.5),
+                pixel_width: 2880,
+                pixel_height: 1620,
             }],
             windows: vec![Window {
                 id: 4,
@@ -234,6 +249,7 @@ mod tests {
                 screen: OutputRole::Left,
                 slot: 0,
             }],
+            x11_scale: Scale::new(1.5),
         }
     }
 

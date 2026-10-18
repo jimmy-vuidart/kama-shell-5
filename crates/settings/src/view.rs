@@ -457,9 +457,11 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     let cards = model::screens(&app.file, snapshot);
     let choices = model::connector_choices(&app.file, snapshot);
     let simulated = snapshot.is_some_and(|snapshot| snapshot.simulated);
+    let shown = model::shown_roles(snapshot);
 
-    let mut content: Column<'_, Message> = column![drawing(app, &cards, palette)].spacing(18);
-    for role in PerScreen::<()>::ROLES {
+    let mut content: Column<'_, Message> =
+        column![drawing(app, &cards, &shown, palette)].spacing(18);
+    for &role in &shown {
         let screen = cards.get(role);
         let connector: Element<'a, Message> = if simulated {
             text("Écrans simulés").size(13).color(palette.muted).into()
@@ -492,7 +494,21 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             move |kind| Message::Change(Change::Layout(role, kind)),
             palette,
         );
+        let scale = picker(
+            model::scale_choices(),
+            model::scale_choice(app.file.scale(role)),
+            move |choice| Message::Change(Change::Scale(role, model::scale_of(&choice))),
+            120.0,
+            palette,
+        );
         let rows = vec![
+            setting(
+                "Mise à l'échelle",
+                "La taille de tout ce qui s'affiche. Les applis X11 la prennent au prochain démarrage.",
+                None,
+                scale,
+                palette,
+            ),
             setting(
                 "Connecteur",
                 "La prise sur laquelle cet écran est branché.",
@@ -516,7 +532,7 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             ),
         ];
         let title = row![
-            text(model::screen_name(role))
+            text(model::screen_title(role, shown.len()))
                 .size(14)
                 .font(style::SEMIBOLD)
                 .color(palette.text),
@@ -567,13 +583,15 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
 fn drawing<'a>(
     app: &'a App,
     cards: &PerScreen<ScreenCard>,
+    shown: &[OutputRole],
     palette: Palette,
 ) -> Element<'a, Message> {
-    let sizes = model::drawing(cards, DRAWING);
+    let sizes = model::drawing(cards, shown, DRAWING);
     let mut line: Row<'_, Message> = row![].spacing(8).align_y(Alignment::Start);
-    for role in PerScreen::<()>::ROLES {
+    for &role in shown {
         let (width, height) = *sizes.get(role);
         let name = match role {
+            _ if shown.len() == 1 => "Écran",
             OutputRole::Left => "Gauche",
             OutputRole::Center => "Centre",
             OutputRole::Right => "Droite",

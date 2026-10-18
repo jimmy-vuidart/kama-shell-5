@@ -451,8 +451,9 @@ impl Dock {
         self.bars.iter().find(|bar| bar.screen == screen)
     }
 
-    /// Where tray item `index` of bar `id` is on the whole desktop: where a
-    /// program that draws its own menu (Wine) opens it.
+    /// Where tray item `index` of bar `id` is on the whole desktop, as X11
+    /// counts (in real pixels): where a program that draws its own menu
+    /// (Wine) opens it.
     fn tray_point(&self, id: window::Id, index: usize) -> (i32, i32) {
         let Some(bar) = self.bar(id) else {
             return (0, 0);
@@ -475,9 +476,11 @@ impl Dock {
             (screen.width, screen.height),
             surface,
         );
+        let x11 =
+            |logical: i32| (f64::from(logical) * self.snapshot.x11_scale.get()).round() as i32;
         (
-            screen.x + left + x + width / 2,
-            screen.y + top + y + height / 2,
+            x11(screen.x + left + x + width / 2),
+            x11(screen.y + top + y + height / 2),
         )
     }
 

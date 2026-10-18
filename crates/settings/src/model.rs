@@ -7,7 +7,7 @@ use std::path::Path;
 
 use coquille_config::{PerScreen, Settings};
 use coquille_ipc::Snapshot;
-use coquille_model::OutputRole;
+use coquille_model::{OutputRole, Scale};
 
 /// A page of the settings screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
@@ -64,6 +64,48 @@ pub fn screen_name(role: OutputRole) -> &'static str {
         OutputRole::Center => "Écran central",
         OutputRole::Right => "Écran droit",
     }
+}
+
+/// The name of a screen on the page: a lone screen (a laptop) is simply
+/// « Écran ».
+pub fn screen_title(role: OutputRole, shown: usize) -> &'static str {
+    if shown == 1 {
+        "Écran"
+    } else {
+        screen_name(role)
+    }
+}
+
+/// The screens the page shows: the ones the compositor has, else (outside
+/// of coquille, to set the file for the next start) all three.
+pub fn shown_roles(snapshot: Option<&Snapshot>) -> Vec<OutputRole> {
+    let live = snapshot.map(|snapshot| &snapshot.screens);
+    match live.filter(|screens| !screens.is_empty()) {
+        Some(screens) => PerScreen::<()>::ROLES
+            .into_iter()
+            .filter(|role| screens.iter().any(|screen| screen.role == *role))
+            .collect(),
+        None => PerScreen::<()>::ROLES.to_vec(),
+    }
+}
+
+/// The scales offered, from 100 % to 300 %.
+pub fn scale_choices() -> Vec<Choice> {
+    Scale::ALL
+        .iter()
+        .map(|scale| Choice::new(&scale.get().to_string(), scale.label()))
+        .collect()
+}
+
+/// The scale a line of [`scale_choices`] stands for.
+pub fn scale_of(choice: &Choice) -> Scale {
+    let value = choice.value.as_deref().and_then(|value| value.parse().ok());
+    Scale::new(value.unwrap_or(1.0))
+}
+
+/// The line of [`scale_choices`] for `scale`.
+pub fn scale_choice(scale: Scale) -> Option<Choice> {
+    chosen(&scale_choices(), Some(&scale.get().to_string()))
 }
 
 /// A line of a list: what it says, and what choosing it writes. `None` is
@@ -235,14 +277,18 @@ pub struct ScreenCard {
     pub connector: Option<String>,
     /// In pixels, when the compositor says.
     pub size: Option<(i32, i32)>,
+    /// What the compositor draws it at.
+    pub scale: Option<Scale>,
 }
 
 impl ScreenCard {
-    /// `HDMI-A-1 · 1920 × 1080`.
+    /// `HDMI-A-1 · 1920 × 1080`, and its scale when it is not 100 %.
     pub fn detail(&self) -> String {
-        let size = self
-            .size
-            .map(|(width, height)| format!("{width} × {height}"));
+        let scale = self.scale.filter(|scale| *scale != Scale::ONE);
+        let size = self.size.map(|(width, height)| match scale {
+            Some(scale) => format!("{width} × {height} · {}", scale.label()),
+            None => format!("{width} × {height}"),
+        });
         match (&self.connector, size) {
             (Some(connector), Some(size)) => format!("{connector} · {size}"),
             (Some(connector), None) => connector.clone(),
@@ -266,7 +312,15 @@ pub fn screens(settings: &Settings, snapshot: Option<&Snapshot>) -> PerScreen<Sc
                 .get(role)
                 .clone()
                 .or_else(|| real.map(|screen| screen.name.clone())),
-            size: live.map(|screen| (screen.width, screen.height)),
+            size: live.map(|screen| {
+                // Older compositors only said the logical size.
+                if screen.pixel_width > 0 && screen.pixel_height > 0 {
+                    (screen.pixel_width, screen.pixel_height)
+                } else {
+                    (screen.width, screen.height)
+                }
+            }),
+            scale: live.map(|screen| screen.scale),
         }
     };
     PerScreen {
@@ -300,10 +354,18 @@ pub fn connector_choices(settings: &Settings, snapshot: Option<&Snapshot>) -> Ve
 }
 
 /// The size of each screen on the drawing of the page, `width` wide in all
-/// without the gaps. A screen of unknown size is drawn as the real setup
-/// has it: 21:9 in the center, 16:9 on the sides.
-pub fn drawing(cards: &PerScreen<ScreenCard>, width: f32) -> PerScreen<(f32, f32)> {
+/// without the gaps (half of it for a lone screen, which would be drawn too
+/// large). A screen of unknown size is drawn as the real setup has it: 21:9
+/// in the center, 16:9 on the sides. A screen not `shown` is not drawn.
+pub fn drawing(
+    cards: &PerScreen<ScreenCard>,
+    shown: &[OutputRole],
+    width: f32,
+) -> PerScreen<(f32, f32)> {
     let size = |card: &ScreenCard| {
+        if !shown.contains(&card.role) {
+            return (0.0, 0.0);
+        }
         let usual = match card.role {
             OutputRole::Center => (3440, 1440),
             OutputRole::Left | OutputRole::Right => (1920, 1080),
@@ -312,7 +374,8 @@ pub fn drawing(cards: &PerScreen<ScreenCard>, width: f32) -> PerScreen<(f32, f32
         (w as f32, h as f32)
     };
     let sizes = [size(&cards.left), size(&cards.center), size(&cards.right)];
-    let scale = width / sizes.iter().map(|(w, _)| w).sum::<f32>();
+    let width = if shown.len() == 1 { width / 2.0 } else { width };
+    let scale = width / sizes.iter().map(|(w, _)| w).sum::<f32>().max(1.0);
     let scaled = |(w, h): (f32, f32)| ((w * scale).round(), (h * scale).round());
     PerScreen {
         left: scaled(sizes[0]),
@@ -452,6 +515,9 @@ mod tests {
             height,
             layout: LayoutKind::Full,
             anchored: false,
+            scale: Default::default(),
+            pixel_width: width,
+            pixel_height: height,
         };
         Snapshot {
             simulated,
@@ -577,13 +643,56 @@ mod tests {
     fn the_drawing_keeps_the_proportions_of_the_screens() {
         let cards = screens(&Settings::default(), Some(&snapshot(false)));
 
-        let drawn = drawing(&cards, 364.0);
+        let all = PerScreen::<()>::ROLES;
+        let drawn = drawing(&cards, &all, 364.0);
 
         assert_eq!(drawn.left, (96.0, 54.0));
         assert_eq!(drawn.center, (172.0, 72.0));
         assert_eq!(drawn.right, (96.0, 54.0));
         // Unknown sizes are drawn as the real setup.
-        assert_eq!(drawing(&screens(&Settings::default(), None), 364.0), drawn);
+        assert_eq!(
+            drawing(&screens(&Settings::default(), None), &all, 364.0),
+            drawn
+        );
+    }
+
+    #[test]
+    fn a_laptop_shows_one_screen_with_its_pixels_and_its_scale() {
+        let mut laptop = snapshot(false);
+        laptop.screens = vec![coquille_ipc::Screen {
+            name: "eDP-1".into(),
+            role: OutputRole::Center,
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            layout: LayoutKind::Full,
+            anchored: false,
+            scale: Scale::new(2.0),
+            pixel_width: 3840,
+            pixel_height: 2160,
+        }];
+
+        let shown = shown_roles(Some(&laptop));
+        let cards = screens(&Settings::default(), Some(&laptop));
+
+        assert_eq!(shown, [OutputRole::Center]);
+        assert_eq!(screen_title(OutputRole::Center, shown.len()), "Écran");
+        assert_eq!(cards.center.detail(), "eDP-1 · 3840 × 2160 · 200\u{202f}%");
+        let drawn = drawing(&cards, &shown, 364.0);
+        assert_eq!(drawn.center, (182.0, 102.0));
+        assert_eq!(drawn.left, (0.0, 0.0));
+        assert_eq!(shown_roles(None).len(), 3);
+    }
+
+    #[test]
+    fn every_scale_is_offered_and_read_back() {
+        let choices = scale_choices();
+
+        assert_eq!(choices.len(), 9);
+        assert_eq!(choices[4].label, "200\u{202f}%");
+        assert_eq!(scale_of(&choices[4]), Scale::new(2.0));
+        assert_eq!(scale_choice(Scale::new(1.25)), Some(choices[1].clone()));
     }
 
     #[test]
