@@ -1735,7 +1735,9 @@ impl Dock {
                 Task::none()
             }
             Message::Brightness(level) => {
-                self.request(Request::Brightness(level.clamp(0.05, 1.0)));
+                self.request(Request::Brightness(
+                    level.clamp(services::MIN_BRIGHTNESS, 1.0),
+                ));
                 Task::none()
             }
             Message::StreamVolume(key, volume) => {
@@ -1895,6 +1897,12 @@ impl Dock {
                 self.toggle_drawer(screen)
             }
             compositor::Update::Event(Event::ConfigChanged) => self.reload_config(),
+            compositor::Update::Event(Event::Brightness { up }) => {
+                if let Some(level) = self.brightness {
+                    self.request(Request::Brightness(services::brightness_step(level, up)));
+                }
+                Task::none()
+            }
             compositor::Update::Event(Event::State(snapshot)) => {
                 self.snapshot = snapshot;
                 // The screens are known: a lone one gets its dock.

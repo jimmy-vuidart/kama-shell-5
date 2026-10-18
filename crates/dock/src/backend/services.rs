@@ -1,7 +1,8 @@
 //! The switches and the brightness of the control center, through the tools
-//! of each service: `nmcli` (NetworkManager), `bluetoothctl` (BlueZ) and
-//! `ddcutil` (the screens, over DDC/CI). A tool that is missing leaves its
-//! control greyed, and nothing else changes.
+//! of each service: `nmcli` (NetworkManager), `bluetoothctl` (BlueZ),
+//! `ddcutil` (the screens, over DDC/CI) or, on a laptop, its backlight
+//! (`backlight.rs`). A tool that is missing leaves its control greyed, and
+//! nothing else changes.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -13,6 +14,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::{debug, warn};
 
+use super::backlight::{self, Backlight};
 use super::{Backend, Request, Switch, Update};
 
 /// The output of a tool, when it ran and succeeded.
@@ -92,6 +94,17 @@ pub fn parse_brightness(answer: &str) -> Option<f32> {
     let maximum: f32 = words.next()?.parse().ok()?;
     (maximum > 0.0).then(|| (current / maximum).clamp(0.0, 1.0))
 }
+
+/// The brightness after a press of a brightness key: 5 % brighter or
+/// dimmer, never so dim that the screen looks off.
+pub fn brightness_step(level: f32, up: bool) -> f32 {
+    let step = if up { 0.05 } else { -0.05 };
+    // On the grid of the steps, so that up then down comes back.
+    (((level + step) * 20.0).round() / 20.0).clamp(MIN_BRIGHTNESS, 1.0)
+}
+
+/// The dimmest the dock makes a screen.
+pub const MIN_BRIGHTNESS: f32 = 0.05;
 
 /// The numbers of the screens `ddcutil detect --brief` can talk to.
 pub fn parse_displays(answer: &str) -> Vec<u32> {
@@ -202,6 +215,16 @@ fn brightness_service() -> impl Stream<Item = Update> {
             .send(Update::Link(Backend::Brightness, requests))
             .await;
 
+        // A laptop: its own screen has a backlight.
+        if let Some(found) = backlight::find() {
+            tracing::info!(
+                device = found.name,
+                "brightness of the screen through its backlight"
+            );
+            backlight_service(found, output, asked).await;
+            return;
+        }
+
         // Talking to a screen takes a while: the screens are listed once.
         let detected = run("ddcutil", &["detect", "--brief"]).await;
         let displays = detected.as_deref().map(parse_displays).unwrap_or_default();
@@ -239,9 +262,58 @@ fn brightness_service() -> impl Stream<Item = Update> {
     })
 }
 
+/// The brightness of a laptop's screen: set when asked, and read again now
+/// and then, should the firmware change it by itself (keys it handles).
+async fn backlight_service(
+    found: Backlight,
+    mut output: Sender<Update>,
+    mut asked: tokio::sync::mpsc::UnboundedReceiver<Request>,
+) {
+    let mut shown = found.read();
+    let _ = output.send(Update::Brightness(shown)).await;
+    let mut tick = tokio::time::interval(Duration::from_secs(2));
+    loop {
+        tokio::select! {
+            request = asked.recv() => {
+                let Some(request) = request else {
+                    return;
+                };
+                let Request::Brightness(mut wanted) = request else {
+                    continue;
+                };
+                // While the slider moves, only where it ends up matters.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                while let Ok(later) = asked.try_recv() {
+                    if let Request::Brightness(value) = later {
+                        wanted = value;
+                    }
+                }
+                found.set(wanted).await;
+                shown = found.read();
+            }
+            _ = tick.tick() => {
+                let now = found.read();
+                if now.is_some() && now != shown {
+                    shown = now;
+                    let _ = output.send(Update::Brightness(now)).await;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_brightness_key_moves_by_five_percent_and_never_turns_the_screen_off() {
+        assert_eq!(brightness_step(0.5, true), 0.55);
+        assert_eq!(brightness_step(0.52, false), 0.45);
+        assert_eq!(brightness_step(0.98, true), 1.0);
+        assert_eq!(brightness_step(0.07, false), MIN_BRIGHTNESS);
+        assert_eq!(brightness_step(brightness_step(0.3, true), false), 0.3);
+    }
 
     const DEVICES: &str = "wifi:connected:Freebox-5GHz\nloopback:connected (externally):lo\nbridge:connected (externally):virbr0\nwifi-p2p:disconnected:\nethernet:unavailable:\n";
 

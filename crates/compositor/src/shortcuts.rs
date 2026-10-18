@@ -56,6 +56,10 @@ pub enum Action {
     LeaveFullscreen,
     /// Switches to another virtual terminal: the way out if all else fails.
     SwitchVt(i32),
+    /// A brightness key of a laptop: the screen gets brighter or dimmer.
+    Brightness {
+        up: bool,
+    },
 }
 
 /// A key going down.
@@ -86,6 +90,14 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     }
     if press.ctrl && press.alt && has(Keysym::BackSpace) {
         return Some(Action::Quit);
+    }
+    // Keys of the hardware: they work without the shell modifier, in a
+    // game too.
+    if has(Keysym::XF86_MonBrightnessUp) {
+        return Some(Action::Brightness { up: true });
+    }
+    if has(Keysym::XF86_MonBrightnessDown) {
+        return Some(Action::Brightness { up: false });
     }
 
     if !press.main {
@@ -162,6 +174,15 @@ mod tests {
             Some(Action::RestoreWindow)
         );
         assert_eq!(press(false, false, &[Keysym::r]), None);
+    }
+
+    #[test]
+    fn the_brightness_keys_work_without_the_shell_modifier() {
+        let up = press(false, false, &[Keysym::XF86_MonBrightnessUp]);
+        let down = press(true, false, &[Keysym::XF86_MonBrightnessDown]);
+
+        assert_eq!(up, Some(Action::Brightness { up: true }));
+        assert_eq!(down, Some(Action::Brightness { up: false }));
     }
 
     #[test]

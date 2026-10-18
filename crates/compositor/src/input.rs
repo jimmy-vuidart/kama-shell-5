@@ -351,6 +351,11 @@ impl State {
                 self.backend.switch_vt(vt);
                 return;
             }
+            Action::Brightness { up } => {
+                // The dock holds the brightness, and shows it.
+                self.brightness_key(up);
+                return;
+            }
             Action::CycleTab { forward } => {
                 match desk.focused().and_then(|id| desk.placement(id)) {
                     Some(Placement::Slot(slot)) => desk.cycle_tab(slot, forward),

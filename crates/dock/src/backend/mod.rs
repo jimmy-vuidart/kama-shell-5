@@ -3,6 +3,7 @@
 //! a simulated one, so that the dock can be tried without touching anything.
 
 pub mod audio;
+pub mod backlight;
 pub mod compositor;
 pub mod mock;
 pub mod notify;
@@ -27,7 +28,7 @@ pub enum Backend {
     Network,
     /// BlueZ.
     Bluetooth,
-    /// The brightness of the screens, through DDC/CI.
+    /// The brightness of the screens: a laptop's backlight, else DDC/CI.
     Brightness,
     /// Logging out, restarting, powering off: always after a confirmation.
     Session,

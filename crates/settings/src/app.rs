@@ -278,6 +278,8 @@ impl App {
                 self.read_file();
             }
             compositor::Update::Event(Event::ConfigChanged) => self.read_file(),
+            // For the dock.
+            compositor::Update::Event(Event::Brightness { .. }) => {}
             compositor::Update::Event(Event::ToggleLauncher { .. }) => {}
         }
     }

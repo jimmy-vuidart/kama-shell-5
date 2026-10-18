@@ -112,6 +112,9 @@ pub enum Event {
     /// The configuration file was read again: programs that read it too
     /// should do the same.
     ConfigChanged,
+    /// A brightness key was pressed: the screen gets brighter (`up`) or
+    /// dimmer.
+    Brightness { up: bool },
 }
 
 /// From a program of the shell to the compositor.

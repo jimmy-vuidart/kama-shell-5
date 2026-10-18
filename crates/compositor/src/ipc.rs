@@ -340,6 +340,14 @@ impl State {
         }
     }
 
+    /// A brightness key was pressed: the dock, which holds the brightness of
+    /// the screens and shows it, changes it.
+    pub fn brightness_key(&mut self, up: bool) {
+        if let Some(ipc) = self.ipc.as_mut() {
+            ipc.broadcast(&Event::Brightness { up });
+        }
+    }
+
     /// Tells the programs of the shell that read the configuration file to
     /// read it again.
     pub fn config_changed(&mut self) {
