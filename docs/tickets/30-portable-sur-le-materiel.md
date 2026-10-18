@@ -14,10 +14,11 @@ batterie et la veille sont faits (voir « État du portable » dans
 
 ## À essayer, dans l'ordre
 
-1. `coquille --probe` : GPU utilisé, connecteur `eDP`, mode 4K, échelle lue
-   dans `[scale]`. **Si le portable est hybride** (iGPU qui tient l'écran,
-   NVIDIA à part), un jeu rendu sur la NVIDIA passe par PRIME : vérifier
-   qu'il s'affiche, et à quelle vitesse, avant le reste.
+1. `coquille --probe` : le GPU Intel (le seul du portable), connecteur
+   `eDP`, mode 4K, échelle lue dans `[scale]`, synchronisation explicite et
+   VRR de la dalle. Sur Intel, les plans overlay restent offerts au
+   compositeur DRM (ils ne sont écartés que sur NVIDIA) : surveiller dans
+   `session.log` les erreurs d'image et un écran qui scintille.
 2. Session à 200 % : décorations nettes, curseur à la bonne taille, dock et
    « Paramètres » nets ; passer à 150 % depuis « Paramètres » sans redémarrer.
 3. Applis X11 (Steam, un jeu Proton) : nettes, Steam à la bonne taille

@@ -30,7 +30,7 @@ Un compositeur Wayland construit sur **Smithay**, pensé pour **un PC de bureau 
   - direct scanout sur plans overlay plus restreint que sur AMD/Intel : à valider, pas acquis ;
   - VRR : d'après `--probe`, seul le centre (DP-2) se dit capable (`vrr_capable`), et le pilote expose l'interrupteur `VRR_ENABLED`.
 - Beaucoup de jeux tournent via **Proton / XWayland** : le support XWayland n'est pas optionnel.
-- **Second poste : un portable à écran 4K, un seul écran** (connecteur `eDP`), avec pavé tactile, rétroéclairage et batterie. Son écran unique prend le rôle **centre** ; il se règle à 200 % (`[scale]`). Son GPU n'est pas encore connu : s'il est hybride (iGPU qui tient l'écran, NVIDIA à part), les jeux rendus sur la NVIDIA passent par PRIME, et coquille n'utilise qu'un GPU (celui du démarrage) : à vérifier avec `--probe` avant tout.
+- **Second poste : un portable à écran 4K, un seul écran** (connecteur `eDP`), avec pavé tactile, rétroéclairage et batterie. Son écran unique prend le rôle **centre** ; il se règle à 200 % (`[scale]`). Un seul GPU, **Intel** (pas d'hybride, pas de PRIME) : coquille prend celui du démarrage, sans rien à choisir. Contrairement à la NVIDIA, ses plans overlay ne sont pas écartés (`light` dans `backend/udev.rs`) : le compositeur DRM de Smithay peut y poser des éléments, chemin jamais essayé.
 
 ## Mes usages (ils guident toutes les décisions)
 
