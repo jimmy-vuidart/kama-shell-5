@@ -17,13 +17,16 @@ protocole `ext-session-lock-v1` qu'utilisent les écrans de verrouillage
 Pour s'absenter sans laisser la session ouverte, il faut se déconnecter, donc
 fermer toutes les fenêtres.
 
+## Décidé avec la phase 5
+
+Le verrouillage fait partie de la session autonome (`docs/phase-5.md`,
+étape 4) : par le protocole, avec hyprlock ou swaylock d'abord, un écran de
+verrouillage à nous plus tard ; verrouillage avant la mise en veille.
+
 ## À décider avec Jimmy
 
-- En a-t-il l'usage sur ce PC de bureau ?
-- Un écran de verrouillage existant (par le protocole), ou un programme du
-  shell de plus, dans le style du dock ?
-- Comment verrouiller : un bouton du centre de contrôle à côté de la
-  déconnexion, un raccourci, après la mise en veille (ticket 22) ?
+- Comment verrouiller à la main : un bouton du centre de contrôle à côté de
+  la déconnexion, un raccourci ?
 
 ## Piste
 
@@ -47,3 +50,4 @@ Par le protocole, qui laisse le choix du programme :
 ## Liens
 
 - Va naturellement avec : 22.
+- Étape 4 de la phase 5.

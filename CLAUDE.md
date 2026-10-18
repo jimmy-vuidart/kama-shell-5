@@ -107,11 +107,11 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 
 - `Super + glisser` : ranger une fenêtre (même hors barre de titre) : les emplacements s'affichent, relâcher la place.
 - `Super + glisser sur une séparation` : ajuster la largeur des deux colonnes qu'elle sépare.
-- **Secouer la souris** : halo autour du curseur pour le retrouver.
+- **Secouer la souris** : halo autour du curseur pour le retrouver (pas encore réalisé, ticket 27).
 
 ## Apparence (référence : maquettes)
 
-Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de toucher au rendu). Celles d'origine, dans `docs/maquettes/shell/`, font référence pour les fenêtres, leurs décorations et le rangement ; **plus pour les barres latérales ni pour le lanceur**, abandonnés sous cette forme.
+Les maquettes sont dans `docs/maquettes/` (les ouvrir avant de toucher au rendu) ; son `README.md` dit ce que chacune montre encore de juste. Celles d'origine (`docs/maquettes/origine/`) font référence pour les fenêtres et le rangement ; **plus pour les barres latérales, le lanceur, les onglets ni les boutons de la barre de titre**.
 
 - Style proche de Windows 11 / Fluent : coins arrondis, surfaces translucides en **verre liquide** flouté, sobre.
 - Thèmes **clair** et **sombre** (anthracite translucide).
@@ -122,13 +122,13 @@ Les maquettes sont exportées dans `docs/maquettes/` (les ouvrir avant de touche
   - boutons à droite, pour une fenêtre flottante seulement : réduire, agrandir, fermer (une fenêtre rangée ou maximisée les a sur sa capsule) ;
   - un double-clic sur la barre maximise la fenêtre, un autre la restaure.
 - **Pas de double barre** : une fenêtre qui dessine déjà sa barre de titre (applis GTK comme Nautilus, qui ne demandent pas `xdg-decoration` ; applis Electron comme Discord ou Claude Desktop, qui demandent par `xdg-decoration` à se décorer elles-mêmes, et sont alors prises au mot ; applis X11 qui refusent la décoration par leurs indications Motif, comme Steam) ne reçoit jamais celle du shell, même dans un emplacement partagé. Glisser sa propre barre vaut glisser celle du shell (la fenêtre flotte et suit le curseur).
-- **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine (`palette.glass_strong` avec liseré `palette.rim`) et montre réduire, agrandir (« restaurer », deux carrés, dans le groupe des fenêtres maximisées) et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Les fenêtres maximisées ont leur groupe en haut au centre de l'écran (dans la moitié centrale de la bande) ; un groupe d'emplacement qui le toucherait s'écarte du côté de son milieu (à gauche s'ils partagent le même). Ni capsule pour une fenêtre flottante, ni sur un écran ancré. Spécification : `docs/superpowers/specs/2026-10-12-capsules-design.md`.
+- **Capsules** : les onglets ne sont plus dans les barres de titre. Chaque emplacement occupé porte au-dessus de lui (bande de **32 px**, puis 8 px) un groupe de capsules centré, une par fenêtre de sa pile, même s'il n'y en a qu'une : icône et nom de l'appli. La capsule de la fenêtre affichée est pleine (`palette.glass_strong` avec liseré `palette.rim`) et montre réduire, agrandir (« restaurer », deux carrés, dans le groupe des fenêtres maximisées) et fermer ; les autres les montrent au survol, à une place réservée (survoler ne déplace rien). Fenêtre réduite : capsule grisée, qui reste même si tout l'emplacement est réduit. Capsule de la fenêtre active : anneau d'accent. Quand la place manque, les plus larges rétrécissent d'abord, jusqu'à l'icône seule. Les fenêtres maximisées ont leur groupe en haut au centre de l'écran (dans la moitié centrale de la bande) ; un groupe d'emplacement qui le toucherait s'écarte du côté de son milieu (à gauche s'ils partagent le même). Ni capsule pour une fenêtre flottante, ni sur un écran ancré. Spécification : `docs/conception/capsules.md`.
 - Fenêtre active : **anneau d'accent de 2 px**, d'une couleur unie. Accent par défaut : pervenche `#5b63e6` (clair), `#8f97ff` (sombre), réglable (`accent`, page Apparence de « Paramètres »).
 - **Ombres douces** : seules les fenêtres flottantes et la barre de rangement projettent une ombre douce teintée (`palette.shadow`), dessinée par le shader `shadow` (`render/shadow.rs`). Une fenêtre rangée n'en a pas : à 8 px, elle salirait sa voisine et les capsules. L'ombre est évidée sous la fenêtre qui la projette, pour qu'une barre de titre translucide montre ce qui est derrière, pas l'ombre.
 - **Flou d'arrière-plan** : le compositeur calcule un vrai flou d'arrière-plan (« framebuffer effects » de Smithay, Dual Kawase : passes de réduction puis d'agrandissement, shaders `blur_down` et `blur_up`, puis `glass` qui applique le masque) derrière ses décorations et derrière les programmes du shell (panneaux `coquille-*`, fenêtre `coquille-settings`). Le verre d'une barre de titre est sous la fenêtre : il floute ce qui est derrière elle, jamais son contenu. Coupé en mode jeu (écran ancré).
 - **Règle des alphas** : derrière nos programmes, le flou prend la forme de leurs pixels assez opaques (couverture `smoothstep(0.2, 0.4, alpha)`). Les surfaces de verre ont donc un alpha > 0.45, le voile/scrim et les ombres restent sous 0.18 (vérifié par un test de `crates/theme`). Le fond de fenêtre (`surface`), visible là où une appli n'a pas encore dessiné, reste opaque.
 - **Un accent or métallique a été essayé, puis abandonné** : dégradés, lingots, filets et gris chauds n'étaient pas jolis à l'usage (commits `18374c1` à `1ad7eaa`, annulés). Ne pas y revenir sans que je le demande.
-- Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, cahier des charges `docs/maquettes/dock.md`) a une taille d'icônes configurable (`[dock]` `icon_size`, défaut 24 px ; barre de 44 px à 8 px du bord et zone réservée de 60 px par défaut, qui s'ajustent à la taille choisie). Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche.
+- Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, conception `docs/conception/dock.md`) a une taille d'icônes configurable (`[dock]` `icon_size`, défaut 24 px ; barre de 44 px à 8 px du bord et zone réservée de 60 px par défaut, qui s'ajustent à la taille choisie). Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche.
 - Police d'interface : Figtree (repli : police système sans-serif).
 - **Icônes des applis : thème Reversal**, carrés arrondis comme sous macOS, sans détourner les marques (paquet AUR `reversal-icon-theme-git`, qui n'installe que la variante par défaut, `Reversal` et `Reversal-dark`). Le dock et le compositeur prennent la variante claire ou sombre selon le thème, et la couleur la plus proche de l'accent si sa variante est installée (`Reversal-purple-dark`…), sinon la variante par défaut ; sans Reversal, le thème d'icônes de GNOME (`gsettings`). Le choix (`crates/apps/src/reversal.rs`) suit les changements de thème et d'accent en cours de session. Les applis lancées, elles, gardent le thème d'icônes du système.
 
@@ -151,7 +151,7 @@ coquille/
 │  ├─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
 │  └─ settings/     # binaire `coquille-settings` : l'écran « Paramètres ».
 ├─ vendor/          # code tiers porté dans le dépôt (voir vendor/README.md).
-├─ docs/maquettes/
+├─ docs/            # phase en cours, tickets, conception, maquettes (voir docs/README.md)
 └─ CLAUDE.md
 ```
 
@@ -292,7 +292,7 @@ Fait mais **jamais exercé pour de vrai** : couper le réseau ou le Bluetooth de
 
 Intégration à la session : écrite, **essayée en imbriqué et dans un dossier d'essai seulement** (`scripts/install.sh` avec `PREFIX`, `SESSIONS_DIR` et les dossiers XDG redirigés ; `coquille-dock-watch` relance bien un dock tué et s'arrête avec le compositeur). Jamais lancée depuis l'écran de connexion. Si le dock ne s'affiche pas sur le matériel (il dessine avec le GPU, par wgpu), `ICED_BACKEND=tiny-skia` le fait dessiner sans.
 
-Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un écran. Limites du dock : `crates/dock/README.md`.
+Pas fait : les messages non lus réels ; glisser une icône du tiroir vers un écran (ticket 28). Limites du dock : `crates/dock/README.md`.
 
 ### État de l'écran « Paramètres »
 
@@ -357,8 +357,8 @@ On avance **par phases**, en s'arrêtant à la fin de chacune pour que je teste.
 - **Phase 1 — Compositeur imbriqué** : backend **winit** (fenêtre dans ma session actuelle), xdg-shell, une sortie simulée, dispositions `Full` / `Columns`, décorations serveur, focus et anneau d'accent. Test avec `foot` ou `alacritty`.
 - **Phase 2 — Trois écrans réels** : backend **udev** (DRM/KMS, GBM, libinput, libseat), trois sorties dont le 21:9 central, glisser-déposer vers les emplacements, flottant par défaut, onglets, ⇄, mémoire par appli, `Free`.
 - **Phase 3 — Jeu** : XWayland, détection du plein écran, écran ancré, direct scanout, VRR, pointer-constraints, relative-pointer, bords collants.
-- **Phase 4 — Shell** : le **dock** (barre, tiroir, centre de contrôle, mixeur), d'après `docs/maquettes/dock.md`. Reste son intégration à la session, puis les notifications et les instantanés, dont la forme n'est pas définie. Abandonnés : les barres latérales et le lanceur des maquettes d'origine, le saut de curseur au bouton latéral. Détail dans `docs/tasks/PHASE_4.md`.
-- **Phase 5 — Session autonome** : coquille sera le seul bureau installé. Reconstruire ce que Plasma ou GNOME fournissent encore : notifications, agent polkit, portails et démarrage automatique, veille et verrouillage, capture pour le partage d'écran, thème des applis, touches multimédia, écran de connexion, pont des icônes X11. Détail et ordre dans `docs/tasks/PHASE_5.md`.
+- **Phase 4 — Shell** : le **dock** (barre, tiroir, centre de contrôle, mixeur), son intégration à la session et l'écran « Paramètres ». Terminée ; ses restes sont des tickets (26 à 29), les notifications passent à la phase 5. Abandonnés : les barres latérales et le lanceur des maquettes d'origine, le saut de curseur au bouton latéral.
+- **Phase 5 — Session autonome** : coquille sera le seul bureau installé. Reconstruire ce que Plasma ou GNOME fournissent encore : notifications, agent polkit, portails et démarrage automatique, veille et verrouillage, capture pour le partage d'écran, thème des applis, touches multimédia, écran de connexion, pont des icônes X11. Détail et ordre dans `docs/phase-5.md`.
 - **Plus tard** : calque par-dessus le jeu (performances, son par appli, capture), vignettes vivantes.
 
 ## Sécurité pendant le développement

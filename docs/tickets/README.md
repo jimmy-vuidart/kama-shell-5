@@ -1,15 +1,25 @@
 # Tickets
 
-Les tâches issues de la revue technique du 13 octobre 2026, faite sur le
-commit `1ad7eaa`. Les numéros de ligne cités dans les tickets sont ceux de ce
-commit.
+Les tâches précises, une par fichier : bugs, dette, évolutions sans phase.
+Les grands chantiers sont dans les documents de phase (`docs/phase-5.md`),
+qui renvoient aux tickets quand ils en ont un.
 
-La revue s'est faite à la lecture du code : rien n'a été exécuté sur le
-backend matériel. Chaque ticket dit donc ce qui est **lu dans le code** et ce
-qui reste **à confirmer** par un essai.
+Les tickets 01 à 20 viennent de la revue technique du 13 octobre 2026, faite
+à la lecture du code sur le commit `1ad7eaa` : leurs numéros de ligne sont
+ceux de ce commit et ont pu bouger depuis (`scripts/codegraph.sh` retrouve
+les symboles). Chaque ticket dit ce qui est **lu dans le code** et ce qui
+reste **à confirmer** par un essai.
 
 Un ticket terminé est supprimé dans le commit qui le règle (l'historique git
-en garde la trace), et sa ligne retirée de ce tableau.
+en garde la trace), et sa ligne retirée de ce tableau. Les numéros ne sont
+jamais réutilisés : le suivant est le 30.
+
+## Faits, à vérifier sur le matériel
+
+| N° | Ticket | Nature |
+|---|---|---|
+| 11 | [Les voyants du clavier ne s'allument pas](11-voyants-clavier.md) | bug |
+| 12 | [Aucun périphérique d'entrée n'est réglé](12-reglages-libinput.md) | évolution |
 
 ## Priorité haute
 
@@ -35,22 +45,24 @@ en garde la trace), et sa ligne retirée de ce tableau.
 
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
-| 11 | [Les voyants du clavier ne s'allument pas](11-voyants-clavier.md) | bug | matériel |
-| 12 | [Aucun périphérique d'entrée n'est réglé](12-reglages-libinput.md) | évolution | matériel |
 | 13 | [Une fenêtre démappée sans être détruite reste en fantôme](13-fenetre-demappee.md) | bug | imbriqué |
 | 14 | [Une fenêtre refusée par `manage` n'est jamais configurée](14-echec-de-manage.md) | bug | tests |
 | 15 | [Les habitudes n'ont ni version ni copie de secours](15-habitudes-version.md) | robustesse | tests |
 | 16 | [Le canal du shell n'a pas de version](16-version-du-canal.md) | dette | tests |
 | 18 | [Le dock lance trop de processus](18-processus-du-dock.md) | performance | imbriqué |
 | 19 | [Une appli installée en cours de session n'a ni nom ni icône](19-catalogue-a-chaud.md) | bug | imbriqué |
+| 26 | [Pas de raccourci pour fermer la fenêtre active](26-fermer-la-fenetre-active.md) | évolution | imbriqué |
+| 27 | [Halo autour du curseur quand on secoue la souris](27-halo-du-curseur.md) | évolution | imbriqué |
+| 28 | [Dock : messages non lus réels, glisser une icône vers un écran](28-dock-non-lus-et-glisser.md) | évolution | imbriqué |
+| 29 | [Seuls les jeux Steam sont reconnus comme jeux](29-jeux-reconnus.md) | évolution | tests |
 
 ## Architecture et évolutions
 
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
 | 20 | [Sortir la cadence des images en logique pure](20-cadence-en-logique-pure.md) | dette | tests |
-| 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) | évolution | matériel |
-| 23 | [Verrouillage de la session](23-verrouillage-de-session.md) | évolution | imbriqué |
+| 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) (phase 5, étape 4) | évolution | matériel |
+| 23 | [Verrouillage de la session](23-verrouillage-de-session.md) (phase 5, étape 4) | évolution | imbriqué |
 | 24 | [Protocole `wp_presentation`](24-presentation-time.md) | évolution | matériel |
 | 25 | [Installer coquille comme paquet AUR](25-paquet-aur.md) | évolution | chroot, session |
 
@@ -60,6 +72,8 @@ en garde la trace), et sa ligne retirée de ce tableau.
    sans le matériel.
 2. **07, 09, 10** : courts, sans dépendance.
 3. **05**, qui profite des drapeaux par écran du 01, puis **06**.
-4. **03 et 04** : demandent des essais sur le matériel avec Jimmy.
-5. Le reste selon l'envie ; **22 à 24** attendent des décisions de Jimmy ;
-   **25** quand coquille sera prête à être distribuée.
+4. **03 et 04**, et la vérification de **11 et 12** : demandent des essais
+   sur le matériel avec Jimmy.
+5. Le reste selon l'envie ; **22 et 23** avec la phase 5 ; **26 à 29**
+   attendent une décision de Jimmy (touche, geste, indices) ; **25** quand
+   coquille sera prête à être distribuée.

@@ -50,3 +50,4 @@ consommation.
 
 - Partage du code avec : 03.
 - Va naturellement avec : 23.
+- Étape 4 de la phase 5 (`docs/phase-5.md`).

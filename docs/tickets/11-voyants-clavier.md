@@ -1,12 +1,12 @@
 # 11 — Les voyants du clavier ne s'allument pas
 
 - **Priorité :** faible
-- **Nature :** bug
+- **Nature :** bug (corrigé, à vérifier)
 - **Zone :** `crates/compositor/src/handlers/mod.rs`, `backend/udev.rs`
 - **Se vérifie :** sur le matériel seulement
-- **Certitude :** lu dans le code
+- **Certitude :** implémenté, jamais essayé sur le matériel
 
-## Constat
+## Constat (avant la correction)
 
 `SeatHandler` (`handlers/mod.rs:39`) ne redéfinit pas `led_state_changed`,
 qui ne fait rien par défaut dans Smithay. Le backend matériel ne garde pas
@@ -17,14 +17,6 @@ non plus la liste des claviers : `process_input_event` ignore
 
 Sur le matériel, Verr. Maj et Verr. Num changent bien d'état, mais leurs
 voyants ne suivent pas.
-
-## Piste
-
-1. Dans `udev.rs`, garder les périphériques libinput qui ont la capacité
-   clavier (`DeviceAdded`, `DeviceRemoved`).
-2. Implémenter `led_state_changed` : pour chaque clavier, `led_update` avec
-   l'état reçu. Rien à faire en imbriqué.
-3. Donner l'état courant à un clavier qui vient d'être branché.
 
 ## État
 

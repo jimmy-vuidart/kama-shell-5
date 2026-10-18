@@ -60,7 +60,8 @@ gros morceau (la capture pour le partage d'écran) ensuite.
         d'autostart : vérifier que les composants KDE et GNOME ne partent pas
         (ils filtrent sur `XDG_CURRENT_DESKTOP`).
 - [ ] 4. **Veille, extinction des écrans, verrouillage.** Rien n'existe :
-      les écrans ne s'éteignent jamais, rien ne se verrouille.
+      les écrans ne s'éteignent jamais, rien ne se verrouille. Détail et
+      questions ouvertes : tickets 22 (veille) et 23 (verrouillage).
       - `ext-idle-notify-v1` et `idle-inhibit-unstable-v1` (une vidéo ou un
         jeu ancré empêche la mise en veille) ;
       - extinction des écrans (DPMS) après un délai réglable, rallumage au
@@ -114,10 +115,11 @@ gros morceau (la capture pour le partage d'écran) ensuite.
 ## Protocoles Wayland secondaires
 
 Pas indispensables, mais des applis les attendent : `wp-tearing-control`
-(jeux, en complément du VRR), `presentation-time`, `xdg-foreign` (dialogues
-des portails rattachés à leur fenêtre), `keyboard-shortcuts-inhibit`
-(machines virtuelles, bureau à distance), `foreign-toplevel`, sélection
-primaire (limite connue), `single-pixel-buffer`.
+(jeux, en complément du VRR), `presentation-time` (ticket 24),
+`xdg-foreign` (dialogues des portails rattachés à leur fenêtre),
+`keyboard-shortcuts-inhibit` (machines virtuelles, bureau à distance),
+`foreign-toplevel`, sélection primaire (limite connue),
+`single-pixel-buffer`.
 
 ## Paquets
 

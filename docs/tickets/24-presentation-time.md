@@ -49,3 +49,4 @@ ticket 01 sont les deux pièces dont ce ticket a besoin.
 ## Liens
 
 - Dépend de : 20, 01.
+- Cité parmi les protocoles secondaires de la phase 5.
