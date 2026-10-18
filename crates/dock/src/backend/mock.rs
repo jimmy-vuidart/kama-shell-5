@@ -217,6 +217,8 @@ pub fn tray() -> Vec<crate::model::tray::TrayItem> {
         title: title.to_owned(),
         tooltip: Some(tooltip.to_owned()),
         icon_name: Some(icon.to_owned()),
+        icon_theme_path: None,
+        icon_file: None,
         pixmap: None,
         menu_path: menu.as_ref().map(|_| "/MenuBar".to_owned()),
         menu,

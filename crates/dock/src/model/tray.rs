@@ -2,6 +2,8 @@
 //! menus through the StatusNotifierItem (SNI) and DBusMenu protocols.
 //! Every placement rule and metric calculation lives here, tested.
 
+use std::path::{Path, PathBuf};
+
 use system_tray::item::{IconPixmap, StatusNotifierItem};
 use system_tray::menu::TrayMenu;
 
@@ -50,6 +52,50 @@ pub fn parse_pixmap(pixmap: &IconPixmap) -> Option<TrayPixmap> {
     })
 }
 
+/// The image named `name` in the icon folder of an item: the folder itself
+/// (Electron writes `status_icon_N.png` there), or a theme laid out in it
+/// (`hicolor/22x22/apps/…`), the largest size first.
+pub fn find_in_theme_path(dir: &Path, name: &str) -> Option<PathBuf> {
+    fn search(dir: &Path, name: &str, depth: usize, found: &mut Vec<PathBuf>) {
+        for extension in ["png", "svg"] {
+            let path = dir.join(format!("{name}.{extension}"));
+            if path.is_file() {
+                found.push(path);
+            }
+        }
+        if depth == 0 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                search(&entry.path(), name, depth - 1, found);
+            }
+        }
+    }
+    // The size of a theme folder (`22x22`, `scalable`) decides between them.
+    let size = |path: &PathBuf| {
+        path.strip_prefix(dir)
+            .unwrap_or(path)
+            .ancestors()
+            .filter_map(|dir| dir.file_name()?.to_str())
+            .find_map(|dir| match dir {
+                "scalable" => Some(u32::MAX),
+                _ => dir.split_once('x')?.0.parse().ok(),
+            })
+            .unwrap_or(0)
+    };
+    let direct = dir.join(format!("{name}.png"));
+    if direct.is_file() {
+        return Some(direct);
+    }
+    let mut found = Vec::new();
+    search(dir, name, 3, &mut found);
+    found.into_iter().max_by_key(size)
+}
+
 /// Selects the best pixmap for our tray icon size (16px).
 /// Prefers sizes closest to 16px, or the smallest one >= 16px.
 pub fn select_best_pixmap(pixmaps: &[IconPixmap]) -> Option<TrayPixmap> {
@@ -82,6 +128,12 @@ pub struct TrayItem {
     pub title: String,
     pub tooltip: Option<String>,
     pub icon_name: Option<String>,
+    /// The folder the item names for its icons (`IconThemePath`), as
+    /// `system-tray` last read it: it does not follow its changes.
+    pub icon_theme_path: Option<String>,
+    /// The image of `icon_name` in the item's own folder, found by the
+    /// tray service: Electron (Discord, Claude) gives its icon only that way.
+    pub icon_file: Option<PathBuf>,
     pub pixmap: Option<TrayPixmap>,
     pub menu_path: Option<String>,
     pub menu: Option<TrayMenu>,
@@ -94,6 +146,7 @@ impl PartialEq for TrayItem {
             && self.title == other.title
             && self.tooltip == other.tooltip
             && self.icon_name == other.icon_name
+            && self.icon_file == other.icon_file
             && self.pixmap == other.pixmap
             && self.menu_path == other.menu_path
             && self.menu.is_some() == other.menu.is_some()
@@ -130,6 +183,8 @@ impl TrayItem {
             title,
             tooltip,
             icon_name,
+            icon_theme_path: sni.icon_theme_path.clone().filter(|path| !path.is_empty()),
+            icon_file: None,
             pixmap,
             menu_path: sni.menu.clone(),
             menu,
@@ -173,6 +228,8 @@ impl TrayItem {
             id: icon.class,
             title,
             icon_name: None,
+            icon_theme_path: None,
+            icon_file: None,
             pixmap: Some(icon.pixmap),
             menu_path: None,
             menu: None,
@@ -225,6 +282,41 @@ pub fn vertical_coord(index: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use crate::model::{Orientation, Side};
+
+    /// A folder of its own under the system's temporary folder, emptied.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("coquille-tray-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_electron_icon_is_found_in_its_folder() {
+        let dir = scratch("electron");
+        std::fs::write(dir.join("status_icon_27.png"), b"png").unwrap();
+        assert_eq!(
+            find_in_theme_path(&dir, "status_icon_27"),
+            Some(dir.join("status_icon_27.png"))
+        );
+        assert_eq!(find_in_theme_path(&dir, "status_icon_0"), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_theme_in_the_folder_gives_its_largest_icon() {
+        let dir = scratch("theme");
+        for size in ["16x16", "48x48", "22x22"] {
+            let apps = dir.join("hicolor").join(size).join("apps");
+            std::fs::create_dir_all(&apps).unwrap();
+            std::fs::write(apps.join("steam.png"), b"png").unwrap();
+        }
+        assert_eq!(
+            find_in_theme_path(&dir, "steam"),
+            Some(dir.join("hicolor/48x48/apps/steam.png"))
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn a_bar_surface_is_centered_along_its_edge() {

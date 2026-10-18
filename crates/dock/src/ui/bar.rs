@@ -735,6 +735,21 @@ pub fn tray_icon_element<'a, Message: 'a>(
         .content_fit(ContentFit::Contain)
         .into();
     }
+    // The item's own folder comes first: Electron names its icons
+    // `status_icon_N`, which no theme has.
+    if let Some(path) = &item.icon_file {
+        if path.extension().is_some_and(|ext| ext == "svg") {
+            return svg(svg::Handle::from_path(path))
+                .width(size)
+                .height(size)
+                .into();
+        }
+        return image(image::Handle::from_path(path))
+            .width(size)
+            .height(size)
+            .content_fit(ContentFit::Contain)
+            .into();
+    }
     if let Some(icon_name) = &item.icon_name {
         if let Some(icon) = dock.icons.get(icon_name) {
             return match icon {

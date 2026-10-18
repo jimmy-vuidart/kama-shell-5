@@ -3,6 +3,8 @@
 //! tray (`xembed`) for Wine and other X11 programs.
 //! Converts events into dock updates and dispatches user actions back to items.
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use iced::Subscription;
@@ -14,7 +16,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::{debug, error, info, warn};
 
 use super::{Backend, Request, Update, xembed};
-use crate::model::tray::{TrayItem, x11_window};
+use crate::model::tray::{TrayItem, find_in_theme_path, x11_window};
 
 pub fn subscription() -> Subscription<Update> {
     Subscription::run(service)
@@ -55,6 +57,11 @@ fn service() -> impl FutureStream<Item = Update> {
                 None
             }
         };
+        let bus = match &client {
+            Some(_) => zbus::Connection::session().await.ok(),
+            None => None,
+        };
+        let mut theme_paths = ThemePaths::new();
         let mut events = client.as_ref().map(Client::subscribe);
         let items_map = client.as_ref().map(Client::items);
         let all = |x11_items: &[TrayItem]| {
@@ -66,8 +73,17 @@ fn service() -> impl FutureStream<Item = Update> {
             items
         };
 
+        // Every list of items goes out with the icons of their folders.
+        macro_rules! send_items {
+            () => {{
+                let mut items = all(&x11_items);
+                find_icon_files(&mut items, &mut theme_paths, bus.as_ref()).await;
+                items
+            }};
+        }
+
         // Initial items if any already exist.
-        let initial_items = all(&x11_items);
+        let initial_items = send_items!();
         if !initial_items.is_empty() {
             let _ = output.send(Update::Tray(initial_items)).await;
         }
@@ -81,11 +97,11 @@ fn service() -> impl FutureStream<Item = Update> {
                     match event {
                         Some(Ok(_ev)) => {
                             debug!("tray event received");
-                            let _ = output.send(Update::Tray(all(&x11_items))).await;
+                            let _ = output.send(Update::Tray(send_items!())).await;
                         }
                         Some(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
                             debug!("tray event stream lagged by {n}");
-                            let _ = output.send(Update::Tray(all(&x11_items))).await;
+                            let _ = output.send(Update::Tray(send_items!())).await;
                         }
                         Some(Err(tokio::sync::broadcast::error::RecvError::Closed)) | None => {
                             info!("tray event channel closed");
@@ -95,7 +111,7 @@ fn service() -> impl FutureStream<Item = Update> {
                 }
                 Some(icons) = x11_changed.recv() => {
                     x11_items = icons.into_iter().map(TrayItem::from_x11).collect();
-                    let _ = output.send(Update::Tray(all(&x11_items))).await;
+                    let _ = output.send(Update::Tray(send_items!())).await;
                 }
                 Some(req) = asked.recv() => {
                     // An X11 icon gets the click itself, where it happened.
@@ -152,14 +168,81 @@ fn service() -> impl FutureStream<Item = Update> {
     })
 }
 
+/// The icon folder of each item, as it last said (`IconThemePath`).
+/// Electron writes each new icon to a new folder and deletes the old one;
+/// `system-tray` drops the `NewIconThemePath` signal and keeps the first.
+type ThemePaths = HashMap<String, String>;
+
+/// Finds the image of the items that name their icon in a folder of their
+/// own, asking the item for its current folder when the one known lacks it.
+async fn find_icon_files(
+    items: &mut [TrayItem],
+    theme_paths: &mut ThemePaths,
+    bus: Option<&zbus::Connection>,
+) {
+    theme_paths.retain(|address, _| items.iter().any(|item| &item.address == address));
+    for item in items {
+        if item.pixmap.is_some() {
+            continue;
+        }
+        let Some(name) = &item.icon_name else {
+            continue;
+        };
+        let Some(known) = theme_paths
+            .get(&item.address)
+            .or(item.icon_theme_path.as_ref())
+        else {
+            continue;
+        };
+        item.icon_file = find_in_theme_path(Path::new(known), name);
+        if item.icon_file.is_some() {
+            continue;
+        }
+        let Some(bus) = bus else {
+            continue;
+        };
+        match icon_theme_path(bus, &item.address).await {
+            Ok(path) => {
+                item.icon_file = find_in_theme_path(Path::new(&path), name);
+                if item.icon_file.is_none() {
+                    debug!(address = %item.address, name, path, "tray icon not in its folder");
+                }
+                theme_paths.insert(item.address.clone(), path);
+            }
+            Err(e) => debug!(error = %e, "failed to read the icon folder of tray item"),
+        }
+    }
+}
+
+/// The bus name and object path of an item, from its address: the bus name,
+/// maybe followed by the path.
+fn destination(address: &str) -> (&str, String) {
+    match address.split_once('/') {
+        Some((name, path)) => (name, format!("/{path}")),
+        None => (address, String::from("/StatusNotifierItem")),
+    }
+}
+
+/// Reads the current icon folder of an item.
+async fn icon_theme_path(bus: &zbus::Connection, address: &str) -> zbus::Result<String> {
+    let (destination, path) = destination(address);
+    let reply = bus
+        .call_method(
+            Some(destination),
+            path.as_str(),
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &("org.kde.StatusNotifierItem", "IconThemePath"),
+        )
+        .await?;
+    let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
+    Ok(String::try_from(value)?)
+}
+
 /// Asks an item to show its own menu, which `system-tray` cannot do.
 async fn context_menu(address: &str, x: i32, y: i32) -> zbus::Result<()> {
     let connection = zbus::Connection::session().await?;
-    // `address` is the bus name of the item, maybe followed by its path.
-    let (destination, path) = match address.split_once('/') {
-        Some((name, path)) => (name, format!("/{path}")),
-        None => (address, String::from("/StatusNotifierItem")),
-    };
+    let (destination, path) = destination(address);
     connection
         .call_method(
             Some(destination),
