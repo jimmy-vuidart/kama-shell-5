@@ -156,14 +156,14 @@ impl Tokens {
     pub const fn new(kind: ThemeKind) -> Self {
         match kind {
             ThemeKind::Light => {
-                let glass = Color::rgba(248, 246, 255, 155);
+                let glass = Color::rgba(255, 255, 255, 118);
                 let hover = Color::rgba(255, 255, 255, 89);
                 Self {
                     kind,
                     backdrop: Color::rgb(0xe9_e6_f4),
                     glass,
                     glass_strong: Color::rgba(255, 255, 255, 204),
-                    rim: Color::rgba(255, 255, 255, 185),
+                    rim: Color::rgba(255, 255, 255, 215),
                     card: Color::rgba(255, 255, 255, 153),
                     hover,
                     separator: Color::rgba(30, 34, 60, 20),
@@ -180,14 +180,14 @@ impl Tokens {
                 }
             }
             ThemeKind::Dark => {
-                let glass = Color::rgba(30, 26, 48, 150);
+                let glass = Color::rgba(26, 22, 44, 118);
                 let hover = Color::rgba(255, 255, 255, 24);
                 Self {
                     kind,
                     backdrop: Color::rgb(0x14_12_1e),
                     glass,
                     glass_strong: Color::rgba(36, 32, 58, 210),
-                    rim: Color::rgba(215, 210, 255, 38),
+                    rim: Color::rgba(215, 210, 255, 45),
                     card: Color::rgba(255, 255, 255, 18),
                     hover,
                     separator: Color::rgba(255, 255, 255, 18),

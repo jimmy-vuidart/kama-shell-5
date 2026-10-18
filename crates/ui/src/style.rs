@@ -159,31 +159,26 @@ pub fn outlined(color: Color, line: Color, radius: f32) -> container::Style {
 
 /// A tactile tile with soft drop shadow for icons on glass.
 pub fn tile_card(palette: Palette, hovered: bool, radius: f32) -> container::Style {
-    let (bg, border_color) = if hovered {
-        (
-            palette.hover,
-            Color::from_rgba8(255, 255, 255, if palette.dark { 0.20 } else { 0.55 }),
-        )
-    } else if palette.dark {
-        (
-            Color::from_rgba8(255, 255, 255, 0.08),
-            Color::from_rgba8(255, 255, 255, 0.10),
-        )
+    if hovered {
+        container::Style {
+            background: Some(Background::Color(palette.hover)),
+            border: Border {
+                color: Color::from_rgba8(255, 255, 255, if palette.dark { 0.20 } else { 0.50 }),
+                width: 0.5,
+                radius: radius.into(),
+            },
+            shadow: palette.tile_shadow(),
+            ..container::Style::default()
+        }
     } else {
-        (
-            Color::from_rgba8(255, 255, 255, 0.72),
-            Color::from_rgba8(255, 255, 255, 0.45),
-        )
-    };
-    container::Style {
-        background: Some(Background::Color(bg)),
-        border: Border {
-            color: border_color,
-            width: 0.5,
-            radius: radius.into(),
-        },
-        shadow: palette.tile_shadow(),
-        ..container::Style::default()
+        container::Style {
+            background: Some(Background::Color(Color::TRANSPARENT)),
+            border: Border {
+                radius: radius.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        }
     }
 }
 
