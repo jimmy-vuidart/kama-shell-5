@@ -239,6 +239,8 @@ mod tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionAction {
     Logout,
+    /// A laptop sleeps (closing its lid does the same, through logind).
+    Suspend,
     Restart,
     PowerOff,
 }
@@ -248,6 +250,7 @@ impl SessionAction {
     pub fn question(self) -> &'static str {
         match self {
             Self::Logout => "Se déconnecter ?",
+            Self::Suspend => "Mettre en veille ?",
             Self::Restart => "Redémarrer l'ordinateur ?",
             Self::PowerOff => "Éteindre l'ordinateur ?",
         }
@@ -257,6 +260,7 @@ impl SessionAction {
     pub fn verb(self) -> &'static str {
         match self {
             Self::Logout => "Se déconnecter",
+            Self::Suspend => "Mettre en veille",
             Self::Restart => "Redémarrer",
             Self::PowerOff => "Éteindre",
         }
@@ -269,6 +273,7 @@ impl SessionAction {
     pub fn command(self) -> Option<[&'static str; 3]> {
         match self {
             Self::Logout => None,
+            Self::Suspend => Some(["systemctl", "suspend", "--no-ask-password"]),
             Self::Restart => Some(["systemctl", "reboot", "--no-ask-password"]),
             Self::PowerOff => Some(["systemctl", "poweroff", "--no-ask-password"]),
         }

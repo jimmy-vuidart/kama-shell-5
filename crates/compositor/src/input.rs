@@ -6,7 +6,7 @@ use coquille_model::{
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
-    PointerMotionEvent,
+    PointerMotionEvent, Switch, SwitchState, SwitchToggleEvent,
 };
 use smithay::desktop::{LayerSurface, WindowSurfaceType};
 use smithay::input::keyboard::{FilterResult, Keycode, Keysym};
@@ -187,6 +187,18 @@ impl State {
                 self.pointer_button(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => self.on_axis::<I>(event),
+            // Closing the lid is logind's business (it suspends the machine
+            // when nobody holds it back, and nothing here does). Opened
+            // again, every screen is drawn whole: one woken from sleep may
+            // have lost its image.
+            InputEvent::SwitchToggle { event } if event.switch() == Some(Switch::Lid) => {
+                let closed = event.state() == SwitchState::On;
+                info!(closed, "lid");
+                if !closed {
+                    self.full_redraw = true;
+                    self.queue_redraw();
+                }
+            }
             _ => {}
         }
     }

@@ -990,6 +990,11 @@ fn session<'a>(
             false,
         ))
         .push(action(
+            Glyph::Moon,
+            Message::Session(SessionAction::Suspend),
+            false,
+        ))
+        .push(action(
             Glyph::Restart,
             Message::Session(SessionAction::Restart),
             false,
