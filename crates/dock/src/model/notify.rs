@@ -2,6 +2,7 @@
 //! Pure logic; D-Bus and drawing live elsewhere.
 
 use coquille_model::OutputRole;
+use std::collections::HashSet;
 
 use super::Orientation;
 
@@ -95,6 +96,7 @@ pub struct NotifyState {
     pub visible: Vec<u32>,
     pub user_dnd: bool,
     next_id: u32,
+    closed: HashSet<u32>,
 }
 
 impl NotifyState {
@@ -145,8 +147,11 @@ impl NotifyState {
         if replacing {
             self.history.retain(|known| known.id != id);
         }
+        self.closed.remove(&id);
         self.history.insert(0, notice);
         self.history.truncate(MAX_HISTORY);
+        let retained_ids: HashSet<_> = self.history.iter().map(|notice| notice.id).collect();
+        self.closed.retain(|closed| retained_ids.contains(closed));
 
         let any_anchored = !anchored.is_empty();
         let show = !self.effective_dnd(any_anchored) && self.toast_bar(bars, anchored).is_some();
@@ -171,12 +176,22 @@ impl NotifyState {
         before != self.visible.len()
     }
 
+    /// Closes a notification once while retaining its session-history entry.
+    pub fn close(&mut self, id: u32) -> bool {
+        if !self.history.iter().any(|notice| notice.id == id) || !self.closed.insert(id) {
+            return false;
+        }
+        self.hide(id);
+        true
+    }
+
     /// Removes a notice from history and from the toast stack.
     #[allow(dead_code)]
     pub fn forget(&mut self, id: u32) -> bool {
         let had = self.history.iter().any(|notice| notice.id == id);
         self.history.retain(|notice| notice.id != id);
         self.visible.retain(|visible| *visible != id);
+        self.closed.remove(&id);
         had
     }
 
@@ -184,8 +199,10 @@ impl NotifyState {
     pub fn clear(&mut self) {
         self.history.clear();
         self.visible.clear();
+        self.closed.clear();
     }
 
+    #[allow(dead_code)]
     pub fn notice(&self, id: u32) -> Option<&Notice> {
         self.history.iter().find(|notice| notice.id == id)
     }
@@ -526,15 +543,40 @@ mod tests {
     }
 
     #[test]
-    fn close_unknown_or_already_forgotten_is_ignored() {
+    fn close_unknown_notice_is_ignored() {
         let mut state = NotifyState::new();
-        assert!(!state.forget(99));
+        assert!(!state.close(99));
         assert!(state.notice(99).is_none());
+    }
+
+    #[test]
+    fn close_is_one_time_and_keeps_history() {
+        let mut state = NotifyState::new();
         state.ingest(notice(7, "known"), &left_bar(), &[]);
-        assert!(state.notice(7).is_some());
-        assert!(state.forget(7));
-        assert!(state.notice(7).is_none());
-        assert!(!state.hide(7));
+        assert_eq!(state.visible, vec![7]);
+
+        assert!(state.close(7));
+        assert!(state.visible.is_empty());
+        assert_eq!(state.notice(7).unwrap().summary, "known");
+        assert_eq!(state.history.len(), 1);
+        assert!(!state.close(7));
+        assert_eq!(state.history.len(), 1);
+    }
+
+    #[test]
+    fn replacing_closed_notice_reopens_its_lifecycle() {
+        let mut state = NotifyState::new();
+        let bars = left_bar();
+        state.ingest(notice(7, "known"), &bars, &[]);
+        assert!(state.close(7));
+
+        assert_eq!(
+            state.ingest(notice(7, "updated"), &bars, &[]),
+            ToastDecision::Replaced { id: 7 }
+        );
+        assert_eq!(state.visible, vec![7]);
+        assert_eq!(state.notice(7).unwrap().summary, "updated");
+        assert!(state.close(7));
     }
 
     #[test]
