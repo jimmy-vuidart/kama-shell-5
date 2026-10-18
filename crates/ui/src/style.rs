@@ -101,7 +101,20 @@ impl Palette {
         Shadow {
             color: self.shadow,
             offset: Vector::new(0.0, 4.0),
-            blur_radius: 18.0,
+            blur_radius: 22.0,
+        }
+    }
+
+    /// The subtle micro-shadow of an app tile sitting on a glass dock.
+    pub fn tile_shadow(&self) -> Shadow {
+        Shadow {
+            color: if self.dark {
+                Color::from_rgba8(0, 0, 0, 0.28)
+            } else {
+                Color::from_rgba8(50, 40, 95, 0.12)
+            },
+            offset: Vector::new(0.0, 1.5),
+            blur_radius: 4.5,
         }
     }
 
@@ -141,6 +154,36 @@ pub fn outlined(color: Color, line: Color, radius: f32) -> container::Style {
             radius: radius.into(),
         },
         ..fill(color, radius)
+    }
+}
+
+/// A tactile tile with soft drop shadow for icons on glass.
+pub fn tile_card(palette: Palette, hovered: bool, radius: f32) -> container::Style {
+    let (bg, border_color) = if hovered {
+        (
+            palette.hover,
+            Color::from_rgba8(255, 255, 255, if palette.dark { 0.20 } else { 0.55 }),
+        )
+    } else if palette.dark {
+        (
+            Color::from_rgba8(255, 255, 255, 0.08),
+            Color::from_rgba8(255, 255, 255, 0.10),
+        )
+    } else {
+        (
+            Color::from_rgba8(255, 255, 255, 0.72),
+            Color::from_rgba8(255, 255, 255, 0.45),
+        )
+    };
+    container::Style {
+        background: Some(Background::Color(bg)),
+        border: Border {
+            color: border_color,
+            width: 0.5,
+            radius: radius.into(),
+        },
+        shadow: palette.tile_shadow(),
+        ..container::Style::default()
     }
 }
 

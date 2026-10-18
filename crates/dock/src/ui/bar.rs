@@ -604,8 +604,8 @@ fn lying<'a>(
 ) -> Element<'a, Message> {
     let pinned = state.pinned();
     let divider = || {
-        let line = container(space().width(1).height(22))
-            .style(move |_| style::fill(palette.separator, 0.0));
+        let line = container(space().width(1).height(16))
+            .style(move |_| style::fill(palette.separator, 0.5));
         container(line).center_x(DIVIDER).center_y(metrics.width)
     };
 
@@ -631,12 +631,13 @@ fn lying<'a>(
         palette,
     ));
 
+    let pill_radius = metrics.width / 2.0;
     let body = container(items)
         .height(metrics.width)
         .padding(Padding::from([0.0, PADDING]))
         .style(move |_| container::Style {
             shadow: palette.shadow(),
-            ..style::outlined(palette.glass, palette.rim, metrics.radius)
+            ..style::outlined(palette.glass, palette.rim, pill_radius)
         });
     if !live {
         return body.into();
@@ -655,15 +656,38 @@ fn lying_launcher<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let open = dock.drawer.is_some();
-    let (color, background) = if open {
-        (palette.on_accent(), palette.accent)
+    let (color, style_fn) = if open {
+        (
+            palette.on_accent(),
+            container::Style {
+                background: Some(iced::Background::Color(palette.accent)),
+                border: iced::Border {
+                    radius: metrics.tile_radius.into(),
+                    ..iced::Border::default()
+                },
+                shadow: iced::Shadow {
+                    color: iced::Color::from_rgba(
+                        palette.accent.r,
+                        palette.accent.g,
+                        palette.accent.b,
+                        0.35,
+                    ),
+                    offset: iced::Vector::new(0.0, 2.0),
+                    blur_radius: 6.0,
+                },
+                ..container::Style::default()
+            },
+        )
     } else {
-        (palette.accent, iced::Color::TRANSPARENT)
+        (
+            palette.accent,
+            style::tile_card(palette, false, metrics.tile_radius),
+        )
     };
     let icon = container(icons::glyph(Glyph::Launcher, metrics.launcher_glyph, color))
         .center_x(metrics.slot)
         .center_y(metrics.slot)
-        .style(move |_| style::fill(background, metrics.tile_radius));
+        .style(move |_| style_fn);
     let area = mouse_area(container(icon).center_y(metrics.width));
     if live || open {
         area.on_press(Message::Launcher(Some(state.screen))).into()
@@ -687,23 +711,18 @@ fn lying_entry<'a>(
     let unread = dock.unread_of(entry);
 
     let mark: Element<'_, Message> = match entry.indicator {
-        Indicator::Here => container(space().width(12).height(3))
-            .style(move |_| style::fill(palette.accent, 1.5))
+        Indicator::Here => container(space().width(4).height(4))
+            .style(move |_| style::fill(palette.accent, 2.0))
             .into(),
-        Indicator::Elsewhere => container(space().width(4).height(3))
+        Indicator::Elsewhere => container(space().width(3).height(3))
             .style(move |_| style::fill(palette.muted, 1.5))
             .into(),
-        Indicator::None => space().height(3).into(),
-    };
-    let tile = if hovered || dragged {
-        palette.hover
-    } else {
-        iced::Color::TRANSPARENT
+        Indicator::None => space().height(4).into(),
     };
     let icon = container(icons::app(&dock.icons, &entry.identity, metrics.icon_size))
         .center_x(metrics.slot)
         .center_y(metrics.slot)
-        .style(move |_| style::fill(tile, metrics.tile_radius));
+        .style(move |_| style::tile_card(palette, hovered || dragged, metrics.tile_radius));
     let icon: Element<'_, Message> = if unread > 0 {
         let count = container(badge(unread, 14.0))
             .width(metrics.slot)
@@ -741,8 +760,8 @@ fn lying_time<'a>(
 ) -> Element<'a, Message> {
     let (hours, minutes, short, _) = clock(now);
     let time = text(format!("{hours}:{minutes}"))
-        .size(14)
-        .font(style::BOLD)
+        .size(13)
+        .font(style::SEMIBOLD)
         .color(palette.text);
     let date = text(short).size(10).color(palette.muted);
     let mut line = row![].spacing(8).align_y(Alignment::Center);
@@ -1013,20 +1032,38 @@ fn launcher<'a>(
 ) -> Element<'a, Message> {
     let Look { side, labels, live } = look;
     let open = dock.drawer.is_some();
-    let color = if open {
-        palette.on_accent()
+    let (color, style_fn) = if open {
+        (
+            palette.on_accent(),
+            container::Style {
+                background: Some(iced::Background::Color(palette.accent)),
+                border: iced::Border {
+                    radius: metrics.tile_radius.into(),
+                    ..iced::Border::default()
+                },
+                shadow: iced::Shadow {
+                    color: iced::Color::from_rgba(
+                        palette.accent.r,
+                        palette.accent.g,
+                        palette.accent.b,
+                        0.35,
+                    ),
+                    offset: iced::Vector::new(0.0, 2.0),
+                    blur_radius: 6.0,
+                },
+                ..container::Style::default()
+            },
+        )
     } else {
-        palette.accent
-    };
-    let background = if open {
-        palette.accent
-    } else {
-        iced::Color::TRANSPARENT
+        (
+            palette.accent,
+            style::tile_card(palette, false, metrics.tile_radius),
+        )
     };
     let icon = container(icons::glyph(Glyph::Launcher, metrics.launcher_glyph, color))
         .center_x(metrics.slot)
         .center_y(metrics.slot)
-        .style(move |_| style::fill(background, metrics.tile_radius));
+        .style(move |_| style_fn);
     let mut content: Vec<Element<'_, Message>> = vec![space().width(MARK).into(), icon.into()];
     if labels {
         let label = text("Lanceur")
@@ -1108,15 +1145,12 @@ fn entry_row<'a>(
             Side::Right => Alignment::Start,
         });
 
-    let tile = if hovered && !labels || dragged {
-        palette.hover
-    } else {
-        iced::Color::TRANSPARENT
-    };
     let icon = container(icons::app(&dock.icons, &entry.identity, metrics.icon_size))
         .center_x(metrics.slot)
         .center_y(metrics.slot)
-        .style(move |_| style::fill(tile, metrics.tile_radius));
+        .style(move |_| {
+            style::tile_card(palette, hovered && !labels || dragged, metrics.tile_radius)
+        });
     // Folded, the count of unread messages sits on the corner of the icon.
     let icon: Element<'_, Message> = if unread > 0 && !labels {
         let count = container(badge(unread, 14.0))

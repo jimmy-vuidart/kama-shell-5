@@ -156,20 +156,20 @@ impl Tokens {
     pub const fn new(kind: ThemeKind) -> Self {
         match kind {
             ThemeKind::Light => {
-                let glass = Color::rgba(255, 255, 255, 140);
+                let glass = Color::rgba(248, 246, 255, 155);
                 let hover = Color::rgba(255, 255, 255, 89);
                 Self {
                     kind,
                     backdrop: Color::rgb(0xe9_e6_f4),
                     glass,
                     glass_strong: Color::rgba(255, 255, 255, 204),
-                    rim: Color::rgba(255, 255, 255, 166),
+                    rim: Color::rgba(255, 255, 255, 185),
                     card: Color::rgba(255, 255, 255, 153),
                     hover,
                     separator: Color::rgba(30, 34, 60, 20),
                     text: Color::rgb(0x1d_20_33),
                     muted: Color::rgb(0x6b_6f_85),
-                    shadow: Color::rgba(60, 50, 120, 36),
+                    shadow: Color::rgba(65, 50, 135, 38),
                     scrim: Color::rgba(40, 30, 80, 26),
                     accent: Color::rgb(0x5b_63_e6),
                     surface: Color::rgb(0xf6_f5_fb),
@@ -180,23 +180,23 @@ impl Tokens {
                 }
             }
             ThemeKind::Dark => {
-                let glass = Color::rgba(22, 22, 26, 140);
+                let glass = Color::rgba(30, 26, 48, 150);
                 let hover = Color::rgba(255, 255, 255, 24);
                 Self {
                     kind,
-                    backdrop: Color::rgb(0x12_12_14),
+                    backdrop: Color::rgb(0x14_12_1e),
                     glass,
-                    glass_strong: Color::rgba(28, 28, 33, 210),
-                    rim: Color::rgba(255, 255, 255, 28),
+                    glass_strong: Color::rgba(36, 32, 58, 210),
+                    rim: Color::rgba(215, 210, 255, 38),
                     card: Color::rgba(255, 255, 255, 18),
                     hover,
                     separator: Color::rgba(255, 255, 255, 18),
                     text: Color::rgb(0xf1_f2_f4),
                     muted: Color::rgb(0x94_98_a4),
-                    shadow: Color::rgba(0, 0, 0, 45),
-                    scrim: Color::rgba(0, 0, 0, 45),
+                    shadow: Color::rgba(15, 10, 35, 45),
+                    scrim: Color::rgba(15, 10, 35, 45),
                     accent: Color::rgb(0x8f_97_ff),
-                    surface: Color::rgb(0x1c_1c_21),
+                    surface: Color::rgb(0x1c_1a_26),
                     titlebar: glass,
                     disabled: Color::rgb(0x50_54_60),
                     button_hover: hover,
