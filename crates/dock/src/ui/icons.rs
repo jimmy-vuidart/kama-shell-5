@@ -22,7 +22,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    fn from_path(path: &Path) -> Self {
+    pub fn from_path(path: &Path) -> Self {
         let is_svg = path.extension().is_some_and(|extension| extension == "svg");
         if is_svg {
             Self::Vector(svg::Handle::from_path(path))

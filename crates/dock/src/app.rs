@@ -26,7 +26,10 @@ use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
-use crate::model::notify::NotifyState;
+use crate::model::notify::{
+    CloseReason, Notice, NotifyState, ToastAnchor, ToastGeometry, ToastSurfacePlan, toast_geometry,
+    toast_surface_plan,
+};
 use crate::model::tray::TrayItem;
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
@@ -126,6 +129,15 @@ pub struct Drawer {
     pub surface: Option<Size>,
 }
 
+/// Overlay of visible toasts, glued to the end of one bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToastSurface {
+    pub id: window::Id,
+    pub screen: OutputRole,
+    pub orientation: Orientation,
+    pub geometry: ToastGeometry,
+}
+
 impl Drawer {
     /// How many columns the grid the arrow keys walk has.
     pub fn columns(&self) -> usize {
@@ -213,6 +225,20 @@ pub enum Message {
     Settings,
     /// The whole Steam library.
     Library,
+    /// The close button of a toast, or of a line of history.
+    NoticeDismiss(u32),
+    /// A click on a toast or a line of history: its default action, or
+    /// its application's window.
+    NoticeOpen(u32),
+    /// One of the buttons of a toast.
+    NoticeAction {
+        id: u32,
+        key: String,
+    },
+    /// Time to hide the toasts whose timeout has elapsed.
+    ExpireToasts,
+    /// « Tout effacer » in the control center.
+    ClearNotices,
 }
 
 /// An audio output sink choice displayed in the launcher selector.
@@ -255,6 +281,7 @@ pub struct Dock {
     pub tray: Vec<TrayItem>,
     pub tray_menu: Option<(window::Id, window::Id, String)>,
     pub drawer: Option<Drawer>,
+    pub toasts: Option<ToastSurface>,
 
     pub audio: Audio,
     pub levels: HashMap<u32, f32>,
@@ -336,6 +363,7 @@ impl Dock {
             drag: None,
             menu: None,
             drawer: None,
+            toasts: None,
             levels: HashMap::new(),
             volumes,
             do_not_disturb: false,
@@ -794,6 +822,7 @@ impl Dock {
         tasks.push(self.show_bars());
         self.rebuild_entries();
         tasks.push(self.fit_bars());
+        tasks.push(self.sync_toasts());
         Task::batch(tasks)
     }
 
@@ -819,15 +848,7 @@ impl Dock {
         let Some((screen, orientation)) = picked.map(|bar| (bar.screen, bar.orientation)) else {
             return Task::none();
         };
-        let first = self.config.docks.first().map(|(first, _)| *first) == Some(screen);
-        let named = self.options.output.clone().filter(|_| first);
-        let output = match (named, self.screen(screen)) {
-            (Some(name), _) => OutputOption::OutputName(name),
-            (None, Some(known)) if self.options.is_real(Backend::Compositor) => {
-                OutputOption::OutputName(known.name.clone())
-            }
-            _ => OutputOption::Active,
-        };
+        let output = self.output_for_bar(screen);
         let (id, task) = Message::layershell_open(NewLayerShellSettings {
             size: None,
             layer: Layer::Overlay,
@@ -856,7 +877,9 @@ impl Dock {
             resizing: false,
             surface: None,
         });
-        self.close_menu().chain(task)
+        // The control center shows the notices: no toast over it.
+        let toasts = self.sync_toasts();
+        self.close_menu().chain(task).chain(toasts)
     }
 
     /// The size of the screen of the launcher: what its surface says, and
@@ -898,6 +921,183 @@ impl Dock {
             Some((id, ..)) => window::close(id),
             None => Task::none(),
         }
+    }
+
+    fn notify_bars(&self) -> Vec<(OutputRole, Orientation)> {
+        self.bars
+            .iter()
+            .map(|bar| (bar.screen, bar.orientation))
+            .collect()
+    }
+
+    fn anchored_roles(&self) -> Vec<OutputRole> {
+        self.snapshot
+            .screens
+            .iter()
+            .filter(|screen| screen.anchored)
+            .map(|screen| screen.role)
+            .collect()
+    }
+
+    /// Bar that should host toasts: none on an anchored screen, when DND
+    /// is in effect, or while the launcher (and its control center, that
+    /// lists the notices) is open.
+    fn toast_target(&self) -> Option<(OutputRole, Orientation)> {
+        let anchored = self.anchored_roles();
+        if self.notify.effective_dnd(!anchored.is_empty()) || self.drawer.is_some() {
+            return None;
+        }
+        self.notify.toast_bar(&self.notify_bars(), &anchored)
+    }
+
+    fn close_toasts(&mut self) -> Task<Message> {
+        match self.toasts.take() {
+            Some(surface) => window::close(surface.id),
+            None => Task::none(),
+        }
+    }
+
+    fn output_for_bar(&self, screen: OutputRole) -> OutputOption {
+        let first = self.config.docks.first().map(|(first, _)| *first) == Some(screen);
+        let named = self.options.output.clone().filter(|_| first);
+        match (named, self.screen(screen)) {
+            (Some(name), _) => OutputOption::OutputName(name),
+            (None, Some(known)) if self.options.is_real(Backend::Compositor) => {
+                OutputOption::OutputName(known.name.clone())
+            }
+            _ => OutputOption::Active,
+        }
+    }
+
+    fn open_toasts(&mut self, screen: OutputRole, orientation: Orientation) -> Task<Message> {
+        let geo = toast_geometry(orientation, self.notify.visible.len());
+        let anchor = match geo.anchor {
+            ToastAnchor::LeftBottom => Anchor::Left | Anchor::Bottom,
+            ToastAnchor::RightBottom => Anchor::Right | Anchor::Bottom,
+            ToastAnchor::BottomRight => Anchor::Bottom | Anchor::Right,
+        };
+        let size = (geo.width, geo.height);
+        let (id, task) = Message::layershell_open(NewLayerShellSettings {
+            size: Some(size),
+            layer: Layer::Overlay,
+            anchor,
+            exclusive_zone: Some(0),
+            margin: Some(geo.margin),
+            keyboard_interactivity: KeyboardInteractivity::None,
+            output_option: self.output_for_bar(screen),
+            events_transparent: false,
+            namespace: Some("coquille-toasts".to_owned()),
+        });
+        self.toasts = Some(ToastSurface {
+            id,
+            screen,
+            orientation,
+            geometry: geo,
+        });
+        task
+    }
+
+    fn sync_toasts(&mut self) -> Task<Message> {
+        self.notify.user_dnd = self.do_not_disturb;
+        let anchored = self.anchored_roles();
+        if self.notify.effective_dnd(!anchored.is_empty()) {
+            self.notify.hide_toasts();
+        }
+        let wanted = self
+            .toast_target()
+            .filter(|_| !self.notify.visible.is_empty());
+        let open = self
+            .toasts
+            .map(|surface| (surface.screen, surface.orientation, surface.geometry));
+        match toast_surface_plan(open, wanted, self.notify.visible.len()) {
+            ToastSurfacePlan::Keep => Task::none(),
+            ToastSurfacePlan::Close => self.close_toasts(),
+            ToastSurfacePlan::Open | ToastSurfacePlan::Relocate => {
+                let (screen, orientation) = wanted.expect("plan opens a wanted bar");
+                let close = self.close_toasts();
+                close.chain(self.open_toasts(screen, orientation))
+            }
+            ToastSurfacePlan::Resize { size } => {
+                if let Some(surface) = &mut self.toasts {
+                    surface.geometry.width = size.0;
+                    surface.geometry.height = size.1;
+                    Task::done(Message::SizeChange {
+                        id: surface.id,
+                        size,
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+        }
+    }
+
+    /// The user closes a notice: its toast and its line in history go.
+    fn dismiss_notice(&mut self, id: u32) -> Task<Message> {
+        if self.notify.close(id) {
+            self.request(Request::NotifyClose {
+                id,
+                reason: CloseReason::Dismissed.as_u32(),
+            });
+        }
+        self.sync_toasts()
+    }
+
+    /// Tells the application which button was pressed. The notice is then
+    /// done with, unless it asked to stay (`resident`).
+    fn invoke_notice(&mut self, id: u32, key: String) -> Task<Message> {
+        let Some(notice) = self.notify.notice(id) else {
+            return Task::none();
+        };
+        let resident = notice.resident;
+        self.request(Request::NotifyAction { id, key });
+        if resident {
+            self.notify.hide(id);
+            return self.sync_toasts();
+        }
+        self.dismiss_notice(id)
+    }
+
+    /// A click on the notice: its default action when it has one (the
+    /// application then shows what it was about), and its window comes to
+    /// the front either way.
+    fn open_notice(&mut self, id: u32) -> Task<Message> {
+        let Some(notice) = self.notify.notice(id) else {
+            return Task::none();
+        };
+        let default = notice.actions.iter().any(|(key, _)| key == "default");
+        if let Some(window) = self.window_of_notice(notice) {
+            self.send(Command::Activate { window });
+        }
+        if default {
+            return self.invoke_notice(id, "default".into());
+        }
+        self.dismiss_notice(id)
+    }
+
+    /// The window of the application that sent a notice: the one its
+    /// desktop entry names, else the one of its name.
+    fn window_of_notice(&self, notice: &Notice) -> Option<u64> {
+        let names = notice.desktop_entry.iter().chain([&notice.app]);
+        names.filter(|name| !name.is_empty()).find_map(|name| {
+            let identity = self.identify(name);
+            let owned = |app: &str| {
+                app.eq_ignore_ascii_case(name)
+                    || identity
+                        .names
+                        .iter()
+                        .any(|own| own.eq_ignore_ascii_case(app))
+            };
+            let windows = self
+                .snapshot
+                .windows
+                .iter()
+                .filter(|window| owned(&window.app));
+            // The one in sight rather than a minimized one.
+            let mut windows: Vec<_> = windows.collect();
+            windows.sort_by_key(|window| window.minimized);
+            windows.first().map(|window| window.id)
+        })
     }
 
     /// What the drawer lists for the search in progress: applications,
@@ -1073,10 +1273,17 @@ impl Dock {
                     }
                     return self.input_region(bar);
                 }
-                if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
+                let drawer = self.drawer.as_ref().is_some_and(|drawer| drawer.id == id);
+                if drawer {
                     self.drawer = None;
                 }
+                if self.toasts.as_ref().is_some_and(|surface| surface.id == id) {
+                    self.toasts = None;
+                }
                 self.bars.retain(|bar| bar.id != id);
+                if drawer {
+                    return self.sync_toasts();
+                }
                 Task::none()
             }
             Message::BarHover(id, hovered) => {
@@ -1365,7 +1572,7 @@ impl Dock {
             Message::CloseDrawer => match self.drawer.take() {
                 Some(drawer) => {
                     self.request(Request::Levels(false));
-                    window::close(drawer.id)
+                    window::close(drawer.id).chain(self.sync_toasts())
                 }
                 None => Task::none(),
             },
@@ -1382,9 +1589,12 @@ impl Dock {
                 match toggle {
                     Toggle::Network => self.request(Request::Network(!self.network.on)),
                     Toggle::Bluetooth => self.request(Request::Bluetooth(!self.bluetooth.on)),
-                    // Kept for when there are notifications and a night
-                    // light: for now they only remember their position.
-                    Toggle::DoNotDisturb => self.do_not_disturb = !self.do_not_disturb,
+                    Toggle::DoNotDisturb => {
+                        self.do_not_disturb = !self.do_not_disturb;
+                        return self.sync_toasts();
+                    }
+                    // Kept for when there is a night light: for now it only
+                    // remembers its position.
                     Toggle::NightLight => self.night_light = !self.night_light,
                     Toggle::DarkTheme => {
                         let theme = match self.snapshot.theme {
@@ -1534,6 +1744,27 @@ impl Dock {
                 spawn(&settings_command(&self.options.config));
                 self.update(Message::CloseDrawer)
             }
+            Message::NoticeDismiss(id) => self.dismiss_notice(id),
+            Message::NoticeOpen(id) => self.open_notice(id),
+            Message::NoticeAction { id, key } => self.invoke_notice(id, key),
+            Message::ExpireToasts => {
+                for id in self.notify.expire(Instant::now()) {
+                    self.request(Request::NotifyClose {
+                        id,
+                        reason: CloseReason::Expired.as_u32(),
+                    });
+                }
+                self.sync_toasts()
+            }
+            Message::ClearNotices => {
+                for id in self.notify.clear() {
+                    self.request(Request::NotifyClose {
+                        id,
+                        reason: CloseReason::Dismissed.as_u32(),
+                    });
+                }
+                self.sync_toasts()
+            }
             // The messages added for the layer shell are handled by it.
             _ => Task::none(),
         }
@@ -1566,7 +1797,8 @@ impl Dock {
                     Task::none()
                 };
                 let icons = self.follow_icon_style();
-                Task::batch([close, show, self.fit_bars(), icons])
+                let toasts = self.sync_toasts();
+                Task::batch([close, show, self.fit_bars(), icons, toasts])
             }
         }
     }
@@ -1607,24 +1839,16 @@ impl Dock {
             }
             backend::Update::Notify(notice) => {
                 self.notify.user_dnd = self.do_not_disturb;
-                let bars: Vec<_> = self
-                    .bars
-                    .iter()
-                    .map(|bar| (bar.screen, bar.orientation))
-                    .collect();
-                let anchored: Vec<_> = self
-                    .snapshot
-                    .screens
-                    .iter()
-                    .filter(|screen| screen.anchored)
-                    .map(|screen| screen.role)
-                    .collect();
+                let bars = self.notify_bars();
+                let anchored = self.anchored_roles();
                 self.notify.ingest(notice, &bars, &anchored);
+                return self.sync_toasts();
             }
             backend::Update::NotifyClosed { id, reason } => {
                 if self.notify.close(id) {
                     self.request(Request::NotifyClose { id, reason });
                 }
+                return self.sync_toasts();
             }
         }
         Task::none()
@@ -1690,6 +1914,11 @@ impl Dock {
             Duration::from_secs(1)
         };
         subscriptions.push(iced::time::every(pace).map(|_| Message::Tick));
+        // Toasts on screen go when their time is up.
+        if !self.notify.visible.is_empty() {
+            let pace = Duration::from_millis(250);
+            subscriptions.push(iced::time::every(pace).map(|_| Message::ExpireToasts));
+        }
 
         if self.bars.iter().any(|bar| bar.unfold != unfold_target(bar)) {
             subscriptions.push(window::frames().map(Message::Frame));
@@ -1747,6 +1976,9 @@ impl Dock {
         }
         if let Some(drawer) = self.drawer.as_ref().filter(|drawer| drawer.id == id) {
             return ui::drawer::view(self, drawer);
+        }
+        if let Some(surface) = self.toasts.as_ref().filter(|surface| surface.id == id) {
+            return ui::toasts::view(self, surface.orientation);
         }
         iced::widget::space().into()
     }

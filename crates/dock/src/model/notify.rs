@@ -2,9 +2,10 @@
 //! Pure logic; D-Bus and drawing live elsewhere.
 
 use coquille_model::OutputRole;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
-use super::Orientation;
+use super::{Orientation, Side};
 
 /// Client timeout omitted (`-1`): hide the toast after this many milliseconds.
 pub const DEFAULT_EXPIRE_MS: u32 = 5_000;
@@ -21,12 +22,10 @@ pub const MAX_IMAGE_PIXELS: u32 = 512 * 512;
 /// How a notification was closed, as `org.freedesktop.Notifications` reasons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
-#[allow(dead_code)] // expired/dismissed are emitted once toasts exist
 pub enum CloseReason {
     Expired = 1,
     Dismissed = 2,
     Requested = 3,
-    Undefined = 4,
 }
 
 impl CloseReason {
@@ -63,11 +62,24 @@ pub struct Notice {
     /// `None` means sticky (timeout 0).
     pub expire_ms: Option<u32>,
     pub image: Option<Icon>,
+    /// When the notice was received, in UTC seconds since the epoch.
+    pub received: i64,
+    /// The `desktop-entry` hint: the application, as its `.desktop` file
+    /// names it.
+    pub desktop_entry: Option<String>,
+    /// The `transient` hint: gone with its toast, never kept in history.
+    pub transient: bool,
+    /// The `resident` hint: invoking an action does not close it.
+    pub resident: bool,
 }
 
 impl Notice {
     pub fn sanitize(mut self) -> Self {
         self.app = clip(&self.app, MAX_APP);
+        self.desktop_entry = self
+            .desktop_entry
+            .map(|entry| clip(&entry, MAX_APP))
+            .filter(|entry| !entry.is_empty());
         self.summary = clip(&self.summary, MAX_SUMMARY);
         self.body = sanitize_markup(&clip(&self.body, MAX_BODY));
         self.actions = self
@@ -89,6 +101,11 @@ pub enum ToastDecision {
 }
 
 /// In-memory session notifications.
+///
+/// The server advertises `persistence`: a notice stays open, in history,
+/// once its toast is gone, until the user acts on it or dismisses it, or
+/// the application closes it. History therefore only holds open notices,
+/// and closing one removes it.
 #[derive(Debug, Clone, Default)]
 pub struct NotifyState {
     /// Newest first.
@@ -96,7 +113,7 @@ pub struct NotifyState {
     pub visible: Vec<u32>,
     pub user_dnd: bool,
     next_id: u32,
-    closed: HashSet<u32>,
+    shown_at: HashMap<u32, Instant>,
 }
 
 impl NotifyState {
@@ -147,18 +164,19 @@ impl NotifyState {
         if replacing {
             self.history.retain(|known| known.id != id);
         }
-        self.closed.remove(&id);
         self.history.insert(0, notice);
         self.history.truncate(MAX_HISTORY);
-        let retained_ids: HashSet<_> = self.history.iter().map(|notice| notice.id).collect();
-        self.closed.retain(|closed| retained_ids.contains(closed));
 
         let any_anchored = !anchored.is_empty();
         let show = !self.effective_dnd(any_anchored) && self.toast_bar(bars, anchored).is_some();
         self.visible.retain(|visible| *visible != id);
+        self.shown_at.remove(&id);
         if show {
             self.visible.insert(0, id);
             self.visible.truncate(MAX_VISIBLE);
+            self.shown_at.insert(id, Instant::now());
+            let kept: HashSet<_> = self.visible.iter().copied().collect();
+            self.shown_at.retain(|shown, _| kept.contains(shown));
             if replacing {
                 ToastDecision::Replaced { id }
             } else {
@@ -173,36 +191,84 @@ impl NotifyState {
     pub fn hide(&mut self, id: u32) -> bool {
         let before = self.visible.len();
         self.visible.retain(|visible| *visible != id);
+        self.shown_at.remove(&id);
         before != self.visible.len()
     }
 
-    /// Closes a notification once while retaining its session-history entry.
-    pub fn close(&mut self, id: u32) -> bool {
-        if !self.history.iter().any(|notice| notice.id == id) || !self.closed.insert(id) {
-            return false;
-        }
-        self.hide(id);
-        true
+    /// Drops every toast without closing the notices (DND / anchored screen).
+    pub fn hide_toasts(&mut self) {
+        self.visible.clear();
+        self.shown_at.clear();
     }
 
-    /// Removes a notice from history and from the toast stack.
-    #[allow(dead_code)]
-    pub fn forget(&mut self, id: u32) -> bool {
+    /// Visible notices, newest first.
+    pub fn visible_notices(&self) -> Vec<&Notice> {
+        self.visible
+            .iter()
+            .filter_map(|id| self.notice(*id))
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub fn shown_at(&self, id: u32) -> Option<Instant> {
+        self.shown_at.get(&id).copied()
+    }
+
+    /// Toasts whose timeout has elapsed. Sticky notices (`expire_ms` none) never appear.
+    pub fn expire_due(&self, now: Instant) -> Vec<u32> {
+        self.visible
+            .iter()
+            .copied()
+            .filter(|id| {
+                let Some(notice) = self.notice(*id) else {
+                    return false;
+                };
+                let Some(ms) = notice.expire_ms else {
+                    return false;
+                };
+                let Some(shown) = self.shown_at.get(id) else {
+                    return false;
+                };
+                now.saturating_duration_since(*shown) >= Duration::from_millis(u64::from(ms))
+            })
+            .collect()
+    }
+
+    /// Hides the toasts whose time is up. Their notices stay open in
+    /// history, except transient ones: those are closed, and their ids
+    /// returned to emit `Expired`.
+    pub fn expire(&mut self, now: Instant) -> Vec<u32> {
+        let mut closed = Vec::new();
+        for id in self.expire_due(now) {
+            if self.notice(id).is_some_and(|notice| notice.transient) {
+                self.close(id);
+                closed.push(id);
+            } else {
+                self.hide(id);
+            }
+        }
+        closed
+    }
+
+    /// Closes an open notification: its toast and its line in history go.
+    /// `false` when it was not open (already closed, or never known), so a
+    /// close is only ever signalled once.
+    pub fn close(&mut self, id: u32) -> bool {
         let had = self.history.iter().any(|notice| notice.id == id);
         self.history.retain(|notice| notice.id != id);
-        self.visible.retain(|visible| *visible != id);
-        self.closed.remove(&id);
+        self.hide(id);
         had
     }
 
-    #[allow(dead_code)]
-    pub fn clear(&mut self) {
+    /// Closes every notification; returns the ids that were open.
+    pub fn clear(&mut self) -> Vec<u32> {
+        let ids = self.history.iter().map(|notice| notice.id).collect();
         self.history.clear();
         self.visible.clear();
-        self.closed.clear();
+        self.shown_at.clear();
+        ids
     }
 
-    #[allow(dead_code)]
     pub fn notice(&self, id: u32) -> Option<&Notice> {
         self.history.iter().find(|notice| notice.id == id)
     }
@@ -215,6 +281,162 @@ impl NotifyState {
         }
         id
     }
+}
+
+/// Gap between the toast stack and the dock / screen edge. The compositor
+/// already keeps the surface out of the dock's reserved zone.
+pub const TOAST_EDGE_GAP: i32 = 8;
+pub const TOAST_STACK_GAP: u32 = 8;
+pub const TOAST_CARD_W_VERTICAL: u32 = 260;
+pub const TOAST_CARD_H_VERTICAL: u32 = 108;
+pub const TOAST_CARD_W_HORIZONTAL: u32 = 220;
+pub const TOAST_CARD_H_HORIZONTAL: u32 = 96;
+
+/// Which corner of the screen the overlay is glued to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastAnchor {
+    /// Upright dock on the left: pile grows up from the bottom.
+    LeftBottom,
+    /// Upright dock on the right.
+    RightBottom,
+    /// Lying dock: row grows left from the bottom-right.
+    BottomRight,
+}
+
+/// Overlay size, anchors and layer-shell margins (`top, right, bottom, left`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToastGeometry {
+    pub width: u32,
+    pub height: u32,
+    pub anchor: ToastAnchor,
+    pub margin: (i32, i32, i32, i32),
+}
+
+/// Surface that holds `count` cards at the end of a dock of `orientation`.
+pub fn toast_geometry(orientation: Orientation, count: usize) -> ToastGeometry {
+    let count = count.clamp(1, MAX_VISIBLE) as u32;
+    let along_dock = TOAST_EDGE_GAP;
+    match orientation {
+        Orientation::Vertical(Side::Left) => ToastGeometry {
+            width: TOAST_CARD_W_VERTICAL,
+            height: stack_len(TOAST_CARD_H_VERTICAL, count),
+            anchor: ToastAnchor::LeftBottom,
+            margin: (0, 0, TOAST_EDGE_GAP, along_dock),
+        },
+        Orientation::Vertical(Side::Right) => ToastGeometry {
+            width: TOAST_CARD_W_VERTICAL,
+            height: stack_len(TOAST_CARD_H_VERTICAL, count),
+            anchor: ToastAnchor::RightBottom,
+            margin: (0, along_dock, TOAST_EDGE_GAP, 0),
+        },
+        Orientation::Horizontal => ToastGeometry {
+            width: stack_len(TOAST_CARD_W_HORIZONTAL, count),
+            height: TOAST_CARD_H_HORIZONTAL,
+            anchor: ToastAnchor::BottomRight,
+            margin: (0, TOAST_EDGE_GAP, along_dock, 0),
+        },
+    }
+}
+
+fn stack_len(card: u32, count: u32) -> u32 {
+    card * count + TOAST_STACK_GAP * count.saturating_sub(1)
+}
+
+/// What `sync_toasts` should do to the overlay surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastSurfacePlan {
+    Keep,
+    Resize { size: (u32, u32) },
+    Relocate,
+    Open,
+    Close,
+}
+
+/// Pure overlay lifecycle: open, resize, relocate, or close.
+///
+/// `open` is the bar, orientation and last geometry of an existing surface.
+/// `wanted` is the bar that should host toasts (`None` when DND, anchoring,
+/// or no visible bar).
+pub fn toast_surface_plan(
+    open: Option<(OutputRole, Orientation, ToastGeometry)>,
+    wanted: Option<(OutputRole, Orientation)>,
+    visible: usize,
+) -> ToastSurfacePlan {
+    match (wanted, open) {
+        (None, None) => ToastSurfacePlan::Keep,
+        (None, Some(_)) | (Some(_), Some(_)) if visible == 0 => ToastSurfacePlan::Close,
+        (None, Some(_)) => ToastSurfacePlan::Close,
+        (Some(_), None) => ToastSurfacePlan::Open,
+        (Some((screen, orientation)), Some((open_screen, open_orientation, geo))) => {
+            let next = toast_geometry(orientation, visible);
+            if screen != open_screen
+                || orientation != open_orientation
+                || next.anchor != geo.anchor
+                || next.margin != geo.margin
+            {
+                ToastSurfacePlan::Relocate
+            } else if (next.width, next.height) != (geo.width, geo.height) {
+                ToastSurfacePlan::Resize {
+                    size: (next.width, next.height),
+                }
+            } else {
+                ToastSurfacePlan::Keep
+            }
+        }
+    }
+}
+
+/// Markup as plain text for iced labels.
+pub fn plain_text(markup: &str) -> String {
+    let mut out = String::with_capacity(markup.len());
+    let mut rest = markup;
+    while !rest.is_empty() {
+        if rest.starts_with('<') {
+            if let Some(end) = rest.find('>') {
+                rest = &rest[end + 1..];
+                continue;
+            }
+            rest = &rest[1..];
+            continue;
+        }
+        if rest.starts_with('&') {
+            if let Some(plain) = entity_plain(rest) {
+                out.push_str(plain.0);
+                rest = &rest[plain.1..];
+                continue;
+            }
+            if let Some(entity) = numeric_entity(rest) {
+                if let Some(ch) = numeric_char(entity) {
+                    out.push(ch);
+                }
+                rest = &rest[entity.len()..];
+                continue;
+            }
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        }
+        let ch = rest.chars().next().unwrap();
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+    out
+}
+
+fn entity_plain(rest: &str) -> Option<(&'static str, usize)> {
+    const NAMED: &[(&str, &str)] = &[
+        ("&amp;", "&"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&apos;", "'"),
+        ("&quot;", "\""),
+    ];
+    for (entity, plain) in NAMED {
+        if rest.starts_with(entity) {
+            return Some((plain, entity.len()));
+        }
+    }
+    None
 }
 
 /// Client expire timeout: `0` sticky, negative → default, otherwise milliseconds.
@@ -307,6 +529,16 @@ fn numeric_entity(rest: &str) -> Option<&str> {
         body.chars().all(|c| c.is_ascii_digit())
     };
     ok.then_some(&rest[..prefix + end + 1])
+}
+
+/// The character a well-formed numeric reference stands for.
+fn numeric_char(entity: &str) -> Option<char> {
+    let digits = entity.strip_prefix("&#")?.strip_suffix(';')?;
+    let code = match digits.strip_prefix(['x', 'X']) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+        None => digits.parse().ok()?,
+    };
+    char::from_u32(code)
 }
 
 fn skip_unknown_tag(rest: &str) -> Option<usize> {
@@ -406,6 +638,10 @@ mod tests {
             actions: Vec::new(),
             expire_ms: Some(DEFAULT_EXPIRE_MS),
             image: None,
+            received: 0,
+            desktop_entry: None,
+            transient: false,
+            resident: false,
         }
     }
 
@@ -550,21 +786,21 @@ mod tests {
     }
 
     #[test]
-    fn close_is_one_time_and_keeps_history() {
+    fn close_is_one_time_and_leaves_history() {
         let mut state = NotifyState::new();
         state.ingest(notice(7, "known"), &left_bar(), &[]);
-        assert_eq!(state.visible, vec![7]);
+        state.ingest(notice(8, "other"), &left_bar(), &[]);
+        assert_eq!(state.visible, vec![8, 7]);
 
         assert!(state.close(7));
-        assert!(state.visible.is_empty());
-        assert_eq!(state.notice(7).unwrap().summary, "known");
+        assert_eq!(state.visible, vec![8]);
+        assert!(state.notice(7).is_none());
         assert_eq!(state.history.len(), 1);
         assert!(!state.close(7));
-        assert_eq!(state.history.len(), 1);
     }
 
     #[test]
-    fn replacing_closed_notice_reopens_its_lifecycle() {
+    fn a_closed_id_sent_again_opens_a_new_notice() {
         let mut state = NotifyState::new();
         let bars = left_bar();
         state.ingest(notice(7, "known"), &bars, &[]);
@@ -572,7 +808,7 @@ mod tests {
 
         assert_eq!(
             state.ingest(notice(7, "updated"), &bars, &[]),
-            ToastDecision::Replaced { id: 7 }
+            ToastDecision::Shown
         );
         assert_eq!(state.visible, vec![7]);
         assert_eq!(state.notice(7).unwrap().summary, "updated");
@@ -584,20 +820,19 @@ mod tests {
         assert_eq!(CloseReason::Expired.as_u32(), 1);
         assert_eq!(CloseReason::Dismissed.as_u32(), 2);
         assert_eq!(CloseReason::Requested.as_u32(), 3);
-        assert_eq!(CloseReason::Undefined.as_u32(), 4);
     }
 
     #[test]
-    fn forget_and_clear_drop_history() {
+    fn clear_closes_every_open_notice_once() {
         let mut state = NotifyState::new();
         state.ingest(notice(0, "one"), &left_bar(), &[]);
-        let id = state.history[0].id;
-        assert!(state.notice(id).is_some());
-        assert!(state.forget(id));
-        assert!(state.history.is_empty());
         state.ingest(notice(0, "two"), &left_bar(), &[]);
-        state.clear();
+        let (newest, oldest) = (state.history[0].id, state.history[1].id);
+        assert!(state.close(oldest));
+        assert_eq!(state.clear(), vec![newest]);
+        assert!(state.history.is_empty());
         assert!(state.visible.is_empty());
+        assert!(state.clear().is_empty());
     }
 
     #[test]
@@ -645,5 +880,143 @@ mod tests {
             Icon::Pixels { rgba, .. } => assert_eq!(rgba, vec![1, 2, 3, 4, 5, 6, 7, 8]),
             _ => panic!("expected pixels"),
         }
+    }
+
+    #[test]
+    fn sticky_toast_never_expires() {
+        let mut state = NotifyState::new();
+        let mut sticky = notice(0, "stay");
+        sticky.expire_ms = None;
+        state.ingest(sticky, &left_bar(), &[]);
+        let id = state.visible[0];
+        let later = state.shown_at(id).unwrap() + Duration::from_secs(60);
+        assert!(state.expire_due(later).is_empty());
+        assert!(state.expire(later).is_empty());
+        assert_eq!(state.visible, vec![id]);
+    }
+
+    #[test]
+    fn an_expired_toast_leaves_its_notice_open_in_history() {
+        let mut state = NotifyState::new();
+        let mut short = notice(0, "bye");
+        short.expire_ms = Some(50);
+        state.ingest(short, &left_bar(), &[]);
+        let id = state.visible[0];
+        let shown = state.shown_at(id).unwrap();
+        assert!(
+            state
+                .expire_due(shown + Duration::from_millis(49))
+                .is_empty()
+        );
+        assert_eq!(
+            state.expire_due(shown + Duration::from_millis(50)),
+            vec![id]
+        );
+        assert!(state.expire(shown + Duration::from_millis(50)).is_empty());
+        assert!(state.visible.is_empty());
+        assert!(state.notice(id).is_some());
+        // Still open: dismissing it from history closes it.
+        assert!(state.close(id));
+    }
+
+    #[test]
+    fn an_expired_transient_toast_is_closed() {
+        let mut state = NotifyState::new();
+        let mut passing = notice(0, "volume");
+        passing.expire_ms = Some(50);
+        passing.transient = true;
+        state.ingest(passing, &left_bar(), &[]);
+        let id = state.visible[0];
+        let later = state.shown_at(id).unwrap() + Duration::from_millis(50);
+        assert_eq!(state.expire(later), vec![id]);
+        assert!(state.history.is_empty());
+        assert!(state.expire(later).is_empty());
+    }
+
+    #[test]
+    fn hide_toasts_keeps_history_open() {
+        let mut state = NotifyState::new();
+        state.ingest(notice(0, "hi"), &left_bar(), &[]);
+        let id = state.visible[0];
+        state.hide_toasts();
+        assert!(state.visible.is_empty());
+        assert!(state.notice(id).is_some());
+        assert!(state.close(id));
+    }
+
+    #[test]
+    fn toast_geometry_follows_bar_orientation() {
+        let left = toast_geometry(Orientation::Vertical(Side::Left), 2);
+        assert_eq!(left.anchor, ToastAnchor::LeftBottom);
+        assert_eq!(left.width, TOAST_CARD_W_VERTICAL);
+        assert_eq!(left.height, TOAST_CARD_H_VERTICAL * 2 + TOAST_STACK_GAP);
+        assert_eq!(left.margin, (0, 0, TOAST_EDGE_GAP, TOAST_EDGE_GAP));
+
+        let right = toast_geometry(Orientation::Vertical(Side::Right), 1);
+        assert_eq!(right.anchor, ToastAnchor::RightBottom);
+        assert_eq!(right.margin, (0, TOAST_EDGE_GAP, TOAST_EDGE_GAP, 0));
+
+        let bottom = toast_geometry(Orientation::Horizontal, 3);
+        assert_eq!(bottom.anchor, ToastAnchor::BottomRight);
+        assert_eq!(bottom.height, TOAST_CARD_H_HORIZONTAL);
+        assert_eq!(
+            bottom.width,
+            TOAST_CARD_W_HORIZONTAL * 3 + TOAST_STACK_GAP * 2
+        );
+        assert_eq!(bottom.margin, (0, TOAST_EDGE_GAP, TOAST_EDGE_GAP, 0));
+
+        let capped = toast_geometry(Orientation::Horizontal, 9);
+        assert_eq!(capped.width, bottom.width);
+    }
+
+    #[test]
+    fn toast_surface_plan_opens_resizes_relocates_and_closes() {
+        let left = (OutputRole::Left, Orientation::Vertical(Side::Left));
+        let right = (OutputRole::Right, Orientation::Vertical(Side::Right));
+        let geo = toast_geometry(left.1, 1);
+        assert_eq!(toast_surface_plan(None, None, 0), ToastSurfacePlan::Keep);
+        assert_eq!(
+            toast_surface_plan(None, Some(left), 1),
+            ToastSurfacePlan::Open
+        );
+        assert_eq!(
+            toast_surface_plan(Some((left.0, left.1, geo)), None, 1),
+            ToastSurfacePlan::Close
+        );
+        assert_eq!(
+            toast_surface_plan(Some((left.0, left.1, geo)), Some(left), 0),
+            ToastSurfacePlan::Close
+        );
+
+        let two = toast_geometry(left.1, 2);
+        assert_eq!(
+            toast_surface_plan(Some((left.0, left.1, geo)), Some(left), 2),
+            ToastSurfacePlan::Resize {
+                size: (two.width, two.height)
+            }
+        );
+        assert_eq!(
+            toast_surface_plan(Some((left.0, left.1, geo)), Some(right), 1),
+            ToastSurfacePlan::Relocate
+        );
+        let lying = (OutputRole::Left, Orientation::Horizontal);
+        assert_eq!(
+            toast_surface_plan(Some((left.0, left.1, geo)), Some(lying), 1),
+            ToastSurfacePlan::Relocate
+        );
+        assert_eq!(
+            toast_surface_plan(Some((left.0, left.1, geo)), Some(left), 1),
+            ToastSurfacePlan::Keep
+        );
+    }
+
+    #[test]
+    fn plain_text_strips_markup() {
+        assert_eq!(plain_text("<b>ok</b> &amp; <i>and</i>"), "ok & and");
+        assert_eq!(
+            plain_text("j&#39;arrive &#x2014;&#xFFFFFFF; ok"),
+            "j'arrive — ok"
+        );
+        assert_eq!(plain_text(&sanitize_markup("l'appli")), "l'appli");
     }
 }

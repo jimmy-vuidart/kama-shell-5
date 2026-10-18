@@ -84,10 +84,9 @@ Quand une fenêtre passe en plein écran (xdg-shell **ou** XWayland) sur un écr
 - **VRR** activé si l'écran le supporte ;
 - support des protocoles **pointer-constraints** et **relative-pointer** (indispensables aux jeux) ;
 - **bords collants** : pour sortir de l'écran du jeu, il faut pousser le curseur contre le bord pendant un court délai (configurable, ~300 ms) ;
-- les **notifications** sont redirigées vers un écran latéral ;
-- **ne pas déranger** automatique pendant le jeu.
+- **ne pas déranger** automatique pendant le jeu : aucune bulle de notification tant qu'un écran est ancré ; les notifications attendent dans l'historique du centre de contrôle.
 
-Les deux derniers points sont des concepts conservés, pas encore réalisés : il n'y a pas de notifications pour l'instant. La bascule « Ne pas déranger » du dock existe déjà, sans effet.
+L'idée première, rediriger les bulles vers un écran latéral pendant le jeu, a cédé la place au « ne pas déranger » automatique.
 
 Sortie : `Super` libère le pointeur (et ouvre le tiroir du dock) ; `Super + Échap` remet le jeu en fenêtre.
 
@@ -157,7 +156,7 @@ coquille/
 ```
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
-- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Le trousseau (`coquille-keyring`) est un service sans fenêtre, sur le bus de session. Notifications et instantanés n'ont pas encore de forme.
+- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Le trousseau (`coquille-keyring`) est un service sans fenêtre, sur le bus de session. Les notifications sont servies par le dock (voir son `README.md`). Les instantanés n'ont pas encore de forme.
 - Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, disposition de chaque écran, délai des bords collants).
 - État persistant (mémoire par appli, largeurs des colonnes, instantanés) : `~/.local/state/coquille/`.
 
@@ -288,7 +287,6 @@ Limites connues :
 - pas de retour dmabuf « scanout » par surface : l'affichage direct dépend de ce que le jeu alloue de lui-même ;
 - avec le VRR, un pointeur visible qui bouge fait remonter la fréquence (il n'est pas sur un plan matériel) ;
 - bords collants inopérants en imbriqué avec la vraie souris : l'hôte possède le pointeur, rien ne peut le retenir ;
-- notifications redirigées et « ne pas déranger » : concepts conservés, à concevoir.
 
 ### État de la phase 4 (dock)
 

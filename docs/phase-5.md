@@ -33,14 +33,13 @@ captures d'écran depuis le tiroir ; déconnexion, redémarrage, extinction
 Ordre conseillé : le plus d'effet pour le moins de code d'abord, le plus
 gros morceau (la capture pour le partage d'écran) ensuite.
 
-- [ ] 1. **Notifications.** Aujourd'hui, `org.freedesktop.Notifications` est
-      activé par D-Bus via `plasma_waitforname`, qui attend `plasmashell` :
-      sous coquille, les notifications de Discord, Steam ou Firefox se
-      perdent déjà. Un serveur dans le dock (ou un programme à part) qui
-      prend le nom, affiche des bulles en layer-shell, garde un historique
-      dans le centre de contrôle. C'est le moment de concevoir le concept
-      conservé de la phase 4 : jamais sur l'écran d'un jeu ancré, « Ne pas
-      déranger » automatique pendant le jeu, bascule du dock enfin active.
+- [x] 1. **Notifications.** Fait le 18 octobre 2026, vérifié en imbriqué
+      sur un bus D-Bus isolé. Le dock sert `org.freedesktop.Notifications`
+      (`dock/src/backend/notify.rs`) : bulles en layer-shell au bout du dock
+      (`dock/src/ui/toasts.rs`), historique des notifications encore
+      ouvertes dans le centre de contrôle, « Ne pas déranger » manuel et
+      automatique pendant un jeu. Détail dans `crates/dock/README.md`. Pas
+      encore vu dans la vraie session (Discord, Steam, Firefox).
 - [ ] 2. **Agent polkit.** Sans lui, toute demande de mot de passe
       administrateur échoue en silence (mises à jour graphiques, montage d'un
       disque interne, GParted…). Aujourd'hui `polkit-kde-agent`, lancé

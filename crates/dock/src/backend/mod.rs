@@ -142,7 +142,6 @@ pub enum Request {
         id: u32,
         reason: u32,
     },
-    #[allow(dead_code)]
     NotifyAction {
         id: u32,
         key: String,

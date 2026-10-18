@@ -5,7 +5,7 @@
 use iced::widget::text::Wrapping;
 use iced::widget::{
     Column, Row, button, column, container, image, mouse_area, pick_list, progress_bar, row,
-    slider, space, stack, text, text_input,
+    scrollable, slider, space, stack, text, text_input,
 };
 use iced::{
     Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, border, mouse,
@@ -18,6 +18,7 @@ use crate::app::{Dock, Drawer, Message, OutputChoice, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
 use crate::model::drawer::{self, PAGE};
 use crate::model::mixer;
+use crate::model::notify::Notice;
 use crate::model::{Identity, Orientation, Side};
 use coquille_ipc::ScreenshotTarget;
 
@@ -797,10 +798,123 @@ fn control_center<'a>(
         (None, true, _) => screenshot_selector(narrow, palette),
         (None, false, note) => session(dock, note.as_deref(), narrow, palette),
     };
-    container(column![switches, sliders, rule(palette), foot].spacing(12))
+    let mut parts: Column<'_, Message> = column![switches, sliders].spacing(12);
+    if !dock.notify.history.is_empty() {
+        parts = parts
+            .push(rule(palette))
+            .push(notification_history(dock, palette));
+    }
+    parts = parts.push(rule(palette)).push(foot);
+    container(parts.spacing(12))
         .padding(12)
         .style(move |_| style::fill(palette.card, 14.0))
         .into()
+}
+
+/// How many lines of history show at once; the others are a scroll away.
+/// The launcher beside a 1080-pixel-high bar has little room left: a line
+/// each, two in sight.
+const HISTORY_LINES: usize = 2;
+const HISTORY_LINE: f32 = 30.0;
+const HISTORY_GAP: f32 = 4.0;
+
+/// The notices still open, newest first: a click opens one, its cross
+/// closes it, « Tout effacer » closes them all.
+fn notification_history<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+    let now = dock.now.timestamp();
+    let count = dock.notify.history.len();
+    let clear = button(
+        text("Tout effacer")
+            .size(12)
+            .font(style::MEDIUM)
+            .color(palette.muted),
+    )
+    .padding(Padding::from([4.0, 8.0]))
+    .on_press(Message::ClearNotices)
+    .style(style::flat(palette.hover, 8.0));
+    let header = heading("Notifications", count.to_string(), palette)
+        .push(space().width(Length::Fill))
+        .push(clear)
+        .align_y(Alignment::Center);
+
+    let items = dock
+        .notify
+        .history
+        .iter()
+        .map(|notice| history_item(dock, notice, now, palette));
+    let items = Column::with_children(items).spacing(HISTORY_GAP);
+    let shown = count.min(HISTORY_LINES) as f32;
+    let height = shown * HISTORY_LINE + (shown - 1.0).max(0.0) * HISTORY_GAP;
+    let list = scrollable(items)
+        .height(height)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(4)
+                .scroller_width(4)
+                .spacing(4),
+        ));
+    column![header, list].spacing(8).into()
+}
+
+/// One line of history: icon, summary, application and when it came.
+fn history_item<'a>(
+    dock: &'a Dock,
+    notice: &'a Notice,
+    now: i64,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let elapsed = now.saturating_sub(notice.received).max(0);
+    let when = relative_time(elapsed as u64);
+    let title = if notice.summary.is_empty() {
+        &notice.app
+    } else {
+        &notice.summary
+    };
+    let summary = text(title.as_str())
+        .size(13)
+        .font(style::MEDIUM)
+        .color(palette.text)
+        .wrapping(Wrapping::None);
+    let app = text(notice.app.as_str())
+        .size(11)
+        .color(palette.muted)
+        .wrapping(Wrapping::None);
+    let words = row![summary, app].spacing(6).align_y(Alignment::Center);
+    let time = text(when).size(11).color(palette.muted);
+    let texts = row![
+        super::toasts::notice_icon(dock, notice, 18.0),
+        container(words).width(Length::Fill).clip(true),
+        time,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    let id = notice.id;
+    let open = button(container(texts).center_y(Length::Fill))
+        .width(Length::Fill)
+        .height(HISTORY_LINE)
+        .padding(Padding::from([0.0, 8.0]))
+        .on_press(Message::NoticeOpen(id))
+        .style(style::flat(palette.hover, 8.0));
+    let close = button(icons::glyph(Glyph::Close, 12.0, palette.muted))
+        .padding(4)
+        .on_press(Message::NoticeDismiss(id))
+        .style(style::flat(palette.hover, 8.0));
+    row![open, close]
+        .spacing(2)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// Format a duration in seconds as a French relative time string.
+fn relative_time(secs: u64) -> String {
+    let days = secs / 86400;
+    match secs {
+        0..=59 => "à l'instant".to_owned(),
+        60..=3599 => format!("il y a {} min", secs / 60),
+        3600..=86399 => format!("il y a {} h", secs / 3600),
+        _ if days < 7 => format!("il y a {} j", days),
+        _ => "plus tôt".to_owned(),
+    }
 }
 
 /// The user on the left; settings and the three ways out on the right.

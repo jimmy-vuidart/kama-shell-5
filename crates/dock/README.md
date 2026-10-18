@@ -157,6 +157,42 @@ n'est jamais réécrit.
   (`ui/opaque.rs`) : celui d'iced demande le curseur `Idle`, dont
   `iced_layershell` 0.19.1 fait le curseur d'attente.
 
+## Notifications
+
+Le dock sert `org.freedesktop.Notifications` sur le bus de session
+(`backend/notify.rs`) ; les règles sont dans `model/notify.rs`, testées.
+
+- **Bulles** : une surface layer-shell à part (`coquille-toasts`, calque
+  `Overlay`, `ui/toasts.rs`), à 8 px du bout de la première barre visible
+  (gauche, puis centre, puis droite) : empilées vers le haut depuis le bas
+  d'une barre verticale, en rang vers la gauche depuis la droite d'une barre
+  horizontale. Trois au plus, la plus récente en premier. Icône (image de la
+  notification, sinon son icône, sinon celle de l'appli), résumé, corps sans
+  balises, boutons d'action, croix.
+- **Délai** : celui de l'appli, 5 s par défaut ; `0` ou l'urgence critique
+  la gardent jusqu'à ce qu'on s'en occupe. Une bulle qui expire disparaît
+  mais **la notification reste ouverte**, dans l'historique (le serveur
+  annonce `persistence`) ; seule une notification `transient` est fermée
+  avec elle.
+- **Historique** : les notifications encore ouvertes, dans le centre de
+  contrôle (deux lignes visibles, le reste en défilement). Un clic sur une
+  ligne ou sur une bulle déclenche son action `default` s'il y en a une et
+  amène la fenêtre de l'appli (trouvée par `desktop-entry`, sinon par le nom
+  de l'appli), puis la ferme. La croix la ferme, « Tout effacer » les ferme
+  toutes. Une appli qui ferme sa notification la retire aussi. Rien n'est
+  gardé d'une session à l'autre.
+- **Ne pas déranger** : la bascule du centre de contrôle retire les bulles,
+  et un écran ancré par un jeu fait de même ; les notifications arrivent
+  quand même dans l'historique. Les bulles se retirent aussi tant que le
+  lanceur est ouvert.
+- **Nom de bus** : dans une session coquille (`XDG_CURRENT_DESKTOP`), le
+  dock prend le nom, quitte à passer devant un serveur resté là s'il le
+  permet, ou à attendre son tour. Imbriqué dans un autre bureau, il ne prend
+  qu'un nom libre : les notifications de l'hôte ne sont jamais détournées.
+  Pour essayer en imbriqué, lancer coquille sous `dbus-run-session` avec
+  `--backends compositor,notifications` pour le dock, puis `notify-send`
+  (ou `gdbus call`, qui n'attend pas les actions).
+
 ## Limites
 
 - **Dock horizontal** : le lanceur fait au plus 1100 px de large, moins sur
@@ -167,8 +203,13 @@ n'est jamais réécrit.
 
 - **Luminosité** : il faut `ddcutil` et l'accès aux bus `i2c` des écrans ;
   sans eux le curseur est remplacé par « indisponible ».
-- **Ne pas déranger** et **Éclairage nocturne** retiennent leur position mais
-  n'ont pas d'effet : il n'y a encore ni notifications ni éclairage nocturne.
+- **Éclairage nocturne** retient sa position mais n'a pas d'effet : il n'y a
+  pas encore d'éclairage nocturne.
+- **Notifications** : ni son, ni réponse dans la bulle, ni jeton
+  d'activation (`ActivationToken`) : le dock amène lui-même la fenêtre de
+  l'appli, ce qui suffit tant qu'elle en a une ouverte. Le corps d'une bulle
+  est coupé à deux lignes (une le long d'une barre horizontale). Avec
+  `--mock`, pas de notifications.
 - **Icônes X11 de la zone de notification** (Wine, Proton : Ubisoft
   Connect…) : le dock est la zone de notification XEmbed du serveur X
   (`backend/xembed.rs`). Elles n'ont pas d'info-bulle (Wine n'en dit rien

@@ -52,7 +52,11 @@ fn service() -> impl FutureStream<Item = Update> {
             return;
         }
 
-        claim_bus(&connection).await;
+        let ours = in_coquille_session();
+        if !claim_bus(&connection, ours).await {
+            info!("notifications: {BUS_NAME} belongs to the desktop this dock runs in; not served");
+            return;
+        }
 
         let iface = match connection
             .object_server()
@@ -99,7 +103,7 @@ fn service() -> impl FutureStream<Item = Update> {
                 Some(signal) = lost.next() => {
                     if signal.args().is_ok_and(|args| args.name() == BUS_NAME) {
                         warn!("notifications: lost {BUS_NAME}; rejoining the queue");
-                        claim_bus(&connection).await;
+                        claim_bus(&connection, ours).await;
                     }
                 }
                 Some(update) = incoming.recv() => {
@@ -130,16 +134,37 @@ fn service() -> impl FutureStream<Item = Update> {
     })
 }
 
-async fn claim_bus(connection: &Connection) {
-    match connection
-        .request_name_with_flags(BUS_NAME, RequestNameFlags::ReplaceExisting.into())
-        .await
-    {
+/// Whether coquille is the desktop of this session (`coquille-session` and
+/// the compositor on real screens say so). Nested in another desktop, the
+/// session bus is that desktop's: its notification server is left alone.
+fn in_coquille_session() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .is_ok_and(|desktops| desktops.split(':').any(|desktop| desktop == "coquille"))
+}
+
+/// Asks for the name. In a coquille session, a server left over gives it up
+/// when it allows it, or the dock waits in line behind it; nested, the dock
+/// only takes a free name. `false` when it is not ours to serve.
+async fn claim_bus(connection: &Connection, ours: bool) -> bool {
+    let flags = if ours {
+        RequestNameFlags::ReplaceExisting.into()
+    } else {
+        RequestNameFlags::DoNotQueue.into()
+    };
+    match connection.request_name_with_flags(BUS_NAME, flags).await {
         Ok(RequestNameReply::InQueue) => {
             warn!("notifications: {BUS_NAME} is taken; waiting in line");
+            true
         }
-        Ok(_) => info!("notifications: owning {BUS_NAME}"),
-        Err(error) => warn!(%error, "notifications: could not request {BUS_NAME}"),
+        Ok(RequestNameReply::Exists) => false,
+        Ok(_) => {
+            info!("notifications: owning {BUS_NAME}");
+            true
+        }
+        Err(error) => {
+            warn!(%error, "notifications: could not request {BUS_NAME}");
+            ours
+        }
     }
 }
 
@@ -185,6 +210,8 @@ impl Server {
         let id = id_for_notify(&self.next_id, replaces_id);
 
         let (icon, image) = icons_from_hints(&app_icon, &hints);
+        // A critical notice stays until it is dealt with.
+        let critical = hint_u8(&hints, "urgency") == Some(2);
         let notice = Notice {
             id,
             app: app_name,
@@ -192,8 +219,15 @@ impl Server {
             body,
             icon,
             actions: actions_from_flat(&actions),
-            expire_ms: expire_from_timeout(expire_timeout),
+            expire_ms: expire_from_timeout(expire_timeout).filter(|_| !critical),
             image,
+            received: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            desktop_entry: hint_string(&hints, &["desktop-entry"]),
+            transient: hint_bool(&hints, "transient"),
+            resident: hint_bool(&hints, "resident"),
         };
 
         let _ = self.to_ui.send(Update::Notify(notice));
@@ -265,6 +299,21 @@ fn hint(hints: &HashMap<String, OwnedValue>, keys: &[&str]) -> Option<OwnedValue
 fn hint_string(hints: &HashMap<String, OwnedValue>, keys: &[&str]) -> Option<String> {
     let value = hint(hints, keys)?;
     String::try_from(value).ok()
+}
+
+fn hint_u8(hints: &HashMap<String, OwnedValue>, key: &str) -> Option<u8> {
+    u8::try_from(hints.get(key)?).ok()
+}
+
+/// A boolean hint; some clients send it as a number.
+fn hint_bool(hints: &HashMap<String, OwnedValue>, key: &str) -> bool {
+    let Some(value) = hints.get(key) else {
+        return false;
+    };
+    bool::try_from(value)
+        .or_else(|_| u8::try_from(value).map(|n| n != 0))
+        .or_else(|_| i32::try_from(value).map(|n| n != 0))
+        .unwrap_or(false)
 }
 
 fn decode_image_data(value: &OwnedValue) -> Option<Icon> {
@@ -339,6 +388,18 @@ mod tests {
         let (icon, image) = icons_from_hints("/usr/share/icon.png", &HashMap::new());
         assert_eq!(icon, Some(Icon::File("/usr/share/icon.png".into())));
         assert!(image.is_none());
+    }
+
+    #[test]
+    fn hints_read_urgency_and_flags() {
+        let mut hints = HashMap::new();
+        hints.insert("urgency".into(), OwnedValue::from(2u8));
+        hints.insert("transient".into(), OwnedValue::from(true));
+        hints.insert("resident".into(), OwnedValue::from(1i32));
+        assert_eq!(hint_u8(&hints, "urgency"), Some(2));
+        assert!(hint_bool(&hints, "transient"));
+        assert!(hint_bool(&hints, "resident"));
+        assert!(!hint_bool(&hints, "missing"));
     }
 
     #[test]
