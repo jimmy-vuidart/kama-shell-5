@@ -358,6 +358,7 @@ On avance **par phases**, en s'arrêtant à la fin de chacune pour que je teste.
 - **Phase 2 — Trois écrans réels** : backend **udev** (DRM/KMS, GBM, libinput, libseat), trois sorties dont le 21:9 central, glisser-déposer vers les emplacements, flottant par défaut, onglets, ⇄, mémoire par appli, `Free`.
 - **Phase 3 — Jeu** : XWayland, détection du plein écran, écran ancré, direct scanout, VRR, pointer-constraints, relative-pointer, bords collants.
 - **Phase 4 — Shell** : le **dock** (barre, tiroir, centre de contrôle, mixeur), d'après `docs/maquettes/dock.md`. Reste son intégration à la session, puis les notifications et les instantanés, dont la forme n'est pas définie. Abandonnés : les barres latérales et le lanceur des maquettes d'origine, le saut de curseur au bouton latéral. Détail dans `docs/tasks/PHASE_4.md`.
+- **Phase 5 — Session autonome** : coquille sera le seul bureau installé. Reconstruire ce que Plasma ou GNOME fournissent encore : notifications, agent polkit, portails et démarrage automatique, veille et verrouillage, capture pour le partage d'écran, thème des applis, touches multimédia, écran de connexion, pont des icônes X11. Détail et ordre dans `docs/tasks/PHASE_5.md`.
 - **Plus tard** : calque par-dessus le jeu (performances, son par appli, capture), vignettes vivantes.
 
 ## Sécurité pendant le développement
