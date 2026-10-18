@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use coquille_config::{Array, Change, Value, apply, with_value};
+use coquille_config::{
+    Array, Change, DockPlace, PerScreen, Settings, Value, apply, docks_for, with_value,
+};
 pub use coquille_config::{default_path, update};
 use coquille_ipc::ThemeName;
 use coquille_model::OutputRole;
@@ -16,15 +18,16 @@ use crate::model::{Orientation, Side};
 
 /// What the dock reads from the configuration. Anything else in the file
 /// belongs to the compositor and is ignored here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
     pub theme: Option<ThemeName>,
     /// `#rrggbb`.
     pub accent: Option<String>,
     /// The applications of the bar, in order.
     pub favorites: Vec<String>,
-    /// The screens that have a dock, and which way each lies.
-    pub docks: Vec<(OutputRole, Orientation)>,
+    /// What the file says of the dock of each screen; `None` where it says
+    /// nothing. [`Config::docks`] tells which screens have one.
+    pub places: PerScreen<Option<DockPlace>>,
     /// The pinned applications of the drawer; the favorites when absent.
     pub pinned: Vec<String>,
     /// The width the user gave the drawer by dragging its edge.
@@ -35,23 +38,6 @@ pub struct Config {
     pub icon_size: Option<u32>,
     pub audio_hidden: Vec<String>,
     pub audio_nicks: BTreeMap<String, String>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            theme: None,
-            accent: None,
-            favorites: Vec::new(),
-            docks: docks(|_| None),
-            pinned: Vec::new(),
-            drawer_width: None,
-            drawer_height: None,
-            icon_size: None,
-            audio_hidden: Vec::new(),
-            audio_nicks: BTreeMap::new(),
-        }
-    }
 }
 
 impl Config {
@@ -66,33 +52,27 @@ impl Config {
     pub fn audio_sink_nick<'a>(&'a self, name: &str) -> Option<&'a str> {
         self.audio_nicks.get(name).map(String::as_str)
     }
-}
 
-/// The docks, given what the configuration says of each screen
-/// (`"vertical"`, `"vertical-right"`, `"horizontal"`, `"off"`). A screen it
-/// says nothing of keeps its usual dock: one on the left screen, upright on
-/// its left edge, none elsewhere.
-fn docks(said: impl Fn(&str) -> Option<String>) -> Vec<(OutputRole, Orientation)> {
-    let screens = [
-        (
-            "left",
-            OutputRole::Left,
-            Some(Orientation::Vertical(Side::Left)),
-        ),
-        ("center", OutputRole::Center, None),
-        ("right", OutputRole::Right, None),
-    ];
-    let dock = |(name, screen, usual): (&str, OutputRole, Option<Orientation>)| {
-        let orientation = match said(name).as_deref() {
-            Some("vertical") => Some(Orientation::Vertical(Side::Left)),
-            Some("vertical-right") => Some(Orientation::Vertical(Side::Right)),
-            Some("horizontal") => Some(Orientation::Horizontal),
-            Some("off") => None,
-            _ => usual,
-        };
-        Some((screen, orientation?))
-    };
-    screens.into_iter().filter_map(dock).collect()
+    /// The screens that have a dock, and which way each lies, when these
+    /// screens are `present` (all three when none is known yet): one on
+    /// the left screen unless the file says otherwise, and always one on a
+    /// lone screen unless the file turns it off.
+    pub fn docks(&self, present: &[OutputRole]) -> Vec<(OutputRole, Orientation)> {
+        let places = docks_for(&self.places, present);
+        PerScreen::<()>::ROLES
+            .into_iter()
+            .filter(|role| present.is_empty() || present.contains(role))
+            .filter_map(|role| {
+                let orientation = match places.get(role) {
+                    DockPlace::Vertical => Orientation::Vertical(Side::Left),
+                    DockPlace::VerticalRight => Orientation::Vertical(Side::Right),
+                    DockPlace::Horizontal => Orientation::Horizontal,
+                    DockPlace::Off => return None,
+                };
+                Some((role, orientation))
+            })
+            .collect()
+    }
 }
 
 /// Reads the configuration. A file that is not valid TOML gives the
@@ -110,10 +90,6 @@ pub fn parse(text: &str) -> Config {
     let length = |key: &str| {
         let value = document.get("drawer")?.get(key)?.as_integer()?;
         u32::try_from(value).ok()
-    };
-    let screen = |name: &str| {
-        let said = document.get("dock")?.get("screens")?.get(name)?.as_str()?;
-        Some(said.to_owned())
     };
     let dock_int = |key: &str| {
         let value = document.get("dock")?.get(key)?.as_integer()?;
@@ -140,7 +116,7 @@ pub fn parse(text: &str) -> Config {
             _ => None,
         },
         accent: text_of("accent").map(str::to_owned),
-        docks: docks(screen),
+        places: Settings::parse(text).docks,
         pinned: names("drawer", "pinned").unwrap_or_else(|| favorites.clone()),
         drawer_width: length("width"),
         drawer_height: length("height"),
@@ -228,7 +204,7 @@ pinned = ["firefox", "mpv"]
         assert_eq!(config.pinned, config.favorites);
         assert_eq!(config.drawer_width, None);
         assert_eq!(
-            config.docks,
+            config.docks(&[]),
             [(OutputRole::Left, Orientation::Vertical(Side::Left))]
         );
     }
@@ -264,11 +240,11 @@ pinned = ["firefox", "mpv"]
     #[test]
     fn without_a_word_the_dock_stands_on_the_left_screen() {
         assert_eq!(
-            parse("").docks,
+            parse("").docks(&[]),
             [(OutputRole::Left, Orientation::Vertical(Side::Left))]
         );
         assert_eq!(
-            parse(FILE).docks,
+            parse(FILE).docks(&[]),
             [(OutputRole::Left, Orientation::Vertical(Side::Left))]
         );
     }
@@ -280,7 +256,7 @@ pinned = ["firefox", "mpv"]
         );
 
         assert_eq!(
-            config.docks,
+            config.docks(&[]),
             [
                 (OutputRole::Center, Orientation::Horizontal),
                 (OutputRole::Right, Orientation::Vertical(Side::Left))
@@ -294,7 +270,7 @@ pinned = ["firefox", "mpv"]
             parse("[dock.screens]\nleft = \"vertical-right\"\nright = \"vertical-right\"\n");
 
         assert_eq!(
-            config.docks,
+            config.docks(&[]),
             [
                 (OutputRole::Left, Orientation::Vertical(Side::Right)),
                 (OutputRole::Right, Orientation::Vertical(Side::Right))
@@ -307,7 +283,7 @@ pinned = ["firefox", "mpv"]
         let config = parse("[dock.screens]\nright = \"horizontal\"\n");
 
         assert_eq!(
-            config.docks,
+            config.docks(&[]),
             [
                 (OutputRole::Left, Orientation::Vertical(Side::Left)),
                 (OutputRole::Right, Orientation::Horizontal)
@@ -320,14 +296,37 @@ pinned = ["firefox", "mpv"]
         let config = parse("[dock.screens]\nleft = \"diagonal\"\ncenter = 3\n");
 
         assert_eq!(
-            config.docks,
+            config.docks(&[]),
             [(OutputRole::Left, Orientation::Vertical(Side::Left))]
         );
     }
 
     #[test]
+    fn a_laptop_has_its_dock_on_its_lone_screen() {
+        let center = [OutputRole::Center];
+
+        assert_eq!(
+            parse("").docks(&center),
+            [(OutputRole::Center, Orientation::Vertical(Side::Left))]
+        );
+        assert_eq!(
+            parse("[dock.screens]\ncenter = \"horizontal\"\n").docks(&center),
+            [(OutputRole::Center, Orientation::Horizontal)]
+        );
+        assert!(
+            parse("[dock.screens]\ncenter = \"off\"\n")
+                .docks(&center)
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn every_dock_can_be_turned_off() {
-        assert!(parse("[dock.screens]\nleft = \"off\"\n").docks.is_empty());
+        assert!(
+            parse("[dock.screens]\nleft = \"off\"\n")
+                .docks(&[])
+                .is_empty()
+        );
     }
 
     #[test]

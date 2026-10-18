@@ -181,7 +181,7 @@ pub fn launcher_screen(
 /// A line of the menu opened by a right click.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
-    /// One of the three "open on" tiles.
+    /// One of the "open on" tiles, one per screen when there are several.
     OpenOn(OutputRole),
     NewWindow,
     Pin,
@@ -202,19 +202,25 @@ pub struct Menu {
     pub actions: Vec<MenuAction>,
 }
 
-/// The menu of an application, according to its state.
-pub fn menu(entry: &Entry) -> Menu {
+/// The menu of an application, according to its state and to the
+/// `screens` plugged in (all three when none is known). A lone screen
+/// needs no "open on" tile, nor to be named.
+pub fn menu(entry: &Entry, screens: &[OutputRole]) -> Menu {
+    let all = [OutputRole::Left, OutputRole::Center, OutputRole::Right];
+    let screens: Vec<OutputRole> = all
+        .into_iter()
+        .filter(|role| screens.is_empty() || screens.contains(role))
+        .collect();
     let count = entry.windows.len();
     let latest = entry.windows.first();
     let subtitle = match (count, latest) {
         (_, None) => "Fermée".to_owned(),
+        (1, Some(_)) if screens.len() == 1 => "1 fenêtre".to_owned(),
         (1, Some(window)) => format!("1 fenêtre · {}", window.screen.label().to_lowercase()),
         (count, Some(_)) => format!("{count} fenêtres"),
     };
-    let mut actions: Vec<MenuAction> = [OutputRole::Left, OutputRole::Center, OutputRole::Right]
-        .into_iter()
-        .map(MenuAction::OpenOn)
-        .collect();
+    let tiles = screens.iter().copied().filter(|_| screens.len() > 1);
+    let mut actions: Vec<MenuAction> = tiles.map(MenuAction::OpenOn).collect();
     if entry.identity.command.is_some() {
         actions.push(MenuAction::NewWindow);
     }
@@ -517,7 +523,7 @@ mod tests {
     fn the_menu_of_a_closed_favorite_offers_to_open_and_unpin() {
         let entries = bar(&["kitty"], &[]);
 
-        let menu = menu(&entries[0]);
+        let menu = menu(&entries[0], &[]);
 
         assert_eq!(menu.subtitle, "Fermée");
         assert_eq!(
@@ -534,6 +540,21 @@ mod tests {
     }
 
     #[test]
+    fn on_a_lone_screen_the_menu_neither_offers_nor_names_screens() {
+        let entries = bar(&["kitty"], &[window(4, "kitty", OutputRole::Center)]);
+
+        let menu = menu(&entries[0], &[OutputRole::Center]);
+
+        assert_eq!(menu.subtitle, "1 fenêtre");
+        assert!(
+            !menu
+                .actions
+                .iter()
+                .any(|action| matches!(action, MenuAction::OpenOn(_)))
+        );
+    }
+
+    #[test]
     fn the_menu_of_an_open_application_can_close_its_last_window() {
         let windows = [
             window(4, "kitty", HERE),
@@ -541,7 +562,7 @@ mod tests {
         ];
 
         let entries = bar(&["kitty"], &windows);
-        let menu = menu(&entries[0]);
+        let menu = menu(&entries[0], &[]);
 
         assert_eq!(menu.subtitle, "2 fenêtres");
         assert_eq!(menu.actions.last(), Some(&MenuAction::Close(4)));
@@ -552,14 +573,14 @@ mod tests {
     fn the_menu_says_where_the_only_window_is() {
         let entries = bar(&["kitty"], &[window(4, "kitty", HERE)]);
 
-        assert_eq!(menu(&entries[0]).subtitle, "1 fenêtre · écran gauche");
+        assert_eq!(menu(&entries[0], &[]).subtitle, "1 fenêtre · écran gauche");
     }
 
     #[test]
     fn the_menu_of_an_application_that_is_not_a_favorite_offers_to_pin_it() {
         let entries = bar(&[], &[window(1, "obsidian", HERE)]);
 
-        let menu = menu(&entries[0]);
+        let menu = menu(&entries[0], &[]);
 
         assert!(menu.actions.contains(&MenuAction::Pin));
         assert!(!menu.actions.contains(&MenuAction::Unpin));
@@ -576,11 +597,11 @@ mod tests {
         let without = bar(&["discord"], &[]);
         let with = bar_with(&["discord"], &[], &[], std::slice::from_ref(&habit));
 
-        assert!(!menu(&without[0]).actions.contains(&MenuAction::Forget));
-        assert!(menu(&with[0]).actions.contains(&MenuAction::Forget));
+        assert!(!menu(&without[0], &[]).actions.contains(&MenuAction::Forget));
+        assert!(menu(&with[0], &[]).actions.contains(&MenuAction::Forget));
         assert_eq!(with[0].habit, Some(habit));
         // Closed, the tile of the screen it would reopen on stands out.
-        assert_eq!(menu(&with[0]).current, Some(OutputRole::Right));
+        assert_eq!(menu(&with[0], &[]).current, Some(OutputRole::Right));
     }
 
     #[test]

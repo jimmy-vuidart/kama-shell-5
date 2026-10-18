@@ -502,6 +502,21 @@ impl Dock {
     }
 
     /// A screen, as the compositor describes it.
+    /// The screens the compositor has; none before it says.
+    pub fn present_screens(&self) -> Vec<OutputRole> {
+        self.snapshot
+            .screens
+            .iter()
+            .map(|screen| screen.role)
+            .collect()
+    }
+
+    /// The screens that have a dock, as the configuration and the screens
+    /// plugged in say: a lone screen always has one, unless turned off.
+    fn docks(&self) -> Vec<(OutputRole, Orientation)> {
+        self.config.docks(&self.present_screens())
+    }
+
     fn screen(&self, role: OutputRole) -> Option<&coquille_ipc::Screen> {
         self.snapshot
             .screens
@@ -537,7 +552,7 @@ impl Dock {
     fn show_bars(&mut self) -> Task<Message> {
         let simulated = !self.options.is_real(Backend::Compositor);
         let mut tasks = Vec::new();
-        for (index, (screen, orientation)) in self.config.docks.clone().into_iter().enumerate() {
+        for (index, (screen, orientation)) in self.docks().into_iter().enumerate() {
             if self.bar_on(screen).is_some() {
                 continue;
             }
@@ -809,25 +824,34 @@ impl Dock {
         }
         info!("configuration read again");
         self.config = config;
-        // A bar whose screen lost its dock, or whose dock now lies the
-        // other way, goes; `show_bars` opens the ones that are missing.
-        let docks = &self.config.docks;
+        let mut tasks = vec![self.close_menu()];
+        tasks.push(self.drop_stale_bars());
+        tasks.push(self.show_bars());
+        self.rebuild_entries();
+        tasks.push(self.fit_bars());
+        tasks.push(self.sync_toasts());
+        Task::batch(tasks)
+    }
+
+    /// A bar whose screen lost its dock, or whose dock now lies the other
+    /// way, goes; `show_bars` opens the ones that are missing.
+    fn drop_stale_bars(&mut self) -> Task<Message> {
+        let docks = self.docks();
         let (kept, gone): (Vec<BarState>, Vec<BarState>) = std::mem::take(&mut self.bars)
             .into_iter()
             .partition(|bar| docks.contains(&(bar.screen, bar.orientation)));
         self.bars = kept;
+        if gone.is_empty() {
+            return Task::none();
+        }
         self.drag = None;
-        let mut tasks = vec![self.close_menu()];
+        let mut tasks = Vec::new();
         // The launcher goes with the bar that opened it.
         let orphan = |drawer: &Drawer| gone.iter().any(|bar| bar.screen == drawer.screen);
         if self.drawer.as_ref().is_some_and(orphan) {
             tasks.push(self.update(Message::CloseDrawer));
         }
         tasks.extend(gone.iter().map(|bar| window::close(bar.id)));
-        tasks.push(self.show_bars());
-        self.rebuild_entries();
-        tasks.push(self.fit_bars());
-        tasks.push(self.sync_toasts());
         Task::batch(tasks)
     }
 
@@ -963,7 +987,7 @@ impl Dock {
     }
 
     fn output_for_bar(&self, screen: OutputRole) -> OutputOption {
-        let first = self.config.docks.first().map(|(first, _)| *first) == Some(screen);
+        let first = self.docks().first().map(|(first, _)| *first) == Some(screen);
         let named = self.options.output.clone().filter(|_| first);
         match (named, self.screen(screen)) {
             (Some(name), _) => OutputOption::OutputName(name),
@@ -1426,7 +1450,7 @@ impl Dock {
                 let Some(entry) = bar.entries.get(index) else {
                     return Task::none();
                 };
-                let menu = bar::menu(entry);
+                let menu = bar::menu(entry, &self.present_screens());
                 let size = (ui::menu::WIDTH, ui::menu::height(&menu));
                 let unfolded = bar.unfold > 0.5;
                 let anchor =
@@ -1844,7 +1868,9 @@ impl Dock {
             compositor::Update::Event(Event::ConfigChanged) => self.reload_config(),
             compositor::Update::Event(Event::State(snapshot)) => {
                 self.snapshot = snapshot;
-                let show = self.show_bars();
+                // The screens are known: a lone one gets its dock.
+                let stale = self.drop_stale_bars();
+                let show = Task::batch([stale, self.show_bars()]);
                 self.rebuild_entries();
                 // A game took the screen of the launcher: the launcher goes.
                 let screen = self.drawer.as_ref().map(|drawer| drawer.screen);

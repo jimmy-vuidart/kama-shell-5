@@ -228,7 +228,7 @@ fn pinned<'a>(dock: &'a Dock, width: f32, palette: Palette) -> Element<'a, Messa
             palette.accent
         };
         let pill = container(
-            text(place.label())
+            text(place.label(dock.snapshot.screens.len() == 1))
                 .size(10)
                 .font(style::SEMIBOLD)
                 .color(color),
@@ -515,6 +515,8 @@ fn games<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     let count = dock.games.len();
     let detail = if count == 0 {
         "aucun jeu Steam installé".to_owned()
+    } else if dock.snapshot.screens.len() == 1 {
+        "s'ouvrent en plein écran, ancrés".to_owned()
     } else {
         "s'ouvrent au centre, ancrés".to_owned()
     };

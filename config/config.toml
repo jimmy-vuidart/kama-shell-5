@@ -95,7 +95,7 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # gauche, lanceur en tiroir), "vertical-right" (la même sur le bord droit),
 # "horizontal" (rangée sur le bord bas, lanceur en panneau au-dessus) ou
 # "off". Sans cette section : un dock vertical sur l'écran gauche, aucun
-# ailleurs.
+# ailleurs ; un écran seul (un portable) a toujours le sien, sauf "off".
 [dock.screens]
 # left = "vertical"
 # center = "off"

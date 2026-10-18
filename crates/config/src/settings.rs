@@ -37,7 +37,7 @@ impl<T> PerScreen<T> {
         }
     }
 
-    fn from_roles(of: impl Fn(OutputRole) -> T) -> Self {
+    pub fn from_roles(of: impl Fn(OutputRole) -> T) -> Self {
         Self {
             left: of(OutputRole::Left),
             center: of(OutputRole::Center),
@@ -96,6 +96,37 @@ impl DockPlace {
             OutputRole::Center | OutputRole::Right => Self::Off,
         }
     }
+}
+
+/// The dock of each screen, given what the file says of each (`None`
+/// where it says nothing) and which screens are `present`. A screen the file
+/// says nothing of has its usual dock (one on the left screen). When the
+/// file says nothing of any present screen and none of them would have a
+/// dock (a laptop: its lone screen is the center), the first present screen
+/// (the center first) gets an upright dock on its left edge. Once the file
+/// names a present screen, it is taken at its word. With no screen known,
+/// every screen counts as present.
+pub fn docks_for(
+    said: &PerScreen<Option<DockPlace>>,
+    present: &[OutputRole],
+) -> PerScreen<DockPlace> {
+    let mut docks = PerScreen::from_roles(|role| said.get(role).unwrap_or(DockPlace::usual(role)));
+    let present: Vec<OutputRole> = if present.is_empty() {
+        PerScreen::<()>::ROLES.to_vec()
+    } else {
+        present.to_vec()
+    };
+    let has_one = present
+        .iter()
+        .any(|role| *docks.get(*role) != DockPlace::Off);
+    let unsaid = present.iter().all(|role| said.get(*role).is_none());
+    if !has_one && unsaid {
+        let order = [OutputRole::Center, OutputRole::Left, OutputRole::Right];
+        if let Some(role) = order.into_iter().find(|role| present.contains(role)) {
+            *docks.get_mut(role) = DockPlace::Vertical;
+        }
+    }
+    docks
 }
 
 /// A mouse pointer acceleration profile.
@@ -294,6 +325,12 @@ impl Settings {
 
     pub fn dock(&self, role: OutputRole) -> DockPlace {
         self.docks.get(role).unwrap_or(DockPlace::usual(role))
+    }
+
+    /// The dock each screen has when these screens are `present` (see
+    /// [`docks_for`]).
+    pub fn docks_on(&self, present: &[OutputRole]) -> PerScreen<DockPlace> {
+        docks_for(&self.docks, present)
     }
 
     pub fn layout(&self, role: OutputRole) -> LayoutKind {
@@ -873,6 +910,59 @@ mod tests {
                 .get(),
             3.0
         );
+    }
+
+    #[test]
+    fn a_lone_screen_always_has_a_dock_unless_turned_off() {
+        let nothing = PerScreen::default();
+        let center = [OutputRole::Center];
+
+        // The usual dock is on the left screen, which a laptop does not have.
+        assert_eq!(docks_for(&nothing, &center).center, DockPlace::Vertical);
+        // One the user chose stays as chosen.
+        let horizontal = PerScreen {
+            center: Some(DockPlace::Horizontal),
+            ..PerScreen::default()
+        };
+        assert_eq!(
+            docks_for(&horizontal, &center).center,
+            DockPlace::Horizontal
+        );
+        // Turned off on purpose: off.
+        let off = PerScreen {
+            center: Some(DockPlace::Off),
+            ..PerScreen::default()
+        };
+        assert_eq!(docks_for(&off, &center).center, DockPlace::Off);
+    }
+
+    #[test]
+    fn three_screens_keep_the_usual_dock_on_the_left() {
+        let all = PerScreen::<()>::ROLES;
+        let docks = docks_for(&PerScreen::default(), &all);
+
+        assert_eq!(docks.left, DockPlace::Vertical);
+        assert_eq!(
+            (docks.center, docks.right),
+            (DockPlace::Off, DockPlace::Off)
+        );
+        assert_eq!(docks_for(&PerScreen::default(), &[]), docks);
+        // Two screens without the left one: the center gets it.
+        let two = docks_for(
+            &PerScreen::default(),
+            &[OutputRole::Center, OutputRole::Right],
+        );
+        assert_eq!(
+            (two.center, two.right),
+            (DockPlace::Vertical, DockPlace::Off)
+        );
+        // The left one turned off on purpose: no dock anywhere.
+        let off = PerScreen {
+            left: Some(DockPlace::Off),
+            ..PerScreen::default()
+        };
+        let none = docks_for(&off, &all);
+        assert_eq!(none, PerScreen::from_roles(|_| DockPlace::Off));
     }
 
     #[test]

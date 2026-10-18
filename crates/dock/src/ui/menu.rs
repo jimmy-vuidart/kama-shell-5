@@ -24,6 +24,15 @@ fn after_rule(action: &MenuAction) -> bool {
     matches!(action, MenuAction::Forget | MenuAction::Close(_))
 }
 
+/// The screens of the "open on" tiles; none on a lone screen.
+fn tiles(menu: &Menu) -> Vec<OutputRole> {
+    let screen = |action: &MenuAction| match action {
+        MenuAction::OpenOn(screen) => Some(*screen),
+        _ => None,
+    };
+    menu.actions.iter().filter_map(screen).collect()
+}
+
 fn lines(menu: &Menu) -> impl Iterator<Item = &MenuAction> {
     menu.actions
         .iter()
@@ -32,7 +41,10 @@ fn lines(menu: &Menu) -> impl Iterator<Item = &MenuAction> {
 
 /// The height of the popup for this menu.
 pub fn height(menu: &Menu) -> u32 {
-    let mut height = 2.0 * PADDING + HEADER + GAP + TITLE + TILES + GAP;
+    let mut height = 2.0 * PADDING + HEADER + GAP;
+    if !tiles(menu).is_empty() {
+        height += TITLE + TILES + GAP;
+    }
     for action in lines(menu) {
         height += ITEM + GAP;
         if after_rule(action) {
@@ -44,7 +56,7 @@ pub fn height(menu: &Menu) -> u32 {
 
 pub fn view<'a>(dock: &'a Dock, entry: &'a Entry) -> Element<'a, Message> {
     let palette = dock.palette();
-    let menu = bar::menu(entry);
+    let menu = bar::menu(entry, &dock.present_screens());
 
     let title = text(menu.title.clone())
         .size(14)
@@ -68,21 +80,21 @@ pub fn view<'a>(dock: &'a Dock, entry: &'a Entry) -> Element<'a, Message> {
     .height(TITLE)
     .align_y(Alignment::End)
     .padding(Padding::from([4.0, 2.0]));
-    let tile = |screen: OutputRole| screen_tile(screen, menu.current == Some(screen), palette);
-    let tiles = row![
-        tile(OutputRole::Left),
-        tile(OutputRole::Center),
-        tile(OutputRole::Right)
-    ]
-    .spacing(6)
-    .height(TILES);
-
-    let mut content: Column<'_, Message> = column![
-        container(header).padding(Padding::from([0.0, 4.0])),
-        open_on,
-        tiles
-    ]
-    .spacing(GAP);
+    let screens = tiles(&menu);
+    let mut content: Column<'_, Message> =
+        column![container(header).padding(Padding::from([0.0, 4.0]))].spacing(GAP);
+    if !screens.is_empty() {
+        let mut line = row![].spacing(6).height(TILES);
+        for &screen in &screens {
+            line = line.push(screen_tile(
+                screen,
+                &screens,
+                menu.current == Some(screen),
+                palette,
+            ));
+        }
+        content = content.push(open_on).push(line);
+    }
     for action in lines(&menu) {
         if after_rule(action) {
             let rule = container(space().width(Length::Fill).height(1))
@@ -100,9 +112,14 @@ pub fn view<'a>(dock: &'a Dock, entry: &'a Entry) -> Element<'a, Message> {
         .into()
 }
 
-/// One of the three screens an application can be opened on: a small
-/// picture of the three screens, with that one lit.
-fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Element<'a, Message> {
+/// One of the screens an application can be opened on: a small picture of
+/// the screens, with that one lit.
+fn screen_tile<'a>(
+    screen: OutputRole,
+    screens: &[OutputRole],
+    current: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
     let label = match screen {
         OutputRole::Left => "Gauche",
         OutputRole::Center => "Centre",
@@ -122,15 +139,12 @@ fn screen_tile<'a>(screen: OutputRole, current: bool, palette: Palette) -> Eleme
         };
         container(space().width(width).height(height)).style(move |_| style::fill(color, 2.0))
     };
-    let screens = row![
-        mini(OutputRole::Left),
-        mini(OutputRole::Center),
-        mini(OutputRole::Right)
-    ]
-    .spacing(2)
-    .align_y(Alignment::Center);
+    let mut pictures = row![].spacing(2).align_y(Alignment::Center);
+    for &role in screens {
+        pictures = pictures.push(mini(role));
+    }
     let label = text(label).size(12).font(style::MEDIUM).color(palette.text);
-    let content = column![screens, label]
+    let content = column![pictures, label]
         .spacing(7)
         .align_x(Alignment::Center);
     let content = container(content)

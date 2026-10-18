@@ -483,7 +483,7 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         ];
         let dock = segmented(
             &places,
-            app.file.dock(role),
+            *app.file.docks_on(&shown).get(role),
             move |place| Message::Change(Change::Dock(role, place)),
             palette,
         );
@@ -603,7 +603,7 @@ fn drawing<'a>(
             container(space().width(width).height(height))
                 .style(move |_| style::fill(palette.accent, 2.0))
         };
-        let inside: Element<'a, Message> = match app.file.dock(role) {
+        let inside: Element<'a, Message> = match *app.file.docks_on(shown).get(role) {
             DockPlace::Vertical => row![dock(4.0.into(), Length::Fill), label].into(),
             DockPlace::VerticalRight => row![label, dock(4.0.into(), Length::Fill)].into(),
             DockPlace::Horizontal => {

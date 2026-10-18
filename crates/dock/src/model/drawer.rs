@@ -195,8 +195,11 @@ pub enum Place {
 }
 
 impl Place {
-    pub fn label(self) -> &'static str {
+    /// What the label says; with a `lone` screen, there is no screen to
+    /// name, only whether the application reopens tidied.
+    pub fn label(self, lone: bool) -> &'static str {
         match self {
+            Self::Screen(_) if lone => "Rangée",
             Self::Screen(OutputRole::Left) => "Gauche",
             Self::Screen(OutputRole::Center) => "Centre",
             Self::Screen(OutputRole::Right) => "Droite",
@@ -438,7 +441,8 @@ mod tests {
         let place = place(&identity("firefox", false), &habits);
 
         assert_eq!(place, Place::Screen(OutputRole::Right));
-        assert_eq!(place.label(), "Droite");
+        assert_eq!(place.label(false), "Droite");
+        assert_eq!(place.label(true), "Rangée");
     }
 
     #[test]
@@ -446,7 +450,7 @@ mod tests {
         let place = place(&identity("gimp", false), &[]);
 
         assert_eq!(place, Place::Floating);
-        assert_eq!(place.label(), "Flottant");
+        assert_eq!(place.label(true), "Flottant");
     }
 
     #[test]
@@ -460,7 +464,7 @@ mod tests {
         let place = place(&identity("steam_app_7", true), &habits);
 
         assert_eq!(place, Place::Screen(OutputRole::Center));
-        assert_eq!(place.label(), "Centre");
+        assert_eq!(place.label(false), "Centre");
     }
 
     #[test]
