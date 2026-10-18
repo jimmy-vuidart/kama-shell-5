@@ -26,6 +26,7 @@ use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
+use crate::model::notify::NotifyState;
 use crate::model::tray::TrayItem;
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
@@ -263,6 +264,7 @@ pub struct Dock {
     pub brightness: Option<f32>,
     pub do_not_disturb: bool,
     pub night_light: bool,
+    pub notify: NotifyState,
     ticks: u64,
 }
 
@@ -338,6 +340,7 @@ impl Dock {
             volumes,
             do_not_disturb: false,
             night_light: false,
+            notify: NotifyState::new(),
             ticks: 0,
         };
         let mut tasks = vec![dock.load_icons(), dock.show_bars()];
@@ -693,7 +696,9 @@ impl Dock {
             Request::TrayActivate { .. }
             | Request::TraySecondary { .. }
             | Request::TrayContextMenu { .. }
-            | Request::TrayMenuItem { .. } => {}
+            | Request::TrayMenuItem { .. }
+            | Request::NotifyClose { .. }
+            | Request::NotifyAction { .. } => {}
         }
     }
 
@@ -1600,6 +1605,26 @@ impl Dock {
                 self.tray = items;
                 return self.fit_bars();
             }
+            backend::Update::Notify(notice) => {
+                self.notify.user_dnd = self.do_not_disturb;
+                let bars: Vec<_> = self
+                    .bars
+                    .iter()
+                    .map(|bar| (bar.screen, bar.orientation))
+                    .collect();
+                let anchored: Vec<_> = self
+                    .snapshot
+                    .screens
+                    .iter()
+                    .filter(|screen| screen.anchored)
+                    .map(|screen| screen.role)
+                    .collect();
+                self.notify.ingest(notice, &bars, &anchored);
+            }
+            backend::Update::NotifyClosed { id, reason } => {
+                self.notify.hide(id);
+                self.request(Request::NotifyClose { id, reason });
+            }
         }
         Task::none()
     }
@@ -1696,6 +1721,9 @@ impl Dock {
         }
         if self.options.is_real(Backend::Tray) {
             subscriptions.push(backend::tray::subscription().map(Message::Backend));
+        }
+        if self.options.is_real(Backend::Notifications) {
+            subscriptions.push(backend::notify::subscription().map(Message::Backend));
         }
         Subscription::batch(subscriptions)
     }
