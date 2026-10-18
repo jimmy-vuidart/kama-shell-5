@@ -945,7 +945,14 @@ fn session<'a>(
     let avatar = container(text(initials).size(13).font(style::BOLD).color(avatar_text))
         .center(36)
         .style(move |_| style::fill(palette.accent, 18.0));
-    let detail = note.unwrap_or("Compte local");
+    // A laptop says how its battery is doing there.
+    let battery = dock
+        .battery
+        .map(|battery| format!("Batterie {} · {}", battery.label(), battery.detail()));
+    let detail = note
+        .map(str::to_owned)
+        .or(battery)
+        .unwrap_or_else(|| "Compte local".to_owned());
     let who = column![
         text(dock.user.clone())
             .size(14)

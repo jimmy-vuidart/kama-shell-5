@@ -38,6 +38,9 @@ pub enum Glyph {
     Check,
     Camera,
     Crop,
+    /// A laptop's battery, on battery and charging.
+    Battery,
+    BatteryCharging,
 }
 
 impl Glyph {
@@ -109,6 +112,12 @@ impl Glyph {
             Self::Crop => {
                 r#"<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>"#
             }
+            Self::Battery => {
+                r#"<rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><rect x="5.5" y="10" width="7" height="4" rx="1" fill="black" stroke="none"/>"#
+            }
+            Self::BatteryCharging => {
+                r#"<rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><path d="M12 9.2 9.5 12.4h3l-2.5 3.2"/>"#
+            }
         }
     }
 
@@ -168,6 +177,8 @@ mod tests {
             Glyph::Check,
             Glyph::Camera,
             Glyph::Crop,
+            Glyph::Battery,
+            Glyph::BatteryCharging,
         ];
         for glyph in glyphs {
             let shapes = glyph.shapes();

@@ -2,6 +2,7 @@
 //! bar, of the drawer and of the mixer lives here, tested.
 
 pub mod bar;
+pub mod battery;
 pub mod drawer;
 pub mod mixer;
 pub mod notify;

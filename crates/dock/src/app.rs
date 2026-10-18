@@ -24,11 +24,12 @@ use crate::backend::{
 };
 use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
+use crate::model::battery::{self, Alert, Battery, Charge};
 use crate::model::drawer::{self, Step};
 use crate::model::mixer::{self, Volumes};
 use crate::model::notify::{
-    CloseReason, Notice, NotifyState, ToastAnchor, ToastGeometry, ToastSurfacePlan, toast_geometry,
-    toast_surface_plan, toasts_that_fit,
+    CloseReason, Icon as NoticeIcon, Notice, NotifyState, ToastAnchor, ToastGeometry,
+    ToastSurfacePlan, toast_geometry, toast_surface_plan, toasts_that_fit,
 };
 use crate::model::tray::TrayItem;
 use crate::model::{Identity, Orientation, Side, identify};
@@ -291,6 +292,8 @@ pub struct Dock {
     pub network: Switch,
     pub bluetooth: Switch,
     pub brightness: Option<f32>,
+    /// A laptop's battery; `None` on a desktop.
+    pub battery: Option<Battery>,
     pub do_not_disturb: bool,
     pub night_light: bool,
     pub notify: NotifyState,
@@ -337,6 +340,11 @@ impl Dock {
                 Switch::default()
             },
             brightness: simulated(Backend::Brightness).then_some(0.7),
+            battery: simulated(Backend::Battery).then_some(Battery {
+                percent: 76,
+                charge: Charge::Discharging,
+                time: Some(Duration::from_secs(3 * 3600 + 12 * 60)),
+            }),
             unread: if simulated(Backend::Compositor) {
                 mock::unread(&config.favorites)
             } else {
@@ -422,7 +430,7 @@ impl Dock {
     }
 
     pub fn metrics(&self) -> ui::bar::Metrics {
-        ui::bar::Metrics::new(self.config.icon_size())
+        ui::bar::Metrics::new(self.config.icon_size()).with_battery(self.battery.is_some())
     }
 
     pub fn identify(&self, name: &str) -> Identity {
@@ -860,6 +868,40 @@ impl Dock {
         }
         tasks.extend(gone.iter().map(|bar| window::close(bar.id)));
         Task::batch(tasks)
+    }
+
+    /// Tells that the battery runs low, as a notification of the dock
+    /// itself. The last warning passes « Ne pas déranger ».
+    fn warn_battery(&mut self, alert: Alert) -> Task<Message> {
+        let Some(level) = self.battery else {
+            return Task::none();
+        };
+        let received = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs() as i64);
+        let notice = Notice {
+            id: 0,
+            app: "Batterie".to_owned(),
+            summary: alert.summary(&level),
+            body: alert.body().to_owned(),
+            icon: Some(NoticeIcon::Named("battery-caution".to_owned())),
+            actions: Vec::new(),
+            expire_ms: match alert {
+                Alert::Low => Some(8000),
+                Alert::Critical => None,
+            },
+            image: None,
+            received,
+            desktop_entry: None,
+            transient: false,
+            resident: false,
+        };
+        self.notify.user_dnd = self.do_not_disturb && alert != Alert::Critical;
+        let bars = self.notify_bars();
+        let anchored = self.anchored_roles();
+        self.notify.ingest(notice, &bars, &anchored);
+        self.notify.user_dnd = self.do_not_disturb;
+        self.sync_toasts()
     }
 
     fn save_favorites(&self) {
@@ -1955,6 +1997,15 @@ impl Dock {
             backend::Update::Network(switch) => self.network = switch,
             backend::Update::Bluetooth(switch) => self.bluetooth = switch,
             backend::Update::Brightness(level) => self.brightness = level,
+            backend::Update::Battery(now) => {
+                let before = std::mem::replace(&mut self.battery, now);
+                // The bar grows or shrinks by the line of the battery.
+                let mut tasks = vec![self.fit_bars()];
+                if let Some(alert) = now.and_then(|now| battery::alert(before, now)) {
+                    tasks.push(self.warn_battery(alert));
+                }
+                return Task::batch(tasks);
+            }
             backend::Update::Tray(items) => {
                 self.tray = items;
                 return self.fit_bars();
@@ -2073,6 +2124,9 @@ impl Dock {
         }
         if self.options.is_real(Backend::Tray) {
             subscriptions.push(backend::tray::subscription().map(Message::Backend));
+        }
+        if self.options.is_real(Backend::Battery) {
+            subscriptions.push(backend::battery::subscription().map(Message::Backend));
         }
         if self.options.is_real(Backend::Notifications) {
             subscriptions.push(backend::notify::subscription().map(Message::Backend));

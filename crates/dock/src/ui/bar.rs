@@ -11,6 +11,7 @@ use super::icons::{self, Glyph};
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
 use crate::model::bar::{Entry, Indicator};
+use crate::model::battery::{Battery, Charge};
 use crate::model::tray::TrayItem;
 use crate::model::{Orientation, Side};
 
@@ -28,6 +29,10 @@ const PADDING: f32 = 6.0;
 /// A separation between two groups, or its title when unfolded.
 const SECTION: f32 = 18.0;
 const CLOCK: f32 = 54.0;
+/// Upright: the line of a laptop's battery, above the clock.
+const BATTERY_ROW: f32 = 24.0;
+/// Lying: the battery, before the clock.
+const BATTERY_WIDTH: f32 = 52.0;
 /// The room between an icon and the edge of the screen for its mark.
 const MARK: f32 = 4.0;
 
@@ -52,6 +57,8 @@ pub struct Metrics {
     pub radius: f32,
     pub tile_radius: f32,
     pub launcher_glyph: f32,
+    /// A laptop: the battery shows with the clock.
+    pub battery: bool,
 }
 
 impl Metrics {
@@ -78,6 +85,29 @@ impl Metrics {
             radius,
             tile_radius,
             launcher_glyph,
+            battery: false,
+        }
+    }
+
+    /// The same, with a laptop's battery beside the clock.
+    pub fn with_battery(self, battery: bool) -> Self {
+        Self { battery, ..self }
+    }
+
+    /// The room of the clock, and of the battery with it.
+    fn clock(&self) -> f32 {
+        if self.battery {
+            CLOCK + BATTERY_ROW
+        } else {
+            CLOCK
+        }
+    }
+
+    fn clock_width(&self) -> f32 {
+        if self.battery {
+            CLOCK_WIDTH + BATTERY_WIDTH
+        } else {
+            CLOCK_WIDTH
         }
     }
 
@@ -96,7 +126,7 @@ impl Metrics {
             let (_, tray_height) = crate::model::tray::vertical_size(tray_items);
             rows.push(tray_height);
         }
-        rows.push(CLOCK);
+        rows.push(self.clock());
         let gaps = GAP * (rows.len() - 1) as f32;
         rows.iter().sum::<f32>() + gaps + 2.0 * PADDING
     }
@@ -121,7 +151,7 @@ impl Metrics {
             items.push(DIVIDER);
             items.push(tray_width);
         }
-        items.extend([DIVIDER, CLOCK_WIDTH]);
+        items.extend([DIVIDER, self.clock_width()]);
         let gaps = GAP * (items.len() - 1) as f32;
         items.iter().sum::<f32>() + gaps + 2.0 * PADDING
     }
@@ -274,7 +304,7 @@ impl Metrics {
         let (col, row) = crate::model::tray::vertical_coord(index);
         let bar_h = self.bar_height(pinned, others, tray_items);
         let (_, tray_h) = crate::model::tray::vertical_size(tray_items);
-        let tray_bottom = SHADOW + bar_h - PADDING - CLOCK - GAP;
+        let tray_bottom = SHADOW + bar_h - PADDING - self.clock() - GAP;
         let tray_top = tray_bottom - tray_h;
         let top = tray_top + row as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP);
         let offset_x =
@@ -594,9 +624,12 @@ fn lying<'a>(
             .push(divider())
             .push(lying_tray(dock, state, live, metrics, palette));
     }
-    items = items
-        .push(divider())
-        .push(lying_time(&dock.now, metrics, palette));
+    items = items.push(divider()).push(lying_time(
+        &dock.now,
+        dock.battery.as_ref(),
+        metrics,
+        palette,
+    ));
 
     let body = container(items)
         .height(metrics.width)
@@ -702,6 +735,7 @@ fn lying_entry<'a>(
 
 fn lying_time<'a>(
     now: &DateTime<Local>,
+    battery: Option<&Battery>,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
@@ -711,8 +745,13 @@ fn lying_time<'a>(
         .font(style::BOLD)
         .color(palette.text);
     let date = text(short).size(10).color(palette.muted);
-    container(column![time, date].align_x(Alignment::End))
-        .width(CLOCK_WIDTH)
+    let mut line = row![].spacing(8).align_y(Alignment::Center);
+    if let Some(battery) = battery {
+        line = line.push(battery_line(battery, palette));
+    }
+    line = line.push(column![time, date].align_x(Alignment::End));
+    container(line)
+        .width(metrics.clock_width())
         .padding(Padding::from([0.0, 6.0]))
         .align_x(Alignment::End)
         .center_y(metrics.width)
@@ -921,7 +960,14 @@ fn bar<'a>(
         rows = rows.push(upright_tray(dock, state, look, metrics, palette));
         rows = rows.push(space().height(GAP));
     }
-    rows = rows.push(time(&dock.now, side, labels, palette));
+    rows = rows.push(time(
+        &dock.now,
+        dock.battery.as_ref(),
+        side,
+        labels,
+        metrics,
+        palette,
+    ));
 
     let body = container(rows)
         .width(width)
@@ -1153,11 +1199,14 @@ fn badge<'a>(count: u32, size: f32) -> Element<'a, Message> {
 
 fn time<'a>(
     now: &DateTime<Local>,
+    battery: Option<&Battery>,
     side: Side,
     labels: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let (hours, minutes, short, long) = clock(now);
+    let height = metrics.clock();
     if labels {
         let time = text(format!("{hours}:{minutes}"))
             .size(20)
@@ -1165,24 +1214,60 @@ fn time<'a>(
             .color(palette.text);
         let date = text(long).size(12).color(palette.muted);
         let line = from_edge(side, vec![time.into(), date.into()]).spacing(10);
-        return container(line)
-            .height(CLOCK)
+        let mut lines = column![].spacing(2);
+        if let Some(battery) = battery {
+            let detail = text(battery.detail()).size(11).color(palette.muted);
+            let charge =
+                from_edge(side, vec![battery_line(battery, palette), detail.into()]).spacing(8);
+            lines = lines.push(charge);
+        }
+        lines = lines.push(line);
+        return container(lines)
+            .height(height)
             .width(Length::Fill)
             .padding(Padding::from([0.0, 14.0]))
             .align_x(outward(side))
-            .center_y(CLOCK)
+            .center_y(height)
             .into();
     }
     let digits = |value: String| text(value).size(14).font(style::BOLD).color(palette.text);
     let date = text(short).size(10).color(palette.muted);
-    let stacked = column![digits(hours), digits(minutes), space().height(2), date]
-        .align_x(Alignment::Center)
-        .spacing(0);
+    let mut stacked = column![].align_x(Alignment::Center).spacing(0);
+    if let Some(battery) = battery {
+        stacked = stacked
+            .push(battery_line(battery, palette))
+            .push(space().height(4));
+    }
+    stacked = stacked.push(
+        column![digits(hours), digits(minutes), space().height(2), date].align_x(Alignment::Center),
+    );
     container(stacked)
-        .height(CLOCK)
+        .height(height)
         .center_x(Length::Fill)
-        .center_y(CLOCK)
+        .center_y(height)
         .into()
+}
+
+/// A laptop's battery: its symbol and how full it is, in the danger color
+/// once it runs low.
+fn battery_line<'a>(battery: &Battery, palette: Palette) -> Element<'a, Message> {
+    let low = battery.charge == Charge::Discharging && battery.percent <= 10;
+    let color = if low { style::DANGER } else { palette.text };
+    let symbol = if battery.charge == Charge::Charging {
+        Glyph::BatteryCharging
+    } else {
+        Glyph::Battery
+    };
+    row![
+        icons::glyph(symbol, 14.0, color),
+        text(battery.percent.to_string())
+            .size(10)
+            .font(style::SEMIBOLD)
+            .color(color)
+    ]
+    .spacing(2)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 #[cfg(test)]

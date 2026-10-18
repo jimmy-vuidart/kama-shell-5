@@ -4,6 +4,7 @@
 
 pub mod audio;
 pub mod backlight;
+pub mod battery;
 pub mod compositor;
 pub mod mock;
 pub mod notify;
@@ -36,12 +37,14 @@ pub enum Backend {
     Tray,
     /// Freedesktop notifications on the session bus.
     Notifications,
+    /// A laptop's battery, through UPower.
+    Battery,
 }
 
 impl Backend {
     /// The backends that are real unless the dock is told otherwise: all
     /// of them.
-    pub const DEFAULT: [Self; 8] = [
+    pub const DEFAULT: [Self; 9] = [
         Self::Compositor,
         Self::Audio,
         Self::Network,
@@ -50,6 +53,7 @@ impl Backend {
         Self::Session,
         Self::Tray,
         Self::Notifications,
+        Self::Battery,
     ];
 }
 
@@ -97,6 +101,8 @@ pub enum Update {
     /// can be reached.
     Brightness(Option<f32>),
     Tray(Vec<TrayItem>),
+    /// A laptop's battery; `None` when it has none, or it is gone.
+    Battery(Option<crate::model::battery::Battery>),
     Notify(Notice),
     NotifyClosed {
         id: u32,
@@ -210,7 +216,8 @@ mod tests {
         assert!(Backend::DEFAULT.contains(&Backend::Session));
         assert!(Backend::DEFAULT.contains(&Backend::Tray));
         assert!(Backend::DEFAULT.contains(&Backend::Notifications));
-        assert_eq!(Backend::DEFAULT.len(), 8);
+        assert!(Backend::DEFAULT.contains(&Backend::Battery));
+        assert_eq!(Backend::DEFAULT.len(), 9);
     }
 
     #[test]
