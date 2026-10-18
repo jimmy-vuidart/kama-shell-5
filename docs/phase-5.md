@@ -93,8 +93,9 @@ gros morceau (la capture pour le partage d'écran) ensuite.
         une session coquille en clair, une session Plasma en sombre peut
         garder des applis GTK 3 claires jusqu'au premier changement de thème
         (à vérifier).
-- [ ] 7. **Touches multimédia.** Les raccourcis ne gèrent que `Mod+…` et les
-      terminaux virtuels. Volume, muet (`pactl`, déjà utilisé par le dock),
+- [ ] 7. **Touches multimédia.** Les raccourcis ne gèrent que `Mod+…`, les
+      terminaux virtuels et les touches de luminosité d'un portable (faites
+      le 18 octobre 2026, transmises au dock). Volume, muet (`pactl`, déjà utilisé par le dock),
       lecture / pause / suivant (MPRIS), `Impr. écran` (capture existante,
       celle du tiroir). À appliquer aussi pendant un jeu : ce sont des
       touches matérielles, comme `Boost`.

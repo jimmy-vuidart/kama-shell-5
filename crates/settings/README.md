@@ -41,12 +41,16 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 | Apparence | thème clair ou sombre, couleur d'accent (celle du thème, huit pastilles, ou `#rrggbb` saisi) | aussitôt |
 | Écrans et dock | connecteur de chaque écran | **au prochain démarrage** |
 | | disposition de chaque écran : plein écran, 2 colonnes, 3 colonnes, maître / esclave | aussitôt |
-| | dock de chaque écran : à gauche, à droite, en bas, aucun | aussitôt |
+| | dock de chaque écran : à gauche, à droite, en bas, aucun (un écran seul a le sien tant que le fichier ne dit rien) | aussitôt |
+| | mise à l'échelle de chaque écran, de 100 % à 300 % par pas de 25 % | aussitôt (applis X11 : **au prochain démarrage**) |
 | Mode jeu | bords collants et leur délai, affichage direct, fréquence variable | aussitôt |
-| Souris | vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons | aussitôt |
+| Souris et pavé | vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons | aussitôt |
+| | pavé tactile (s'il y en a un, ou hors de coquille) : toucher pour cliquer, toucher puis glisser, clic droit à deux doigts ou dans le coin, défilement naturel, coupure pendant la frappe, vitesse | aussitôt |
 | Système | disposition et variante du clavier, terminal | aussitôt |
 | | applications X11 (XWayland) | **au prochain démarrage** |
 
+- Dans coquille, la page « Écrans et dock » ne montre que les écrans
+  présents (un seul s'appelle « Écran ») ; hors de coquille, les trois.
 - Donner à un écran le connecteur d'un autre **échange** les deux : deux
   écrans ne partagent jamais un connecteur.
 - En imbriqué, les écrans sont simulés et leurs noms ne sont pas des

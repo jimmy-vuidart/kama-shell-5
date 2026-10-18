@@ -12,7 +12,7 @@ reste **à confirmer** par un essai.
 
 Un ticket terminé est supprimé dans le commit qui le règle (l'historique git
 en garde la trace), et sa ligne retirée de ce tableau. Les numéros ne sont
-jamais réutilisés : le suivant est le 30.
+jamais réutilisés : le suivant est le 33.
 
 ## Faits, à vérifier sur le matériel
 
@@ -25,6 +25,7 @@ jamais réutilisés : le suivant est le 30.
 
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
+| 30 | [Essayer coquille sur le portable](30-portable-sur-le-materiel.md) | vérification | portable |
 | 01 | [Une image vide bloque l'écran pendant une période](01-cadence-image-vide.md) | performance | matériel |
 | 02 | [Les fenêtres cachées ne reçoivent pas de « frame callback »](02-frame-callbacks-fenetres-cachees.md) | bug | imbriqué |
 | 03 | [Un écran éteint puis rallumé reste noir](03-evenements-de-connecteur.md) | robustesse | matériel |
@@ -55,6 +56,8 @@ jamais réutilisés : le suivant est le 30.
 | 27 | [Halo autour du curseur quand on secoue la souris](27-halo-du-curseur.md) | évolution | imbriqué |
 | 28 | [Dock : messages non lus réels, glisser une icône vers un écran](28-dock-non-lus-et-glisser.md) | évolution | imbriqué |
 | 29 | [Seuls les jeux Steam sont reconnus comme jeux](29-jeux-reconnus.md) | évolution | tests |
+| 31 | [Gestes du pavé tactile](31-gestes-du-pave.md) | évolution | portable |
+| 32 | [Un écran externe branché au portable](32-ecran-externe-du-portable.md) | évolution | portable |
 
 ## Architecture et évolutions
 

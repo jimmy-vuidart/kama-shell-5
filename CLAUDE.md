@@ -14,7 +14,7 @@ Ce fichier donne le contexte du projet à Claude Code. Le garder à la racine du
 
 ## Le projet en une phrase
 
-Un compositeur Wayland construit sur **Smithay**, pensé pour **un PC de bureau à trois écrans**, utilisé **à la souris**, pour **le jeu et le développement web assisté par IA**, avec un modèle de fenêtres simple : **« Centre + compagnons »**.
+Un compositeur Wayland construit sur **Smithay**, pensé pour **un PC de bureau à trois écrans** (et aussi pour **un portable 4K à un seul écran**), utilisé **à la souris**, pour **le jeu et le développement web assisté par IA**, avec un modèle de fenêtres simple : **« Centre + compagnons »**.
 
 ## Matériel et environnement
 
@@ -30,6 +30,7 @@ Un compositeur Wayland construit sur **Smithay**, pensé pour **un PC de bureau 
   - direct scanout sur plans overlay plus restreint que sur AMD/Intel : à valider, pas acquis ;
   - VRR : d'après `--probe`, seul le centre (DP-2) se dit capable (`vrr_capable`), et le pilote expose l'interrupteur `VRR_ENABLED`.
 - Beaucoup de jeux tournent via **Proton / XWayland** : le support XWayland n'est pas optionnel.
+- **Second poste : un portable à écran 4K, un seul écran** (connecteur `eDP`), avec pavé tactile, rétroéclairage et batterie. Son écran unique prend le rôle **centre** ; il se règle à 200 % (`[scale]`). Son GPU n'est pas encore connu : s'il est hybride (iGPU qui tient l'écran, NVIDIA à part), les jeux rendus sur la NVIDIA passent par PRIME, et coquille n'utilise qu'un GPU (celui du démarrage) : à vérifier avec `--probe` avant tout.
 
 ## Mes usages (ils guident toutes les décisions)
 
@@ -94,7 +95,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 
 - **Quel écran ?** Celui que l'appli nomme (xdg-shell), sinon celui où se trouve sa fenêtre. Une fenêtre X11 qui démarre en plein écran en couvrant exactement un écran va sur celui-là ; le centre est annoncé à X11 comme écran principal (RandR), ce qui y envoie les jeux Wine/Proton. Un jeu lancé avec le pointeur sur un écran latéral et qui ne dit rien s'ouvre donc là : le ranger une fois au centre suffit, la mémoire par appli fait le reste.
 - **`Super` seul** (appuyé puis relâché sans autre touche ni clic) ouvre ou ferme le tiroir du dock, et libère au passage le pointeur du jeu qui le retient, jusqu'au prochain clic dans le jeu. Tant qu'il est libéré, les bords ne collent plus.
-- **Aucun panneau sur un écran ancré** : si un jeu prend l'écran gauche, le dock et le tiroir disparaissent, et reviennent quand l'écran est libéré.
+- **Aucun panneau sur un écran ancré** : si un jeu prend l'écran gauche, le dock et le tiroir disparaissent, et reviennent quand l'écran est libéré. **Sauf quand des jeux tiennent tous les écrans** (le portable) : `Super` ouvre alors le tiroir par-dessus le jeu, avec les panneaux de cet écran, faute d'ailleurs. Une fenêtre ouverte pendant le jeu reste cachée derrière lui ; lancée depuis le tiroir alors qu'elle est ouverte (ou activée depuis le dock), elle vient **par-dessus le jeu**, qui reste en plein écran ; un clic dans le jeu le remet devant (modèle : `Desk::bring`).
 - **Bords collants seulement quand le jeu a le focus** : traverser l'écran d'un jeu laissé de côté (focus sur Discord) ne retient pas le curseur. Entrer sur l'écran du jeu n'est jamais retenu. Un glisser du shell n'est jamais retenu.
 - **Une fenêtre qui s'ouvre pendant que le jeu a le focus ne lui prend pas le clavier** : elle apparaît sur l'écran latéral (règle 7), sans le focus, avec sa barre de rangement ; un clic dessus le lui donne.
 - `Super + Échap` vise le jeu qui a le focus, sinon celui de l'écran du pointeur, sinon le seul jeu ancré.
@@ -127,7 +128,8 @@ Les maquettes sont dans `docs/maquettes/` (les ouvrir avant de toucher au rendu)
 - **Flou d'arrière-plan** : le compositeur calcule un vrai flou d'arrière-plan (« framebuffer effects » de Smithay, Dual Kawase : passes de réduction puis d'agrandissement, shaders `blur_down` et `blur_up`, puis `glass` qui applique le masque) derrière ses décorations et derrière les programmes du shell (panneaux `coquille-*`, fenêtre `coquille-settings`). Le verre d'une barre de titre est sous la fenêtre : il floute ce qui est derrière elle, jamais son contenu. Coupé en mode jeu (écran ancré).
 - **Règle des alphas** : derrière nos programmes, le flou prend la forme de leurs pixels assez opaques (couverture `smoothstep(0.2, 0.4, alpha)`). Les surfaces de verre ont donc un alpha > 0.45, le voile/scrim et les ombres restent sous 0.18 (vérifié par un test de `crates/theme`). Le fond de fenêtre (`surface`), visible là où une appli n'a pas encore dessiné, reste opaque.
 - **Un accent or métallique a été essayé, puis abandonné** : dégradés, lingots, filets et gris chauds n'étaient pas jolis à l'usage (commits `18374c1` à `1ad7eaa`, annulés). Ne pas y revenir sans que je le demande.
-- Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, conception `docs/conception/dock.md`) a une taille d'icônes configurable (`[dock]` `icon_size`, défaut 24 px ; barre de 44 px à 8 px du bord et zone réservée de 60 px par défaut, qui s'ajustent à la taille choisie). Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche.
+- Les barres latérales des maquettes d'origine sont abandonnées. Le **dock** (maquettes `docs/maquettes/dock/`, conception `docs/conception/dock.md`) a une taille d'icônes configurable (`[dock]` `icon_size`, défaut 24 px ; barre de 44 px à 8 px du bord et zone réservée de 60 px par défaut, qui s'ajustent à la taille choisie). Chaque écran peut avoir la sienne (`[dock.screens]`), dans un sens ou dans l'autre : **verticale** sur le bord gauche ou sur le bord droit (elle se déploie au survol, lanceur en tiroir du même côté ; à droite, tout est en miroir), ou **horizontale** sur le bord bas (étiquette au survol, lanceur en panneau centré au-dessus). Par défaut : une barre verticale sur l'écran gauche ; **un écran seul a toujours la sienne** (règle `docks_for` de `crates/config`, partagée par le dock et « Paramètres » : quand le fichier ne dit rien des écrans branchés et qu'aucun n'aurait de dock, le premier, le centre d'abord, en reçoit un ; un écran que le fichier nomme est pris au mot).
+- **Batterie** (portable) : au-dessus de l'heure de la barre, avec le temps restant au survol et dans le centre de contrôle ; alertes à 10 % et 5 % (notifications du dock).
 - **Notifications** : des capsules comme la barre du dock (même verre, même épaisseur, même arrondi), dans le coin bas de l'écran du dock, à sa marge : sous une barre verticale, à droite d'une barre horizontale. Leur historique est en tête du centre de contrôle. Détail : `crates/dock/README.md`.
 - Police d'interface : Figtree (repli : police système sans-serif).
 - **Icônes des applis : thème Reversal**, carrés arrondis comme sous macOS, sans détourner les marques (paquet AUR `reversal-icon-theme-git`, qui n'installe que la variante par défaut, `Reversal` et `Reversal-dark`). Le dock et le compositeur prennent la variante claire ou sombre selon le thème, et la couleur la plus proche de l'accent si sa variante est installée (`Reversal-purple-dark`…), sinon la variante par défaut ; sans Reversal, le thème d'icônes de GNOME (`gsettings`). Le choix (`crates/apps/src/reversal.rs`) suit les changements de thème et d'accent en cours de session. Les applis lancées, elles, gardent le thème d'icônes du système, dont seule la luminosité suit le thème quand il existe en deux variantes (`Reversal` / `Reversal-dark`, `breeze` / `breeze-dark`).
@@ -191,6 +193,8 @@ scripts/codegraph.sh files                                               # l'arb
   - les textures sont réservées par paliers de 64 px et réutilisées ; un framebuffer et un quad partagés vivent dans le contexte EGL ;
   - chaque écran est dessiné à part sur le matériel : un cache d'élément (verre, ombre, forme) est tenu par vue (`render/per_view.rs`), sinon il change à chaque écran dessiné et tout est refloué ;
   - la marge capturée autour du verre est la portée réelle du flou (`blur_reach`, 32 px à la force 3).
+- **Mise à l'échelle** (`[scale]`, de 100 % à 300 % par pas de 25 %, par écran ; type `Scale` du modèle, en quarts) : le modèle, la saisie et le canal du shell travaillent en **pixels logiques** ; les écrans sont placés côte à côte selon leur taille logique (mode ÷ échelle). La sortie porte l'échelle (`Scale::Fractional`), `wp_fractional_scale_v1` la dit aux clients (`preferred_buffer_scale`, arrondie au-dessus, pour les autres ; `scale.rs`). Le compositeur peint barres de titre, capsules, barre de rangement, fond d'écran et curseur avec **autant de pixels que l'écran en a** (pixmap physique, constantes logiques par une transformation tiny-skia, `painted` dans `render/scene.rs`) ; bords des formes adoucis sur un pixel de l'écran (uniforme `pixel`) ; le flou ajoute des passes avec l'échelle (`Blur`) pour garder sa force à l'œil. Changée dans « Paramètres », elle s'applique à chaud (`State::set_scales`). En imbriqué, la fenêtre se dessine en une passe : **une seule échelle** pour tous les écrans simulés (celle du rôle simulé, du centre avec `--three-screens`) ; `--scale` l'impose à tous les écrans. Sur le matériel, chaque écran a la sienne.
+- **XWayland en natif** : les applis X11 voient les vrais pixels de l'écran le plus détaillé (`set_client_scale` de Smithay, avant `start_wm`), avec `Xft.dpi` (96 × échelle, par `xrdb`, paquet `xorg-xrdb`), un curseur X11 agrandi d'autant et `STEAM_FORCE_DESKTOPUI_SCALING` pour Steam. Un jeu Proton plein écran rend donc à la définition de l'écran (affichage direct possible). Cette échelle est **fixée au démarrage**. Une appli X11 qui ne lit pas `Xft.dpi` paraît petite à 200 %.
 - **Mode imbriqué (winit) : `Alt` remplace `Super`**, que la session hôte intercepte. `scripts/ci.sh` lance `fmt`, `clippy` et les tests ; hors d'un terminal (un agent), `clippy` et les tests passent par `rtk`, qui ne garde que les erreurs et les échecs (`CI_RAW=1` rend la sortie complète de cargo).
 - **La donnée de la boucle d'événements est `State` lui-même** (plus de `App { display, state }`) : le gestionnaire de fenêtres X11 de Smithay l'exige. Le `Display` Wayland appartient à la source qui distribue les requêtes des clients (`main.rs`), toujours sans `unsafe`.
 - **Focus clavier = `KeyFocus`** (`focus.rs`) : la surface Wayland, accompagnée de la fenêtre X11 quand c'en est une, pour que le serveur X soit prévenu des changements de focus. Le focus du pointeur reste une `WlSurface`.
@@ -224,6 +228,7 @@ Deux backends, choisis tout seuls (`--backend auto`) : **imbriqué** (winit) s'i
 ```
 cargo run -p coquille -- --three-screens --spawn kitty      # imbriqué, trois écrans simulés
 cargo run -p coquille -- --role left --spawn kitty          # imbriqué, un seul écran
+cargo run -p coquille -- --role center --scale 2 --spawn kitty  # imbriqué, un écran à 200 % (le portable)
 cargo run -p coquille -- --probe                            # examine GPU et écrans, n'affiche rien
 ```
 
@@ -232,7 +237,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 - Souris, suite : tirer un bord ou un coin d'une fenêtre flottante la redimensionne (le compositeur impose alors sa taille) ; `Mod+glisser` sur la séparation de deux colonnes règle leurs largeurs.
 - Capsules : un clic affiche la fenêtre ; « réduire » la cache (sa capsule reste, grisée ; un clic dessus, sur son icône du dock, ou `Mod+R` la ramène) ; « agrandir » la maximise (« restaurer » la remet à sa place) ; « fermer » la ferme, affichée ou non. La barre de titre d'une fenêtre flottante garde ces trois boutons ; un double-clic sur une barre de titre du shell maximise ou restaure.
 - Dock : `target/debug/coquille --role left --spawn "$PWD/target/debug/coquille-dock --mock"` (tout simulé) ; sans `--mock`, vraies fenêtres et vrais services. Détail dans `crates/dock/README.md`.
-- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+S` Paramètres ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter.
+- Raccourcis (touche Mod = `Super` sur le matériel, `Alt` en imbriqué) : `Mod+Entrée` terminal ; `Mod+S` Paramètres ; `Mod+Page suiv./préc.` onglet suivant/précédent ; `Mod+R` restaure la dernière fenêtre réduite ; `Mod+Maj+E` quitter. Sans Mod, même en jeu : les touches de luminosité d'un portable (transmises au dock, qui tient la luminosité).
 - Mode jeu : `Mod+Échap` remet le jeu en fenêtre ; `Mod` seul ouvre le tiroir du dock et libère le pointeur. (En imbriqué, GNOME garde `Alt+Échap` pour lui : ce raccourci ne s'essaie qu'avec `--debug-input`.)
 - Thème des applis : `--app-theme` le donne aussi en imbriqué, en réécrivant les réglages GNOME et GTK de la session hôte. Pour essayer sans y toucher : `dbus-run-session` avec `XDG_CONFIG_HOME` et `XDG_RUNTIME_DIR` jetables (dconf y écrit ; `WAYLAND_DISPLAY` en chemin absolu, et un `XDG_RUNTIME_DIR` court, sinon le chemin du socket dépasse la limite).
 - Applications X11 : `DISPLAY` est transmis aux programmes lancés par le compositeur (et aux services de la session avec `--export-environment`). `--no-xwayland` ou `xwayland = false` s'en passent.
@@ -244,7 +249,7 @@ cargo run -p coquille -- --probe                            # examine GPU et éc
 
 - Paramètres : le bouton du dock (à côté de la déconnexion) lance `coquille-settings` sur le fichier que lit le dock, `Mod+S` sur celui que lit le compositeur. À la main : `target/debug/coquille-settings --config FICHIER --page screens` (`appearance`, `screens`, `game`, `system`). Détail dans `crates/settings/README.md`.
 
-Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[glass]` (`blur` = `true`, `strength` de 1 à 5, défaut `3` ; un entier, sinon tout le fichier est refusé), `[outputs]`, `[layout]` (`left`, `center`, `right` : `"full"`, `"two-columns"`, `"three-columns"` ou `"main-side"`), `[keyboard]`, et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`, `icon_size`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"vertical-right"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
+Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les réglages généraux doivent précéder les sections) : `theme`, `accent`, `terminal`, `xwayland`, `[glass]` (`blur` = `true`, `strength` de 1 à 5, défaut `3` ; un entier, sinon tout le fichier est refusé), `[outputs]`, `[layout]` (`left`, `center`, `right` : `"full"`, `"two-columns"`, `"three-columns"` ou `"main-side"`), `[scale]` (`left`, `center`, `right` : de `1.0` à `3.0` par pas de `0.25`), `[keyboard]`, `[mouse]`, `[touchpad]` (`tap`, `tap_drag`, `disable_while_typing`, `natural_scroll` : `true` par défaut ; `accel_speed` ; `click_method` : `"clickfinger"` ou `"areas"` ; seulement pour les pavés tactiles, la souris gardant `[mouse]`), et pour le mode jeu `[game]` : `sticky_edges_ms` (300 ; 0 désactive), `direct_scanout` (`true`), `vrr` (`true`). Les sections `[dock]` (`favorites`, `icon_size`), `[dock.screens]` (`left`, `center`, `right` : `"vertical"`, `"vertical-right"`, `"horizontal"` ou `"off"`) et `[drawer]` (`pinned`, `width`, `height`) sont lues par le dock, qui réécrit `favorites`, `theme`, `width` et `height` quand on les change à la souris (le lanceur se redimensionne en tirant sa poignée).
 
 ### Installer
 
@@ -367,10 +372,28 @@ Limites connues :
 - si gnome-keyring prend le nom avant lui (activé par D-Bus entre son arrêt et le démarrage du trousseau), le trousseau attend son tour (`waiting for it to leave` dans `keyring.log`) ;
 - ni agent SSH, ni interfaces propres à gnome-keyring (Seahorse).
 
+### État du portable (mise à l'échelle, écran unique)
+
+Fait, **vérifié en imbriqué** (essais scriptés, captures relues) et par tests unitaires :
+
+- mise à l'échelle à 125, 150, 175 et 200 % : décorations, capsules, anneau, verre, barre de rangement, curseur et texte nets, aux mêmes proportions qu'à 100 % ; kitty et le dock nets (échelle fractionnaire côté client) ; 100 % inchangé sur les trois écrans simulés ;
+- échelle changée à chaud depuis le fichier (et la page « Écrans et dock », qui ne montre que les écrans présents, un seul s'appelant « Écran ») ;
+- écran unique : dock automatique, lanceur, centre de contrôle ; en jeu, tiroir par-dessus le jeu et fenêtre amenée par-dessus depuis le tiroir ;
+- batterie simulée (`--mock`) : barre, centre de contrôle ; règles d'alerte et lecture d'`upower` par tests ; réglages du pavé tactile écrits et relus (page « Souris et pavé », visible hors de coquille ou avec un pavé).
+
+Fait mais **jamais exécuté sur le portable** : le connecteur `eDP` et son mode à l'échelle (backend matériel), X11 en natif à 200 % (seulement à 100 % en imbriqué, puisque la fenêtre imbriquée a une seule échelle et que XWayland prend la plus grande au démarrage), les réglages libinput d'un vrai pavé, le rétroéclairage (`busctl` vers logind, signature vérifiée sur ce poste), les touches de luminosité, `upower` sur une vraie batterie, la veille par le capot (logind) et l'image redessinée à l'ouverture, le bouton « Mettre en veille ».
+
+Limites connues :
+
+- un écran à une échelle et un autre à une autre : X11 prend la plus grande (les applis X11 sont petites sur l'écran à 100 %) ;
+- capot fermé avec un écran externe : rien n'est fait (il faudrait le branchement à chaud, ticket 03) ; pas de verrouillage avant la veille (ticket 23) ;
+- ni gestes du pavé (balayage à trois doigts), ni touches de volume et de lecture (phase 5, étape 7) ;
+- les icônes de la colonne du tiroir ouvert sont une image de la barre, pas des boutons.
+
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 
 - Un seul GPU : celui du démarrage (la NVIDIA). Écrans détectés **au démarrage seulement** (pas de branchement à chaud).
-- Rôles des écrans : `[outputs]` du fichier de configuration, sinon le plus large au centre. Placés côte à côte, alignés en haut.
+- Rôles des écrans : `[outputs]` du fichier de configuration, sinon le plus large au centre (un écran seul est le centre). Placés côte à côte selon leur taille logique (à leur échelle), alignés en haut.
 - Tout est composé par le GPU, sauf l'écran d'un jeu (affichage direct et VRR, voir l'état de la phase 3). Pas de plan matériel pour le curseur, pas de plans overlay. Synchronisation explicite activée quand le pilote la propose.
 - Je (Claude) ne peux pas tester ce backend moi-même : la session en cours possède les écrans. Seuls `--probe` et le mode imbriqué sont vérifiables sans l'utilisateur.
 

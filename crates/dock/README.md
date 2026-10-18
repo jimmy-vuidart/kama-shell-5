@@ -59,8 +59,8 @@ qui le relance s'il tombe (cinq chutes d'affilée et il renonce).
 
 | Option | Effet |
 |---|---|
-| `--mock` | Simule tout : fenêtres, son, réseau, Bluetooth, luminosité, session. |
-| `--backends a,b,…` | Les services réels à utiliser, les autres étant simulés : `compositor`, `audio`, `network`, `bluetooth`, `brightness`, `session`. Sans l'option : tous. |
+| `--mock` | Simule tout : fenêtres, son, réseau, Bluetooth, luminosité, batterie, session. |
+| `--backends a,b,…` | Les services réels à utiliser, les autres étant simulés : `compositor`, `audio`, `network`, `bluetooth`, `brightness`, `session`, `tray`, `notifications`, `battery`. Sans l'option : tous. |
 | `--output NOM` | L'écran où s'afficher. Par défaut, celui que le compositeur désigne comme écran gauche. |
 | `--config FICHIER` | Fichier de configuration (défaut : `~/.config/coquille/config.toml`). |
 | `--state-dir DOSSIER` | Où garder les volumes par application (défaut : `~/.local/state/coquille`, et un dossier temporaire avec `--mock`). |
@@ -68,10 +68,11 @@ qui le relance s'il tombe (cinq chutes d'affilée et il renonce).
 
 `RUST_LOG=coquille_dock=debug` détaille ce que fait le dock.
 
-**Session.** Se déconnecter, Redémarrer et Éteindre demandent toujours une
-confirmation, puis agissent pour de vrai : la déconnexion demande au
-compositeur de quitter, le redémarrage et l'extinction passent par
-`systemctl reboot` et `systemctl poweroff`. Si le système refuse, sa raison
+**Session.** Se déconnecter, Mettre en veille, Redémarrer et Éteindre
+demandent toujours une confirmation, puis agissent pour de vrai : la
+déconnexion demande au compositeur de quitter, la veille, le redémarrage et
+l'extinction passent par `systemctl suspend`, `systemctl reboot` et
+`systemctl poweroff`. Si le système refuse, sa raison
 s'affiche sous le nom de l'utilisateur. Seul `--mock` (ou une liste
 `--backends` sans `session`) les simule : **en imbriqué sans `--mock`,
 Redémarrer redémarre vraiment la machine.**
@@ -100,9 +101,20 @@ height = 500           # lanceur d'un dock horizontal
 ```
 
 Sans `[dock.screens]`, il y a un dock vertical sur l'écran gauche et aucun
-ailleurs. Toutes les barres montrent les mêmes applis ; « Ici » y désigne
-l'écran de la barre. La touche `Super` ouvre le lanceur sur l'écran du
-pointeur s'il a un dock, sinon sur le premier écran qui en a un.
+ailleurs. **Un écran seul (un portable) a toujours le sien** : quand le
+fichier ne dit rien des écrans branchés et qu'aucun n'aurait de dock, le
+premier (le centre d'abord) reçoit un dock vertical ; dès que le fichier
+nomme un écran branché, il est pris au mot (`off` compris). La règle est
+dans `coquille-config` (`docks_for`), partagée avec l'écran « Paramètres ».
+Toutes les barres montrent les mêmes applis ; « Ici » y désigne l'écran de
+la barre. Avec un seul écran, le menu n'offre pas « Ouvrir sur » et les
+étiquettes ne nomment pas d'écran. La touche `Super` ouvre le lanceur sur
+l'écran du pointeur s'il a un dock, sinon sur le premier écran qui en a un.
+
+**En jeu sur un seul écran**, aucun écran n'est libre : `Super` ouvre le
+lanceur par-dessus le jeu (le compositeur y montre alors les panneaux de cet
+écran). Une appli déjà ouverte qu'on y lance vient par-dessus le jeu au lieu
+de démarrer une seconde fois ; un clic dans le jeu le remet devant.
 
 Un nom est celui d'un fichier `.desktop` (sans l'extension), sa dernière
 partie (`nautilus` pour `org.gnome.Nautilus`), le programme qu'il lance, ou
@@ -132,7 +144,9 @@ n'est jamais réécrit.
   laisser de place au mixeur), le bord haut du lanceur horizontal
   (`[drawer] height`, jamais moins de 480 px).
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
-  curseur pour le régler) ; la flèche au bout du volume ouvre le mixeur, seul
+  curseur pour le régler ; les touches de luminosité d'un portable la font
+  aussi varier de 5 %, même en jeu) ; sur un portable, la batterie sous le
+  nom de l'utilisateur ; la flèche au bout du volume ouvre le mixeur, seul
   endroit où choisir la sortie audio. Le bouton aux
   curseurs, à côté de la déconnexion, ouvre l'écran « Paramètres »
   (`coquille-settings`, voir `crates/settings/README.md`) : c'est là que se
@@ -149,7 +163,17 @@ n'est jamais réécrit.
 - `backend/` : le lien avec le compositeur (crate `coquille-ipc`) et les
   services. Le son passe par `pactl` et `parec` (l'interface PulseAudio de
   PipeWire), le réseau par `nmcli`, le Bluetooth par `bluetoothctl`, la
-  luminosité par `ddcutil`. Un outil absent laisse sa commande grisée.
+  luminosité par le rétroéclairage d'un portable (`backend/backlight.rs` :
+  lu dans `/sys/class/backlight`, réglé par logind avec `busctl`, relu toutes
+  les deux secondes) sinon par `ddcutil`, la batterie par `upower`
+  (`backend/battery.rs` : relue à chaque ligne de `upower --monitor` et
+  chaque minute). Un outil absent laisse sa commande grisée.
+- **Batterie** (portable seulement) : au-dessus de l'heure dans la barre
+  verticale, avant elle dans la barre horizontale, avec le temps restant
+  dans la barre dépliée et le centre de contrôle. À 10 % puis 5 % sur
+  batterie, une notification du dock lui-même prévient ; la dernière passe
+  « Ne pas déranger » (pas un écran ancré : pendant un jeu, elle attend dans
+  l'historique).
 - Couleurs, symboles, lien au compositeur et police Figtree (licence OFL,
   embarquée dans le binaire) viennent de la crate `coquille-ui`, partagée
   avec l'écran « Paramètres ».
@@ -207,8 +231,11 @@ Le dock sert `org.freedesktop.Notifications` sur le bus de session
 - **Avec `--mock`**, une seule barre s'affiche (celle du premier écran
   configuré) : les écrans simulés n'existent pas pour de vrai.
 
-- **Luminosité** : il faut `ddcutil` et l'accès aux bus `i2c` des écrans ;
-  sans eux le curseur est remplacé par « indisponible ».
+- **Luminosité** : sur un PC fixe, il faut `ddcutil` et l'accès aux bus
+  `i2c` des écrans ; sans eux le curseur est remplacé par « indisponible ».
+  Sur un portable, seul l'écran intégré est réglé (pas un écran externe).
+- **Lanceur ouvert** : sa colonne d'icônes à gauche est une image de la
+  barre, pas des boutons ; on passe par les épinglées ou la recherche.
 - **Éclairage nocturne** retient sa position mais n'a pas d'effet : il n'y a
   pas encore d'éclairage nocturne.
 - **Notifications** : ni son, ni réponse dans la bulle, ni jeton
