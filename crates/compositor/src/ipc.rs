@@ -281,8 +281,9 @@ impl State {
         debug!(?command, "asked by the shell");
         match command {
             Command::Activate { window } => {
-                // Focusing a hidden window brings it back.
-                match self.shell.desk.focus(WindowId(window)) {
+                // Focusing a hidden window brings it back; one a game hides
+                // comes over the game.
+                match self.shell.desk.bring(WindowId(window)) {
                     Ok(()) => self.apply_arrangement(),
                     Err(error) => warn!(%error, "cannot show the window the shell asked for"),
                 }

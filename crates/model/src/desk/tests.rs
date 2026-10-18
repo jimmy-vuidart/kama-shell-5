@@ -2570,3 +2570,87 @@ fn cycling_maximized_tabs_shows_each_in_turn() {
     assert_eq!(desk.focused(), Some(WindowId(1)));
     assert!(geo(&desk, 1).visible && !geo(&desk, 2).visible);
 }
+
+// A laptop: one screen, a game on it.
+
+fn laptop() -> Desk {
+    let screen = OutputInfo::new(CENTER, OutputRole::Center, Size::new(1920, 1080));
+    Desk::new(vec![screen], Metrics::default())
+}
+
+/// A game holds the lone screen, and Discord opens while it is played.
+fn playing_with_discord() -> Desk {
+    let mut desk = laptop();
+    open(&mut desk, 1, "steam_app_1", CENTER);
+    desk.set_anchored(WindowId(1), true).unwrap();
+    open(&mut desk, 2, "discord", CENTER);
+    desk
+}
+
+#[test]
+fn a_window_opened_during_a_game_on_a_lone_screen_stays_behind_it() {
+    let desk = playing_with_discord();
+
+    assert!(!geo(&desk, 2).visible);
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn a_window_brought_from_the_dock_comes_over_the_game() {
+    let mut desk = playing_with_discord();
+
+    desk.bring(WindowId(2)).unwrap();
+
+    assert!(geo(&desk, 2).visible);
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    // Still fullscreen, under the window brought over it.
+    assert!(geo(&desk, 1).anchored && geo(&desk, 1).visible);
+    let order: Vec<WindowId> = desk
+        .arrangement()
+        .iter()
+        .map(|geometry| geometry.id)
+        .collect();
+    assert_eq!(order, [WindowId(1), WindowId(2)]);
+}
+
+#[test]
+fn clicking_the_game_puts_it_back_in_front() {
+    let mut desk = playing_with_discord();
+    desk.bring(WindowId(2)).unwrap();
+
+    desk.focus(WindowId(1)).unwrap();
+
+    assert!(!geo(&desk, 2).visible);
+    assert!(!desk.is_over_game(WindowId(2)));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn once_the_game_is_over_nothing_is_over_it() {
+    let mut desk = playing_with_discord();
+    desk.bring(WindowId(2)).unwrap();
+
+    desk.set_anchored(WindowId(1), false).unwrap();
+
+    assert!(!desk.is_over_game(WindowId(2)));
+    assert!(geo(&desk, 2).visible);
+    // Played again: Discord does not come back over it by itself.
+    desk.set_anchored(WindowId(1), true).unwrap();
+    assert!(!geo(&desk, 2).visible);
+}
+
+#[test]
+fn bringing_a_window_no_game_hides_only_focuses_it() {
+    let mut desk = desk();
+    open(&mut desk, 1, "kitty", LEFT);
+    open(&mut desk, 2, "discord", LEFT);
+
+    desk.bring(WindowId(1)).unwrap();
+
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert!(!desk.is_over_game(WindowId(1)));
+    assert_eq!(
+        desk.bring(WindowId(9)),
+        Err(ModelError::UnknownWindow(WindowId(9)))
+    );
+}

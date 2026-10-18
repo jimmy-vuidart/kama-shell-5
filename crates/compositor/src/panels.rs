@@ -52,16 +52,33 @@ pub fn reserved(screen: Size, free: Rect) -> Insets {
     }
 }
 
+/// The launcher of the dock is open on this screen.
+fn has_drawer(output: &smithay::output::Output) -> bool {
+    let map = layer_map_for_output(output);
+    map.layers()
+        .any(|layer| layer.namespace() == DRAWER_NAMESPACE)
+}
+
+/// What the dock calls its launcher.
+const DRAWER_NAMESPACE: &str = "coquille-drawer";
+
 impl State {
-    /// The panels shown, topmost first. A screen held by a game shows none.
+    /// The panels shown, topmost first. A screen held by a game shows none,
+    /// unless games hold every screen (a laptop) and the drawer is open on
+    /// it: with nowhere else to go, the dock comes over the game.
     pub fn panels(&self) -> Vec<Panel> {
+        let elsewhere = self
+            .outputs
+            .iter()
+            .any(|screen| !self.is_anchored(screen.id));
         let mut panels = Vec::new();
         for layer in [Layer::Overlay, Layer::Top, Layer::Bottom, Layer::Background] {
             for screen in &self.outputs {
                 let Some(info) = self.shell.screen(screen.id) else {
                     continue;
                 };
-                if self.is_anchored(screen.id) {
+                let over_game = !elsewhere && has_drawer(&screen.output);
+                if self.is_anchored(screen.id) && !over_game {
                     continue;
                 }
                 let corner = Point::from((info.rect.x, info.rect.y));

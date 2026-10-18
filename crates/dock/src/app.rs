@@ -502,6 +502,13 @@ impl Dock {
     }
 
     /// A screen, as the compositor describes it.
+    /// Games hold every screen (a laptop playing): the launcher may open
+    /// over a game, having nowhere else to go.
+    fn every_screen_held(&self) -> bool {
+        let screens = &self.snapshot.screens;
+        !screens.is_empty() && screens.iter().all(|screen| screen.anchored)
+    }
+
     /// The screens the compositor has; none before it says.
     pub fn present_screens(&self) -> Vec<OutputRole> {
         self.snapshot
@@ -873,7 +880,9 @@ impl Dock {
             .iter()
             .map(|bar| (bar.screen, held(bar.screen)))
             .collect();
-        let picked = bar::launcher_screen(&docks, asked).and_then(|screen| self.bar_on(screen));
+        let every_screen = self.every_screen_held();
+        let picked = bar::launcher_screen(&docks, asked, every_screen)
+            .and_then(|screen| self.bar_on(screen));
         let Some((screen, orientation)) = picked.map(|bar| (bar.screen, bar.orientation)) else {
             return Task::none();
         };
@@ -1202,6 +1211,26 @@ impl Dock {
             Target::App(key) => self.identify(key),
             Target::Game(id) => self.identify(&format!("steam_app_{id}")),
         };
+        // Playing on a laptop, the launcher is the only way to the windows
+        // the game hides: an application already open comes over the game
+        // instead of starting again.
+        if self.every_screen_held() {
+            let named = |app: &str| {
+                identity
+                    .names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(app))
+            };
+            let open = self
+                .snapshot
+                .windows
+                .iter()
+                .find(|window| named(&window.app));
+            if let Some(window) = open {
+                self.send(Command::Activate { window: window.id });
+                return;
+            }
+        }
         if identity.game {
             // Belt and braces: the compositor sends games to the center
             // by itself.
@@ -1875,7 +1904,8 @@ impl Dock {
                 // A game took the screen of the launcher: the launcher goes.
                 let screen = self.drawer.as_ref().map(|drawer| drawer.screen);
                 let held = screen.and_then(|role| self.screen(role));
-                let close = if held.is_some_and(|screen| screen.anchored) {
+                let elsewhere = !self.every_screen_held();
+                let close = if held.is_some_and(|screen| screen.anchored) && elsewhere {
                     self.update(Message::CloseDrawer)
                 } else {
                     Task::none()

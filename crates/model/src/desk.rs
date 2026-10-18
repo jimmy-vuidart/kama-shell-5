@@ -181,6 +181,9 @@ pub struct Desk {
     /// Screens asked for the next window of an application, once each. An
     /// application is asked for under every name its windows may bear.
     asked: Vec<(Vec<AppKey>, OutputId)>,
+    /// Windows the user brought over the game that holds their screen:
+    /// shown above it until the game is clicked again.
+    over_game: Vec<WindowId>,
 }
 
 impl Desk {
@@ -196,6 +199,7 @@ impl Desk {
             restore: BTreeMap::new(),
             last_side: None,
             asked: Vec::new(),
+            over_game: Vec::new(),
         }
     }
 
@@ -275,11 +279,33 @@ impl Desk {
         })
     }
 
-    /// `id` is on a screen that another window anchors.
+    /// `id` is on a screen that another window anchors, and was not
+    /// brought over it.
     fn under_a_game(&self, id: WindowId) -> bool {
-        self.screens
-            .iter()
-            .any(|screen| screen.anchored().is_some_and(|game| game != id) && screen.contains(id))
+        let hidden = |screen: &Screen| {
+            screen.anchored().is_some_and(|game| game != id) && screen.contains(id)
+        };
+        !self.over_game.contains(&id) && self.screens.iter().any(hidden)
+    }
+
+    /// The user asks for a window (from the dock): it shows and takes the
+    /// focus. One that a game hides comes over the game, which stays
+    /// fullscreen: on a lone screen there is nowhere else to show it.
+    /// Clicking the game puts the game back in front.
+    pub fn bring(&mut self, id: WindowId) -> Result<(), ModelError> {
+        if !self.windows.contains_key(&id) {
+            return Err(ModelError::UnknownWindow(id));
+        }
+        if self.under_a_game(id) {
+            self.over_game.push(id);
+        }
+        self.mark_focused(id);
+        Ok(())
+    }
+
+    /// `id` was brought over the game of its screen.
+    pub fn is_over_game(&self, id: WindowId) -> bool {
+        self.over_game.contains(&id)
     }
 
     /// A new window appears (rules 1, 4 and 7) and takes the focus, unless a
@@ -415,6 +441,8 @@ impl Desk {
         self.windows.remove(&id);
         self.focus_order.retain(|window| *window != id);
         self.minimized.retain(|window| *window != id);
+        self.over_game.retain(|window| *window != id);
+        self.forget_over_game();
         self.settle();
 
         if was_focused {
@@ -815,8 +843,19 @@ impl Desk {
         let (screen, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         if self.screens[screen].anchored() == Some(id) {
             self.screens[screen].set_anchored(None);
+            self.forget_over_game();
         }
         Ok(())
+    }
+
+    /// Windows only stay over a game while there is one.
+    fn forget_over_game(&mut self) {
+        let screens = &self.screens;
+        self.over_game.retain(|id| {
+            screens.iter().any(|screen| {
+                screen.anchored().is_some_and(|game| game != *id) && screen.contains(*id)
+            })
+        });
     }
 
     /// A window goes fullscreen on `output`, or on its own screen when it
@@ -975,9 +1014,13 @@ impl Desk {
         let mut arrangement = Vec::with_capacity(self.windows.len());
         for screen in &self.screens {
             let mut on_top = None;
+            // Over the game: what the user brought there.
+            let mut above = Vec::new();
             let mut add = |geometry: WindowGeometry| {
                 if geometry.anchored {
                     on_top = Some(geometry);
+                } else if self.over_game.contains(&geometry.id) {
+                    above.push(geometry);
                 } else {
                     arrangement.push(geometry);
                 }
@@ -1001,6 +1044,7 @@ impl Desk {
                 add(self.geometry(screen, window.id, window.rect, true, Layer::Floating));
             }
             arrangement.extend(on_top);
+            arrangement.extend(above);
         }
         arrangement
     }
@@ -1035,7 +1079,10 @@ impl Desk {
             frame,
             titlebar,
             client,
-            visible: anchored || (shown && !minimized && screen.anchored().is_none()),
+            visible: anchored
+                || (shown
+                    && !minimized
+                    && (screen.anchored().is_none() || self.over_game.contains(&id))),
             focused: self.focused() == Some(id),
             floating: layer == Layer::Floating,
             maximized: layer == Layer::Maximized && !anchored,
@@ -1191,6 +1238,14 @@ impl Desk {
         self.focus_order.retain(|window| *window != id);
         self.focus_order.push(id);
         self.minimized.retain(|window| *window != id);
+        // The game is back in front of what was brought over it.
+        if let Some(screen) = self
+            .screens
+            .iter()
+            .find(|screen| screen.anchored() == Some(id))
+        {
+            self.over_game.retain(|window| !screen.contains(*window));
+        }
 
         if let Some((index, spot)) = self.locate(id) {
             let screen = &mut self.screens[index];

@@ -165,12 +165,15 @@ pub fn left_click(entry: &Entry) -> Click {
 /// The screen the launcher opens on when its shortcut is pressed: the one
 /// the pointer is on if it has a dock, else the first screen that has one.
 /// `docks` gives each screen with a dock, and whether a game holds it: no
-/// panel ever shows there.
+/// panel shows there, unless games hold `every_screen` (a laptop): the
+/// launcher then opens over the game, there being nowhere else.
 pub fn launcher_screen(
     docks: &[(OutputRole, bool)],
     pointer: Option<OutputRole>,
+    every_screen: bool,
 ) -> Option<OutputRole> {
-    let free = |(screen, anchored): &(OutputRole, bool)| (!anchored).then_some(*screen);
+    let free =
+        |(screen, anchored): &(OutputRole, bool)| (!anchored || every_screen).then_some(*screen);
     let under_pointer = docks
         .iter()
         .filter(|(screen, _)| Some(*screen) == pointer)
@@ -609,7 +612,7 @@ mod tests {
         let docks = [(OutputRole::Left, false), (OutputRole::Right, false)];
 
         assert_eq!(
-            launcher_screen(&docks, Some(OutputRole::Right)),
+            launcher_screen(&docks, Some(OutputRole::Right), false),
             Some(OutputRole::Right)
         );
     }
@@ -619,10 +622,10 @@ mod tests {
         let docks = [(OutputRole::Left, false), (OutputRole::Right, false)];
 
         assert_eq!(
-            launcher_screen(&docks, Some(OutputRole::Center)),
+            launcher_screen(&docks, Some(OutputRole::Center), false),
             Some(OutputRole::Left)
         );
-        assert_eq!(launcher_screen(&docks, None), Some(OutputRole::Left));
+        assert_eq!(launcher_screen(&docks, None, false), Some(OutputRole::Left));
     }
 
     #[test]
@@ -630,11 +633,24 @@ mod tests {
         let docks = [(OutputRole::Left, true), (OutputRole::Right, false)];
 
         assert_eq!(
-            launcher_screen(&docks, Some(OutputRole::Left)),
+            launcher_screen(&docks, Some(OutputRole::Left), false),
             Some(OutputRole::Right)
         );
-        assert_eq!(launcher_screen(&[(OutputRole::Left, true)], None), None);
-        assert_eq!(launcher_screen(&[], Some(OutputRole::Left)), None);
+        assert_eq!(
+            launcher_screen(&[(OutputRole::Left, true)], None, false),
+            None
+        );
+        assert_eq!(launcher_screen(&[], Some(OutputRole::Left), false), None);
+    }
+
+    #[test]
+    fn on_a_lone_screen_held_by_a_game_the_launcher_opens_over_it() {
+        let docks = [(OutputRole::Center, true)];
+
+        assert_eq!(
+            launcher_screen(&docks, Some(OutputRole::Center), true),
+            Some(OutputRole::Center)
+        );
     }
 
     #[test]
