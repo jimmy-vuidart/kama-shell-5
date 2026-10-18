@@ -16,7 +16,7 @@
 //! `wheel` turns the wheel by notches, down when positive.
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
-const KEYS: [(&str, u32); 14] = [
+const KEYS: [(&str, u32); 15] = [
     ("alt", 64),
     ("ctrl", 37),
     ("shift", 50),
@@ -31,6 +31,7 @@ const KEYS: [(&str, u32); 14] = [
     ("s", 39),
     ("pageup", 112),
     ("pagedown", 117),
+    ("print", 107),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -234,6 +235,7 @@ mod tests {
     fn escape_and_f11_can_be_named() {
         assert_eq!(steps("0 key alt+escape")[1], (0, Step::Press(9)));
         assert_eq!(steps("0 key ctrl+shift+f11")[2], (0, Step::Press(95)));
+        assert_eq!(steps("0 key print")[0], (0, Step::Press(107)));
     }
 
     #[test]

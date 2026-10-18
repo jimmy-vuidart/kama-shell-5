@@ -368,6 +368,10 @@ impl State {
                 self.brightness_key(up);
                 return;
             }
+            Action::ScreenshotRegion => {
+                self.start_region_screenshot();
+                return;
+            }
             Action::CycleTab { forward } => {
                 match desk.focused().and_then(|id| desk.placement(id)) {
                     Some(Placement::Slot(slot)) => desk.cycle_tab(slot, forward),

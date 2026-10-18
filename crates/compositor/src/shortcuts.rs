@@ -60,6 +60,8 @@ pub enum Action {
     Brightness {
         up: bool,
     },
+    /// Starts interactive region screenshot selection.
+    ScreenshotRegion,
 }
 
 /// A key going down.
@@ -98,6 +100,9 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     }
     if has(Keysym::XF86_MonBrightnessDown) {
         return Some(Action::Brightness { up: false });
+    }
+    if has(Keysym::Print) || has(Keysym::Sys_Req) {
+        return Some(Action::ScreenshotRegion);
     }
 
     if !press.main {
@@ -317,5 +322,21 @@ mod tests {
     #[test]
     fn an_unbound_key_does_nothing() {
         assert_eq!(press(true, false, &[Keysym::a]), None);
+    }
+
+    #[test]
+    fn print_screen_triggers_region_screenshot() {
+        assert_eq!(
+            press(false, false, &[Keysym::Print]),
+            Some(Action::ScreenshotRegion)
+        );
+        assert_eq!(
+            press(true, false, &[Keysym::Print]),
+            Some(Action::ScreenshotRegion)
+        );
+        assert_eq!(
+            press(false, false, &[Keysym::Sys_Req]),
+            Some(Action::ScreenshotRegion)
+        );
     }
 }
