@@ -24,6 +24,7 @@ use smithay::utils::{Physical, Rectangle, Size, Transform};
 use tracing::{info, warn};
 
 use super::Backend;
+use crate::config::ScaleConfig;
 use crate::outputs::split_canvas;
 use crate::render::scene::{self, Layers};
 use crate::render::shaders::Shaders;
@@ -34,6 +35,17 @@ const TITLE: &str = "coquille";
 const INITIAL_SIZE: (f64, f64) = (1600.0, 900.0);
 /// Refresh rate announced for the simulated screens, in mHz.
 pub const REFRESH: i32 = 60_000;
+
+impl Simulated {
+    /// Drawn in one pass, the window has a single scale: the one of the
+    /// screen it stands for, the center's when it stands for three.
+    pub fn scale(self, scales: &ScaleConfig) -> Scale {
+        match self {
+            Self::One(role) => scales.of(role),
+            Self::Three => scales.of(OutputRole::Center),
+        }
+    }
+}
 
 /// The size and scale a frame of the window is drawn at.
 type Frame = (Size<i32, Physical>, Scale);
@@ -50,7 +62,7 @@ pub enum Simulated {
 pub struct Winit {
     pub backend: WinitGraphicsBackend<GlesRenderer>,
     pub shaders: Shaders,
-    simulated: Simulated,
+    pub simulated: Simulated,
     /// The window is drawn in one pass: every simulated screen has this
     /// scale.
     pub scale: Scale,

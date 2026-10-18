@@ -68,6 +68,9 @@ pub struct Options {
     /// The layout comes from the command line: the configuration file does
     /// not change it.
     pub keyboard_pinned: bool,
+    /// The scale comes from the command line: the configuration file does
+    /// not change it.
+    pub scale_pinned: bool,
     /// The configuration file, when it is not the usual one.
     pub config_path: Option<PathBuf>,
     pub mod_key: ModKey,
@@ -148,6 +151,7 @@ pub struct State {
     /// file may change it.
     pub keyboard: KeyboardLayout,
     pub keyboard_pinned: bool,
+    pub scale_pinned: bool,
     /// The configuration file, when it is not the usual one.
     pub config_path: Option<PathBuf>,
 
@@ -342,6 +346,7 @@ impl State {
             terminal: options.terminal,
             keyboard: options.keyboard,
             keyboard_pinned: options.keyboard_pinned,
+            scale_pinned: options.scale_pinned,
             config_path: options.config_path,
             outputs,
             backend,

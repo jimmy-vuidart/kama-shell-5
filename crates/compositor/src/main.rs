@@ -267,12 +267,7 @@ fn main() -> anyhow::Result<()> {
         // A script must not be disturbed by the real mouse passing over the
         // window.
         let scripted = cli.debug_input.is_some();
-        // Drawn in one pass, the window has a single scale: the one of the
-        // screen it stands for, the center when it stands for three.
-        let scale = match simulated {
-            Simulated::One(role) => config.scale.of(role),
-            Simulated::Three => config.scale.of(OutputRole::Center),
-        };
+        let scale = simulated.scale(&config.scale);
         init_nested(&handle, simulated, cli.fullscreen, scripted, scale)?
     } else {
         let (udev, screens) = backend::udev::init(
@@ -481,6 +476,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         accent: config.accent(),
         keyboard: keyboard_layout::detect(layout, variant),
         keyboard_pinned: cli.keyboard_layout.is_some(),
+        scale_pinned: cli.scale.is_some(),
         config_path: cli.config.clone(),
         mod_key,
         terminal: config.terminal.clone().unwrap_or_else(default_terminal),
