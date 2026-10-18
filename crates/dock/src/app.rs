@@ -1622,8 +1622,10 @@ impl Dock {
                 self.notify.ingest(notice, &bars, &anchored);
             }
             backend::Update::NotifyClosed { id, reason } => {
-                self.notify.hide(id);
-                self.request(Request::NotifyClose { id, reason });
+                if self.notify.notice(id).is_some() {
+                    self.notify.hide(id);
+                    self.request(Request::NotifyClose { id, reason });
+                }
             }
         }
         Task::none()

@@ -2,13 +2,13 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
 
 use iced::Subscription;
 use iced::futures::channel::mpsc::Sender;
-use iced::futures::{SinkExt, Stream as FutureStream};
+use iced::futures::{SinkExt, Stream as FutureStream, StreamExt};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tracing::{debug, info, warn};
+use zbus::fdo::{self, RequestNameFlags, RequestNameReply};
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{OwnedValue, Value};
 use zbus::{Connection, interface};
@@ -52,21 +52,7 @@ fn service() -> impl FutureStream<Item = Update> {
             return;
         }
 
-        loop {
-            match connection.request_name(BUS_NAME).await {
-                Ok(_) => {
-                    info!("notifications: owning {BUS_NAME}");
-                    break;
-                }
-                Err(error) => {
-                    warn!(
-                        %error,
-                        "notifications: {BUS_NAME} is taken; retrying"
-                    );
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
-        }
+        claim_bus(&connection).await;
 
         let iface = match connection
             .object_server()
@@ -81,8 +67,41 @@ fn service() -> impl FutureStream<Item = Update> {
         };
         let emitter = iface.signal_emitter().clone();
 
+        let dbus = match fdo::DBusProxy::new(&connection).await {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                warn!(%error, "notifications: no DBus proxy");
+                return;
+            }
+        };
+        let mut acquired = match dbus.receive_name_acquired().await {
+            Ok(stream) => stream,
+            Err(error) => {
+                warn!(%error, "notifications: cannot watch NameAcquired");
+                return;
+            }
+        };
+        let mut lost = match dbus.receive_name_lost().await {
+            Ok(stream) => stream,
+            Err(error) => {
+                warn!(%error, "notifications: cannot watch NameLost");
+                return;
+            }
+        };
+
         loop {
             tokio::select! {
+                Some(signal) = acquired.next() => {
+                    if signal.args().is_ok_and(|args| args.name() == BUS_NAME) {
+                        info!("notifications: owning {BUS_NAME}");
+                    }
+                }
+                Some(signal) = lost.next() => {
+                    if signal.args().is_ok_and(|args| args.name() == BUS_NAME) {
+                        warn!("notifications: lost {BUS_NAME}; rejoining the queue");
+                        claim_bus(&connection).await;
+                    }
+                }
                 Some(update) = incoming.recv() => {
                     let _ = output.send(update).await;
                 }
@@ -109,6 +128,19 @@ fn service() -> impl FutureStream<Item = Update> {
             }
         }
     })
+}
+
+async fn claim_bus(connection: &Connection) {
+    match connection
+        .request_name_with_flags(BUS_NAME, RequestNameFlags::ReplaceExisting.into())
+        .await
+    {
+        Ok(RequestNameReply::InQueue) => {
+            warn!("notifications: {BUS_NAME} is taken; waiting in line");
+        }
+        Ok(_) => info!("notifications: owning {BUS_NAME}"),
+        Err(error) => warn!(%error, "notifications: could not request {BUS_NAME}"),
+    }
 }
 
 struct Server {
@@ -150,14 +182,7 @@ impl Server {
         hints: HashMap<String, OwnedValue>,
         expire_timeout: i32,
     ) -> u32 {
-        let id = if replaces_id == 0 {
-            next_id(&self.next_id)
-        } else {
-            let _ = self
-                .next_id
-                .fetch_max(replaces_id.saturating_add(1), Ordering::Relaxed);
-            replaces_id
-        };
+        let id = id_for_notify(&self.next_id, replaces_id);
 
         let (icon, image) = icons_from_hints(&app_icon, &hints);
         let notice = Notice {
@@ -195,6 +220,15 @@ impl Server {
         id: u32,
         action_key: &str,
     ) -> zbus::Result<()>;
+}
+
+fn id_for_notify(counter: &AtomicU32, replaces_id: u32) -> u32 {
+    if replaces_id == 0 {
+        next_id(counter)
+    } else {
+        let _ = counter.fetch_max(replaces_id.saturating_add(1), Ordering::Relaxed);
+        replaces_id
+    }
 }
 
 fn next_id(counter: &AtomicU32) -> u32 {
@@ -242,4 +276,76 @@ fn decode_image_data(value: &OwnedValue) -> Option<Icon> {
         return None;
     }
     pixels_from_image_data(width, height, rowstride, has_alpha, bits, channels, &data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owned_image(
+        width: i32,
+        height: i32,
+        rowstride: i32,
+        has_alpha: bool,
+        data: Vec<u8>,
+    ) -> OwnedValue {
+        let channels = if has_alpha { 4 } else { 3 };
+        let value = Value::from((width, height, rowstride, has_alpha, 8i32, channels, data));
+        OwnedValue::try_from(value).expect("image-data value")
+    }
+
+    #[test]
+    fn next_id_skips_zero_and_replaces_advances() {
+        let counter = AtomicU32::new(0);
+        assert_eq!(next_id(&counter), 1);
+        let counter = AtomicU32::new(1);
+        assert_eq!(id_for_notify(&counter, 0), 1);
+        assert_eq!(id_for_notify(&counter, 0), 2);
+        assert_eq!(id_for_notify(&counter, 42), 42);
+        assert_eq!(id_for_notify(&counter, 0), 43);
+    }
+
+    #[test]
+    fn icons_prefer_image_data_over_path_and_app_icon() {
+        let mut hints = HashMap::new();
+        hints.insert(
+            "image-path".into(),
+            OwnedValue::try_from(Value::from("/tmp/hint.png")).unwrap(),
+        );
+        hints.insert(
+            "image-data".into(),
+            owned_image(1, 1, 3, false, vec![9, 8, 7]),
+        );
+        let (icon, image) = icons_from_hints("dialog-info", &hints);
+        assert_eq!(icon, Some(Icon::Named("dialog-info".into())));
+        assert!(matches!(
+            image,
+            Some(Icon::Pixels {
+                width: 1,
+                height: 1,
+                ..
+            })
+        ));
+
+        let mut path_only = HashMap::new();
+        path_only.insert(
+            "image_path".into(),
+            OwnedValue::try_from(Value::from("/tmp/hint.png")).unwrap(),
+        );
+        let (icon, image) = icons_from_hints("file:///tmp/app.png", &path_only);
+        assert_eq!(icon, Some(Icon::File("file:///tmp/app.png".into())));
+        assert_eq!(image, Some(Icon::File("/tmp/hint.png".into())));
+
+        let (icon, image) = icons_from_hints("/usr/share/icon.png", &HashMap::new());
+        assert_eq!(icon, Some(Icon::File("/usr/share/icon.png".into())));
+        assert!(image.is_none());
+    }
+
+    #[test]
+    fn decode_image_data_rejects_oversize_and_accepts_tuple() {
+        let ok = owned_image(1, 1, 3, false, vec![1, 2, 3]);
+        assert!(decode_image_data(&ok).is_some());
+        let too_big = owned_image(2, 2, 6, false, vec![0; 4 * 512 * 512 + 1]);
+        assert!(decode_image_data(&too_big).is_none());
+    }
 }

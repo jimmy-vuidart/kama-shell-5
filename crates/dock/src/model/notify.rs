@@ -186,7 +186,6 @@ impl NotifyState {
         self.visible.clear();
     }
 
-    #[allow(dead_code)]
     pub fn notice(&self, id: u32) -> Option<&Notice> {
         self.history.iter().find(|notice| notice.id == id)
     }
@@ -221,7 +220,8 @@ pub fn actions_from_flat(flat: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Allows only `<b>`, `<i>`, `<u>` and the five XML entities.
+/// Allows only `<b>`, `<i>`, `<u>`, named XML entities, and numeric character references.
+/// Unknown tags are dropped (their inner text is kept); stray `<` / `>` are escaped.
 pub fn sanitize_markup(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
@@ -242,6 +242,10 @@ pub fn sanitize_markup(input: &str) -> String {
                 rest = &rest[skip..];
                 continue;
             }
+            if let Some(skip) = skip_unknown_tag(rest) {
+                rest = &rest[skip..];
+                continue;
+            }
             out.push_str("&lt;");
             rest = &rest[1..];
             continue;
@@ -259,9 +263,43 @@ pub fn sanitize_markup(input: &str) -> String {
 }
 
 fn known_entity(rest: &str) -> Option<&str> {
-    ["&amp;", "&lt;", "&gt;", "&apos;", "&quot;"]
-        .into_iter()
-        .find(|entity| rest.starts_with(entity))
+    for named in ["&amp;", "&lt;", "&gt;", "&apos;", "&quot;"] {
+        if rest.starts_with(named) {
+            return Some(named);
+        }
+    }
+    numeric_entity(rest)
+}
+
+/// Well-formed `&#123;` / `&#x1F;` (GLib and Chromium emit `&#39;` for `'`).
+fn numeric_entity(rest: &str) -> Option<&str> {
+    let digits = rest.strip_prefix("&#")?;
+    let (digits, prefix) = if let Some(hex) = digits.strip_prefix(['x', 'X']) {
+        (hex, 3)
+    } else {
+        (digits, 2)
+    };
+    let end = digits.find(';')?;
+    let body = &digits[..end];
+    if body.is_empty() {
+        return None;
+    }
+    let ok = if prefix == 3 {
+        body.chars().all(|c| c.is_ascii_hexdigit())
+    } else {
+        body.chars().all(|c| c.is_ascii_digit())
+    };
+    ok.then_some(&rest[..prefix + end + 1])
+}
+
+fn skip_unknown_tag(rest: &str) -> Option<usize> {
+    let inner = rest.strip_prefix('<')?;
+    let name = inner.strip_prefix('/').unwrap_or(inner);
+    let first = name.chars().next()?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+    rest.find('>').map(|i| i + 1)
 }
 
 fn allowed_tag(rest: &str) -> Option<(&str, usize)> {
@@ -304,7 +342,15 @@ pub fn pixels_from_image_data(
         return None;
     }
     let rowstride = rowstride as usize;
-    let needed = rowstride.saturating_mul(height as usize);
+    let channels = channels as usize;
+    let row_bytes = (width as usize).checked_mul(channels)?;
+    if rowstride < row_bytes {
+        return None;
+    }
+    // libnotify omits padding on the last row: (height-1)*rowstride + width*channels.
+    let needed = (height as usize - 1)
+        .checked_mul(rowstride)?
+        .checked_add(row_bytes)?;
     if data.len() < needed {
         return None;
     }
@@ -312,8 +358,8 @@ pub fn pixels_from_image_data(
     for y in 0..height as usize {
         let row = &data[y * rowstride..];
         for x in 0..width as usize {
-            let i = x * channels as usize;
-            if i + channels as usize > row.len() {
+            let i = x * channels;
+            if i + channels > row.len() {
                 return None;
             }
             rgba.push(row[i]);
@@ -444,10 +490,51 @@ mod tests {
     #[test]
     fn markup_strips_unknown_tags() {
         let cleaned = sanitize_markup("<b>ok</b><script>x</script>& <i>and</i>");
+        assert_eq!(cleaned, "<b>ok</b>x&amp; <i>and</i>");
         assert_eq!(
-            cleaned,
-            "<b>ok</b>&lt;script&gt;x&lt;/script&gt;&amp; <i>and</i>"
+            sanitize_markup("<a href=\"https://example\">lien</a> 2 < 3 >"),
+            "lien 2 &lt; 3 &gt;"
         );
+        assert_eq!(sanitize_markup("<img src='x'/>ok"), "ok");
+    }
+
+    #[test]
+    fn markup_keeps_numeric_entities() {
+        assert_eq!(sanitize_markup("j&#39;arrive"), "j&#39;arrive");
+        assert_eq!(sanitize_markup("&#x27;"), "&#x27;");
+        assert_eq!(sanitize_markup("&amp;#39;"), "&amp;#39;");
+        assert_eq!(sanitize_markup("&#;"), "&amp;#;");
+    }
+
+    #[test]
+    fn ingest_with_one_anchored_bar_is_history_only() {
+        let mut state = NotifyState::new();
+        let bars = vec![
+            (
+                OutputRole::Left,
+                Orientation::Vertical(super::super::Side::Left),
+            ),
+            (OutputRole::Center, Orientation::Horizontal),
+        ];
+        let decision = state.ingest(notice(0, "game"), &bars, &[OutputRole::Left]);
+        assert_eq!(decision, ToastDecision::HistoryOnly);
+        assert!(state.visible.is_empty());
+        assert_eq!(
+            state.toast_bar(&bars, &[OutputRole::Left]),
+            Some((OutputRole::Center, Orientation::Horizontal))
+        );
+    }
+
+    #[test]
+    fn close_unknown_or_already_forgotten_is_ignored() {
+        let mut state = NotifyState::new();
+        assert!(!state.forget(99));
+        assert!(state.notice(99).is_none());
+        state.ingest(notice(7, "known"), &left_bar(), &[]);
+        assert!(state.notice(7).is_some());
+        assert!(state.forget(7));
+        assert!(state.notice(7).is_none());
+        assert!(!state.hide(7));
     }
 
     #[test]
@@ -486,6 +573,34 @@ mod tests {
                 assert_eq!((width, height), (1, 1));
                 assert_eq!(rgba, vec![10, 20, 30, 255]);
             }
+            _ => panic!("expected pixels"),
+        }
+    }
+
+    #[test]
+    fn image_data_accepts_padded_and_unpadded_last_row() {
+        // 2×2 RGB, rowstride 8 (> 6). Last row unpadded would be 8+6 = 14.
+        let padded: Vec<u8> = vec![
+            1, 2, 3, 4, 5, 6, 0, 0, // row 0
+            7, 8, 9, 10, 11, 12, 0, 0, // row 1 padded
+        ];
+        let icon = pixels_from_image_data(2, 2, 8, false, 8, 3, &padded).unwrap();
+        match icon {
+            Icon::Pixels { rgba, .. } => {
+                assert_eq!(
+                    rgba,
+                    vec![1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]
+                );
+            }
+            _ => panic!("expected pixels"),
+        }
+        let unpadded = &padded[..14];
+        assert!(pixels_from_image_data(2, 2, 8, false, 8, 3, unpadded).is_some());
+        assert!(pixels_from_image_data(2, 2, 5, false, 8, 3, unpadded).is_none());
+        let rgba_px = [1, 2, 3, 4, 5, 6, 7, 8];
+        let icon = pixels_from_image_data(2, 1, 8, true, 8, 4, &rgba_px).unwrap();
+        match icon {
+            Icon::Pixels { rgba, .. } => assert_eq!(rgba, vec![1, 2, 3, 4, 5, 6, 7, 8]),
             _ => panic!("expected pixels"),
         }
     }
