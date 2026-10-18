@@ -41,6 +41,7 @@ use smithay::wayland::xwayland_shell::XWaylandShellState;
 use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
 
+use crate::app_theme::AppTheme;
 use crate::backend::Backend;
 use crate::config::{GlassConfig, LayoutConfig, WallpaperConfig};
 use crate::cursor::CursorImages;
@@ -157,6 +158,9 @@ pub struct State {
     pub painter: Painter,
     /// The socket of the shell, once it is open.
     pub ipc: Option<Ipc>,
+    /// Gives the applications the light or dark of the chrome, when they
+    /// are to be told.
+    pub app_theme: Option<AppTheme>,
     /// The title bar button under the pointer.
     pub hover: Option<(WindowId, TitlebarButton)>,
     /// The capsule under the pointer.
@@ -344,6 +348,7 @@ impl State {
             catalog: Catalog::load(),
             painter: Painter::new(),
             ipc: None,
+            app_theme: None,
             hover: None,
             capsule_hover: None,
             placement_offer: None,
@@ -505,6 +510,9 @@ impl State {
             .env("WAYLAND_DISPLAY", &self.socket_name);
         if let Some(ipc) = &self.ipc {
             child.env(coquille_ipc::SOCKET_ENV, &ipc.path);
+        }
+        if let Some(theme) = crate::app_theme::qt_platform_theme() {
+            child.env(crate::app_theme::QT_PLATFORM_THEME_VAR, theme);
         }
         match self.xdisplay {
             Some(number) => child.env("DISPLAY", crate::xwayland::display_name(number)),

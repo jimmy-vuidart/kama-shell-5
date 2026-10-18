@@ -350,6 +350,11 @@ impl State {
             return;
         }
         info!(?kind, accent = ?accent.map(Rgba::hex), "theme changed");
+        if kind != self.theme.kind {
+            if let Some(app_theme) = &self.app_theme {
+                app_theme.tell(kind);
+            }
+        }
         self.accent = accent;
         let theme = Theme::new(kind);
         self.theme = match accent {

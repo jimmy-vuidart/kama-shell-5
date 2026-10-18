@@ -1,5 +1,6 @@
 //! coquille: a Wayland compositor built around "Center + companions".
 
+mod app_theme;
 mod backend;
 mod config;
 mod cursor;
@@ -176,6 +177,12 @@ struct Cli {
     #[arg(long)]
     export_environment: bool,
 
+    /// Mode imbriqué : donne aussi le thème clair ou sombre aux applications
+    /// (réglages GNOME et fichiers de GTK de l'utilisateur, que la session
+    /// hôte partage). Sur les vrais écrans, c'est toujours le cas.
+    #[arg(long)]
+    app_theme: bool,
+
     /// Quitte tout seul après ce délai : filet de sécurité pour un premier
     /// essai sur le matériel.
     #[arg(long, value_name = "SECONDES")]
@@ -277,6 +284,12 @@ fn main() -> anyhow::Result<()> {
         options,
     )?;
     state.start_ipc();
+    if !nested || cli.app_theme {
+        state.app_theme = app_theme::AppTheme::start();
+        if let Some(app_theme) = &state.app_theme {
+            app_theme.tell(state.theme.kind);
+        }
+    }
     if !cli.no_xwayland && config.xwayland.unwrap_or(true) {
         // What the X server says goes next to the compositor's own log.
         let log = cli.log_file.as_deref().and_then(Path::parent);
@@ -368,6 +381,10 @@ fn export_environment(state: &State) {
         // `coquille-session`).
         "GNOME_DESKTOP_SESSION_ID=this-is-deprecated".to_owned(),
     ];
+    // Qt applications started by those services follow the theme too.
+    if let Some(theme) = app_theme::qt_platform_theme() {
+        variables.push(format!("{}={theme}", app_theme::QT_PLATFORM_THEME_VAR));
+    }
     // Where the dock, started by those services, finds the compositor.
     if let Some(ipc) = &state.ipc {
         variables.push(format!(

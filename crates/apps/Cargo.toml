@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 coquille-theme.workspace = true
 freedesktop-icons = "0.4"
+tracing.workspace = true
 
 [lints]
 workspace = true

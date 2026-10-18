@@ -77,13 +77,22 @@ gros morceau (la capture pour le partage d'écran) ensuite.
       avec sa propre sélection d'écran ou un sélecteur à nous. Le plus gros
       morceau de la phase. Attention aux écrans ancrés : la capture d'un jeu
       ne doit pas casser l'affichage direct ni le VRR.
-- [ ] 6. **Clair / sombre et thèmes des applis.** Le thème de coquille
-      n'atteint pas les applis. À chaque changement de thème (et au
-      démarrage), écrire `org.gnome.desktop.interface` `color-scheme`,
-      `gtk-theme`, `icon-theme` et `cursor-theme` ; le portail gtk relaie
-      `color-scheme` aux applis libadwaita, Firefox et Electron. Qt : choisir
-      entre `qt6ct` et Kvantum (`QT_QPA_PLATFORMTHEME`), sans Plasma les
-      applis Qt retombent sur Fusion.
+- [x] 6. **Clair / sombre et thèmes des applis.** Fait le 18 octobre 2026
+      (voir « Thème des applis » dans `CLAUDE.md`) : réglages GNOME
+      (`color-scheme`, `gtk-theme`, `icon-theme` s'il a deux variantes),
+      `settings.ini` de GTK, portail gtk pour les réglages, Qt par sa
+      platform theme `gtk3`. Vérifié en imbriqué sur un bus isolé : Dolphin,
+      Calculatrice (libadwaita), pavucontrol (GTK 4), une fenêtre GTK 3,
+      au démarrage et à chaud. Restes :
+      - sans `~/.config/kdeglobals` (installation qui n'a jamais connu
+        Plasma), les applis KDE prennent un style par défaut illisible ;
+        avec un `kdeglobals` qui nomme son style (Breeze), tout va bien ;
+      - applis Qt 5 (VLC 3) : leur platform theme `gtk3` existe aussi, mais
+        rien n'a été essayé avec elles ;
+      - Plasma ne réécrit peut-être pas ces réglages en démarrant : après
+        une session coquille en clair, une session Plasma en sombre peut
+        garder des applis GTK 3 claires jusqu'au premier changement de thème
+        (à vérifier).
 - [ ] 7. **Touches multimédia.** Les raccourcis ne gèrent que `Mod+…` et les
       terminaux virtuels. Volume, muet (`pactl`, déjà utilisé par le dock),
       lecture / pause / suivant (MPRIS), `Impr. écran` (capture existante,
