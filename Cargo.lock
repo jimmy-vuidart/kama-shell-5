@@ -930,6 +930,7 @@ dependencies = [
  "toml_edit",
  "tracing",
  "tracing-subscriber",
+ "x11rb",
  "zbus",
 ]
 

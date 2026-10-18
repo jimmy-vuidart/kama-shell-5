@@ -223,6 +223,8 @@ impl State {
             Some(Screen {
                 name: screen.output.name(),
                 role: info.role,
+                x: info.rect.x,
+                y: info.rect.y,
                 width: info.rect.w,
                 height: info.rect.h,
                 layout: model.layout(),

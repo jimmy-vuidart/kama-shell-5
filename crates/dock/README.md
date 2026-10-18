@@ -170,12 +170,13 @@ n'est jamais réécrit.
 - **Ne pas déranger** et **Éclairage nocturne** retiennent leur position mais
   n'ont pas d'effet : il n'y a encore ni notifications ni éclairage nocturne.
 - **Icônes X11 de la zone de notification** (Wine, Proton : Ubisoft
-  Connect…) : elles passent par `xembedsniproxy` (paquet `plasma-workspace`),
-  que le compositeur lance quand XWayland est prêt. Sans lui, Wine les
-  montre dans une petite fenêtre à lui. Un clic droit ouvre le menu que
-  l'appli dessine elle-même, en haut à gauche de l'écran gauche : le pont ne
-  sait pas où est l'icône. Une icône GTK sous X11 ne reçoit pas les clics
-  (le pont les rejoue par XTest, là où XWayland croit le pointeur).
+  Connect…) : le dock est la zone de notification XEmbed du serveur X
+  (`backend/xembed.rs`). Elles n'ont pas d'info-bulle (Wine n'en dit rien
+  à X11). Les clics sont rejoués directement sur la fenêtre de l'icône :
+  une icône GTK sous X11, qui ne croit que les clics venus du serveur, ne
+  réagit pas. Si le dock tombe, Wine replie ses icônes dans sa petite
+  fenêtre, puis les redonne au dock relancé mais laisse cette fenêtre
+  affichée, vide (défaut de Wine) : la fermer suffit.
 - **Messages non lus** : seule la simulation en montre.
 - **Jeux** : la ludothèque Steam seulement. Un jeu est reconnu par la classe
   de ses fenêtres (`steam_app_…`) ; un jeu natif lancé hors de la rangée Jeux

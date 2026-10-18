@@ -468,7 +468,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
 }
 
 /// Whether a program is found on the `PATH`.
-pub fn installed(name: &str) -> bool {
+fn installed(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
     })

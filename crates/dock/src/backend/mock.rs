@@ -12,6 +12,8 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
     let screen = |name: &str, role, width, height, layout, anchored| Screen {
         name: name.to_owned(),
         role,
+        x: 0,
+        y: 0,
         width,
         height,
         layout,

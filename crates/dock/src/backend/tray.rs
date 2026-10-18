@@ -1,5 +1,6 @@
 //! The system tray service: watches for StatusNotifierItem (SNI) instances
-//! and their DBusMenus over D-Bus using `system-tray`.
+//! and their DBusMenus over D-Bus using `system-tray`, and holds the X11
+//! tray (`xembed`) for Wine and other X11 programs.
 //! Converts events into dock updates and dispatches user actions back to items.
 
 use std::sync::{Arc, Mutex};
@@ -12,8 +13,8 @@ use system_tray::data::BaseMap;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::{debug, error, info, warn};
 
-use super::{Backend, Request, Update};
-use crate::model::tray::TrayItem;
+use super::{Backend, Request, Update, xembed};
+use crate::model::tray::{TrayItem, x11_window};
 
 pub fn subscription() -> Subscription<Update> {
     Subscription::run(service)
@@ -39,45 +40,82 @@ fn service() -> impl FutureStream<Item = Update> {
         let (requests, mut asked) = unbounded_channel::<Request>();
         let _ = output.send(Update::Link(Backend::Tray, requests)).await;
 
+        // The X11 tray (Wine, Proton) works even without D-Bus.
+        let (x11_icons, mut x11_changed) = unbounded_channel();
+        let x11 = xembed::start(x11_icons);
+        let mut x11_items: Vec<TrayItem> = Vec::new();
+
         let client = match Client::new().await {
-            Ok(c) => c,
+            Ok(c) => {
+                info!("system tray client started successfully");
+                Some(c)
+            }
             Err(e) => {
                 warn!(error = %e, "failed to initialize system tray client");
-                return;
+                None
             }
         };
-
-        info!("system tray client started successfully");
-        let mut events = client.subscribe();
-        let items_map = client.items();
+        let mut events = client.as_ref().map(Client::subscribe);
+        let items_map = client.as_ref().map(Client::items);
+        let all = |x11_items: &[TrayItem]| {
+            let mut items = items_map
+                .as_ref()
+                .map(collect_tray_items)
+                .unwrap_or_default();
+            items.extend_from_slice(x11_items);
+            items
+        };
 
         // Initial items if any already exist.
-        let initial_items = collect_tray_items(&items_map);
+        let initial_items = all(&x11_items);
         if !initial_items.is_empty() {
             let _ = output.send(Update::Tray(initial_items)).await;
+        }
+        if client.is_none() && x11.is_none() {
+            return;
         }
 
         loop {
             tokio::select! {
-                event = events.recv() => {
+                event = async { events.as_mut()?.recv().await.into() }, if events.is_some() => {
                     match event {
-                        Ok(_ev) => {
+                        Some(Ok(_ev)) => {
                             debug!("tray event received");
-                            let items = collect_tray_items(&items_map);
-                            let _ = output.send(Update::Tray(items)).await;
+                            let _ = output.send(Update::Tray(all(&x11_items))).await;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        Some(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
                             debug!("tray event stream lagged by {n}");
-                            let items = collect_tray_items(&items_map);
-                            let _ = output.send(Update::Tray(items)).await;
+                            let _ = output.send(Update::Tray(all(&x11_items))).await;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        Some(Err(tokio::sync::broadcast::error::RecvError::Closed)) | None => {
                             info!("tray event channel closed");
-                            break;
+                            events = None;
                         }
                     }
                 }
+                Some(icons) = x11_changed.recv() => {
+                    x11_items = icons.into_iter().map(TrayItem::from_x11).collect();
+                    let _ = output.send(Update::Tray(all(&x11_items))).await;
+                }
                 Some(req) = asked.recv() => {
+                    // An X11 icon gets the click itself, where it happened.
+                    let x11_click = match &req {
+                        Request::TrayActivate { address, x, y } => Some((address, 1, *x, *y)),
+                        Request::TraySecondary { address, x, y } => Some((address, 2, *x, *y)),
+                        Request::TrayContextMenu { address, x, y } => Some((address, 3, *x, *y)),
+                        _ => None,
+                    };
+                    if let Some((address, button, x, y)) = x11_click
+                        && let Some(window) = x11_window(address)
+                    {
+                        if let Some(x11) = &x11 {
+                            x11.click(window, button, (x, y));
+                        }
+                        continue;
+                    }
+                    let Some(client) = &client else {
+                        continue;
+                    };
                     match req {
                         Request::TrayActivate { address, x, y } => {
                             let activate_req = ActivateRequest::Default { address, x, y };

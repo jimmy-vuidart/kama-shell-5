@@ -446,6 +446,8 @@ mod tests {
         let screen = |name: &str, role, width, height| Screen {
             name: name.to_owned(),
             role,
+            x: 0,
+            y: 0,
             width,
             height,
             layout: LayoutKind::Full,

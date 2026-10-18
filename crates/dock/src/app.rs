@@ -418,6 +418,53 @@ impl Dock {
         self.bars.iter().find(|bar| bar.screen == screen)
     }
 
+    /// Where tray item `index` of bar `id` is on the whole desktop: where a
+    /// program that draws its own menu (Wine) opens it.
+    fn tray_point(&self, id: window::Id, index: usize) -> (i32, i32) {
+        let Some(bar) = self.bar(id) else {
+            return (0, 0);
+        };
+        let Some(screen) = self.screen(bar.screen) else {
+            return (0, 0);
+        };
+        let pinned = bar.pinned();
+        let (x, y, width, height) = self.metrics().tray_rect(
+            bar.orientation,
+            index,
+            pinned,
+            bar.entries.len() - pinned,
+            self.tray.len(),
+            bar.unfold > 0.5,
+        );
+        let surface = (bar.size.0 as i32, bar.size.1 as i32);
+        let (left, top) = crate::model::tray::surface_origin(
+            bar.orientation,
+            (screen.width, screen.height),
+            surface,
+        );
+        (
+            screen.x + left + x + width / 2,
+            screen.y + top + y + height / 2,
+        )
+    }
+
+    /// Where the tray item at `address` was clicked: on the bar the pointer
+    /// is over, else on the bar its menu came from.
+    fn tray_pointed(&self, address: &str) -> (i32, i32) {
+        let Some(index) = self.tray.iter().position(|item| item.address == address) else {
+            return (0, 0);
+        };
+        let hovered = self
+            .bars
+            .iter()
+            .find(|bar| bar.hover_tray == Some(index))
+            .map(|bar| bar.id);
+        let from_menu = self.tray_menu.as_ref().map(|(_, bar, _)| *bar);
+        hovered
+            .or(from_menu)
+            .map_or((0, 0), |id| self.tray_point(id, index))
+    }
+
     /// A screen, as the compositor describes it.
     fn screen(&self, role: OutputRole) -> Option<&coquille_ipc::Screen> {
         self.snapshot
@@ -1143,19 +1190,13 @@ impl Dock {
                 Task::none()
             }
             Message::TrayClick(address) => {
-                self.request(backend::Request::TrayActivate {
-                    address,
-                    x: 0,
-                    y: 0,
-                });
+                let (x, y) = self.tray_pointed(&address);
+                self.request(backend::Request::TrayActivate { address, x, y });
                 Task::none()
             }
             Message::TrayMiddle(address) => {
-                self.request(backend::Request::TraySecondary {
-                    address,
-                    x: 0,
-                    y: 0,
-                });
+                let (x, y) = self.tray_pointed(&address);
+                self.request(backend::Request::TraySecondary { address, x, y });
                 Task::none()
             }
             Message::TrayMenu(id, index) => {
@@ -1169,11 +1210,8 @@ impl Dock {
                 // X11 tray icons do).
                 if item.menu.is_none() || item.menu_path.is_none() {
                     let address = item.address.clone();
-                    self.request(backend::Request::TrayContextMenu {
-                        address,
-                        x: 0,
-                        y: 0,
-                    });
+                    let (x, y) = self.tray_point(id, index);
+                    self.request(backend::Request::TrayContextMenu { address, x, y });
                     return self.close_tray_menu().chain(self.close_menu());
                 }
                 let height = ui::tray_menu::height(item);

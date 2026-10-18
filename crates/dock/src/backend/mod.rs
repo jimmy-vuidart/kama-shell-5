@@ -7,6 +7,7 @@ pub mod compositor;
 pub mod mock;
 pub mod services;
 pub mod tray;
+pub mod xembed;
 
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -115,7 +116,8 @@ pub enum Request {
         x: i32,
         y: i32,
     },
-    /// The item draws its own menu (an X11 tray icon, through the bridge).
+    /// The item draws its own menu (an X11 tray icon, or an item without
+    /// DBusMenu).
     TrayContextMenu {
         address: String,
         x: i32,

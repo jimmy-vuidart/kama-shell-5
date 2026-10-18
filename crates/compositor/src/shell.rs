@@ -214,8 +214,8 @@ impl Shell {
 
     /// The X11 menus and tooltips to show and point at, bottom to top. One
     /// that says it is fully transparent (`_NET_WM_WINDOW_OPACITY` 0) is
-    /// left out: the tray bridge (`xembedsniproxy`) keeps such a window
-    /// mapped behind every tray icon, painted black.
+    /// left out: the X11 tray of the dock keeps such a window mapped behind
+    /// every tray icon.
     pub fn visible_overrides(&self) -> impl DoubleEndedIterator<Item = &X11Surface> {
         self.overrides
             .iter()

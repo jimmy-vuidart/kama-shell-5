@@ -25,6 +25,7 @@ iced.workspace = true
 iced_layershell = "0.19.1"
 system-tray = { version = "0.8.9", default-features = false, features = ["data"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
+x11rb = { version = "0.13", features = ["composite", "damage"] }
 
 [lints]
 workspace = true

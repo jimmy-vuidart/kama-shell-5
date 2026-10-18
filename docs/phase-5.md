@@ -13,7 +13,9 @@ sur une session coquille en marche (la session du moment était Plasma).
 
 Compositeur, XWayland et gestionnaire de fenêtres X11, décorations, mode
 jeu ; dock (barre, lanceur, zone de notification : la crate `system-tray`
-tient son propre `StatusNotifierWatcher`, sans `kded6`) ; centre de
+tient son propre `StatusNotifierWatcher`, sans `kded6` ; le dock tient
+aussi la zone de notification X11 des icônes Wine et Proton, sans
+`xembedsniproxy`) ; centre de
 contrôle et mixeur (`pactl`, `nmcli`, `bluetoothctl`, `ddcutil`, outils
 indépendants de tout bureau) ; écran « Paramètres » ; fond d'écran ;
 captures d'écran depuis le tiroir ; déconnexion, redémarrage, extinction
@@ -23,7 +25,6 @@ captures d'écran depuis le tiroir ; déconnexion, redémarrage, extinction
 
 | Dépendance | Paquet | Gravité |
 |---|---|---|
-| `xembedsniproxy` (`compositor/src/xwayland.rs`) | **plasma-workspace** | moyenne : sans lui, les icônes Wine / Proton redeviennent des fenêtres |
 | `gsettings get org.gnome.desktop.interface icon-theme` (`apps/src/icons.rs`) | glib2, gsettings-desktop-schemas | faible : ni l'un ni l'autre n'est un bureau, et ce n'est qu'un repli sans Reversal |
 | écran de connexion `plasmalogin` | **plasma-login-manager** | haute : c'est aussi lui qui déverrouille le trousseau (PAM) |
 
@@ -98,14 +99,14 @@ gros morceau (la capture pour le partage d'écran) ensuite.
       lecture / pause / suivant (MPRIS), `Impr. écran` (capture existante,
       celle du tiroir). À appliquer aussi pendant un jeu : ce sont des
       touches matérielles, comme `Boost`.
-- [ ] 8. **Écran de connexion et pont des icônes X11.**
+- [ ] 8. **Écran de connexion.**
       - Remplacer plasma-login-manager (SDDM seul, ou greetd avec un
         greeter) en reportant `pam_gnome_keyring` dans sa configuration PAM.
         Ne rien changer sans l'accord de Jimmy (voir « Sécurité pendant le
         développement » dans `CLAUDE.md`).
-      - Remplacer `xembedsniproxy` : un pont XEmbed → StatusNotifierItem dans
-        le compositeur (il est déjà gestionnaire de fenêtres X11), ou un
-        paquet indépendant s'il en existe un.
+      - [x] Pont des icônes X11 : fait, le dock est la zone de notification
+        XEmbed (`dock/src/backend/xembed.rs`), `xembedsniproxy` n'est plus
+        lancé.
 
 ## Après les étapes
 
@@ -137,7 +138,7 @@ Pas indispensables, mais des applis les attendent : `wp-tearing-control`
   xdg-desktop-portal et xdg-desktop-portal-gtk, gnome-keyring, glib2 et
   dconf, wl-clipboard, kitty.
 - **À remplacer avant de retirer Plasma et GNOME** : plasma-login-manager,
-  xembedsniproxy (plasma-workspace), polkit-kde-agent, le démon de
+  polkit-kde-agent, le démon de
   notifications de plasmashell. Et les applis du quotidien venues de KDE ou
   GNOME (Dolphin ou Nautilus, Spectacle, Discover…) : elles peuvent rester
   seules, mais tirent une part de leur bureau en dépendance.

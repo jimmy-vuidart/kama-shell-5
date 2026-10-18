@@ -48,6 +48,12 @@ pub struct Screen {
     /// The name clients know the output by (its connector).
     pub name: String,
     pub role: OutputRole,
+    /// Where its top left corner is on the whole desktop, which is also
+    /// where X11 sees it.
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
     pub width: i32,
     pub height: i32,
     pub layout: LayoutKind,
@@ -207,6 +213,8 @@ mod tests {
             screens: vec![Screen {
                 name: "HDMI-A-1".into(),
                 role: OutputRole::Left,
+                x: 0,
+                y: 0,
                 width: 1920,
                 height: 1080,
                 layout: LayoutKind::TwoColumns,

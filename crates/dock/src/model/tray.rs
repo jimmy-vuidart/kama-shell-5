@@ -137,6 +137,49 @@ impl TrayItem {
     }
 }
 
+/// Where a bar's surface sits on its screen, anchored to one edge: against
+/// it, centered along it, as layer-shell places it.
+pub fn surface_origin(
+    orientation: super::Orientation,
+    (screen_w, screen_h): (i32, i32),
+    (surface_w, surface_h): (i32, i32),
+) -> (i32, i32) {
+    use super::{Orientation, Side};
+    match orientation {
+        Orientation::Vertical(Side::Left) => (0, (screen_h - surface_h) / 2),
+        Orientation::Vertical(Side::Right) => (screen_w - surface_w, (screen_h - surface_h) / 2),
+        Orientation::Horizontal => ((screen_w - surface_w) / 2, screen_h - surface_h),
+    }
+}
+
+/// The address of an X11 tray icon: no bus name ever starts like this.
+const X11_PREFIX: &str = "x11:";
+
+/// The window of an X11 tray icon, from its address.
+pub fn x11_window(address: &str) -> Option<u32> {
+    address.strip_prefix(X11_PREFIX)?.parse().ok()
+}
+
+impl TrayItem {
+    /// An icon of the X11 tray (Wine, Proton): it draws its own menu. Wine
+    /// names none of its icons, and they all belong to `explorer.exe`: no
+    /// tooltip then.
+    pub fn from_x11(icon: crate::backend::xembed::X11Icon) -> Self {
+        let tooltip = (!icon.name.is_empty()).then(|| icon.name.clone());
+        let title = tooltip.clone().unwrap_or_else(|| icon.class.clone());
+        Self {
+            address: format!("{X11_PREFIX}{}", icon.window),
+            tooltip,
+            id: icon.class,
+            title,
+            icon_name: None,
+            pixmap: Some(icon.pixmap),
+            menu_path: None,
+            menu: None,
+        }
+    }
+}
+
 /// Number of columns required for `count` items arranged in 2 lines.
 pub fn horizontal_columns(count: usize) -> usize {
     count.div_ceil(2)
@@ -181,6 +224,33 @@ pub fn vertical_coord(index: usize) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::{Orientation, Side};
+
+    #[test]
+    fn a_bar_surface_is_centered_along_its_edge() {
+        let screen = (1920, 1080);
+        let upright = (80, 600);
+        assert_eq!(
+            surface_origin(Orientation::Vertical(Side::Left), screen, upright),
+            (0, 240)
+        );
+        assert_eq!(
+            surface_origin(Orientation::Vertical(Side::Right), screen, upright),
+            (1840, 240)
+        );
+        assert_eq!(
+            surface_origin(Orientation::Horizontal, screen, (800, 90)),
+            (560, 990)
+        );
+    }
+
+    #[test]
+    fn an_x11_icon_is_told_by_its_address() {
+        assert_eq!(x11_window("x11:4194307"), Some(4194307));
+        assert_eq!(x11_window(":1.42"), None);
+        assert_eq!(x11_window("x11:nope"), None);
+    }
+
     use super::*;
 
     #[test]
