@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
-use coquille_model::{OutputId, OutputRole, Rect, Size as ModelSize};
+use coquille_model::{OutputId, OutputRole, Rect, Scale, Size as ModelSize};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::ExportMem;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -14,7 +14,7 @@ use smithay::backend::winit::{self, WinitEventLoop, WinitGraphicsBackend};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::input::pointer::CursorImageStatus;
-use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+use smithay::output::{Mode, Output, PhysicalProperties, Scale as OutputScale, Subpixel};
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::winit::cursor::Cursor as HostCursor;
 use smithay::reexports::winit::dpi::LogicalSize;
@@ -35,6 +35,9 @@ const INITIAL_SIZE: (f64, f64) = (1600.0, 900.0);
 /// Refresh rate announced for the simulated screens, in mHz.
 pub const REFRESH: i32 = 60_000;
 
+/// The size and scale a frame of the window is drawn at.
+type Frame = (Size<i32, Physical>, Scale);
+
 /// What the nested window stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Simulated {
@@ -48,8 +51,11 @@ pub struct Winit {
     pub backend: WinitGraphicsBackend<GlesRenderer>,
     pub shaders: Shaders,
     simulated: Simulated,
-    /// For the size the window had when it was created.
-    damage_tracker: Option<(Size<i32, Physical>, OutputDamageTracker)>,
+    /// The window is drawn in one pass: every simulated screen has this
+    /// scale.
+    pub scale: Scale,
+    /// For the size and scale the window had when it was created.
+    damage_tracker: Option<(Frame, OutputDamageTracker)>,
     /// The host window is still the renderer's current surface. Cleared by
     /// whoever uses the renderer outside of a frame.
     pub window_is_current: bool,
@@ -60,7 +66,11 @@ pub struct Winit {
 /// Opens the host window and prepares the renderer. In full screen, the
 /// window covers the monitor it appears on, which makes the simulated screens
 /// as large as a real one.
-pub fn init(simulated: Simulated, fullscreen: bool) -> anyhow::Result<(Winit, WinitEventLoop)> {
+pub fn init(
+    simulated: Simulated,
+    fullscreen: bool,
+    scale: Scale,
+) -> anyhow::Result<(Winit, WinitEventLoop)> {
     let attributes = WindowAttributes::default()
         .with_title(TITLE)
         .with_surface_size(LogicalSize::new(INITIAL_SIZE.0, INITIAL_SIZE.1))
@@ -73,6 +83,7 @@ pub fn init(simulated: Simulated, fullscreen: bool) -> anyhow::Result<(Winit, Wi
         backend,
         shaders,
         simulated,
+        scale,
         damage_tracker: None,
         window_is_current: false,
         screenshot: None,
@@ -81,9 +92,9 @@ pub fn init(simulated: Simulated, fullscreen: bool) -> anyhow::Result<(Winit, Wi
 }
 
 impl Winit {
-    /// The simulated screens for a window of this size.
+    /// The simulated screens for a window of this size, in logical pixels.
     fn layout(&self, size: Size<i32, Physical>) -> Vec<ScreenInfo> {
-        let canvas = ModelSize::new(size.w, size.h);
+        let canvas = self.scale.logical(ModelSize::new(size.w, size.h));
         let screens = match self.simulated {
             Simulated::One(role) => vec![(role, Rect::from_size(canvas))],
             Simulated::Three => split_canvas(canvas).to_vec(),
@@ -95,6 +106,7 @@ impl Winit {
                 id: OutputId(id),
                 role,
                 rect,
+                scale: self.scale,
             })
             .collect()
     }
@@ -114,7 +126,7 @@ impl Winit {
                         serial_number: "Unknown".into(),
                     },
                 );
-                place(&output, info.rect);
+                place(&output, &info);
                 (info, output)
             })
             .collect()
@@ -134,13 +146,17 @@ impl Winit {
     }
 }
 
-/// Gives a simulated screen its size and position.
-fn place(output: &Output, rect: Rect) {
+/// Gives a simulated screen its size, scale and position.
+fn place(output: &Output, info: &ScreenInfo) {
+    let (rect, scale) = (info.rect, info.scale);
+    let pixels = scale.physical(rect.size());
     let mode = Mode {
-        size: (rect.w, rect.h).into(),
+        size: (pixels.w, pixels.h).into(),
         refresh: REFRESH,
     };
-    output.change_current_state(Some(mode), None, None, Some((rect.x, rect.y).into()));
+    let position = Some((rect.x, rect.y).into());
+    let scale = Some(OutputScale::Fractional(scale.get()));
+    output.change_current_state(Some(mode), None, scale, position);
     output.set_preferred(mode);
 }
 
@@ -161,7 +177,7 @@ impl State {
         let screens = winit.layout(size);
         for info in &screens {
             if let Some(output) = self.output(info.id) {
-                place(output, info.rect);
+                place(output, info);
             }
         }
         let ids: Vec<OutputId> = screens.iter().map(|screen| screen.id).collect();
@@ -192,7 +208,8 @@ impl State {
             self.hover,
             self.capsule_hover,
         );
-        let cursor = self.cursor(false);
+        let scale = self.winit().map_or(Scale::ONE, |winit| winit.scale);
+        let cursor = self.cursor(false, scale);
         self.refresh_bar();
         let overlay = self.overlay();
         let panels = self.panels();
@@ -214,14 +231,15 @@ impl State {
             winit.backend.buffer_age().unwrap_or(0)
         };
         let size = winit.backend.window_size();
+        let scale = winit.scale;
         if winit
             .damage_tracker
             .as_ref()
-            .is_none_or(|(tracked, _)| *tracked != size)
+            .is_none_or(|(tracked, _)| *tracked != (size, scale))
         {
             // The host window is drawn upside down, hence the flip.
-            let tracker = OutputDamageTracker::new(size, 1.0, Transform::Flipped180);
-            winit.damage_tracker = Some((size, tracker));
+            let tracker = OutputDamageTracker::new(size, scale.get(), Transform::Flipped180);
+            winit.damage_tracker = Some(((size, scale), tracker));
         }
         let Some((_, damage_tracker)) = winit.damage_tracker.as_mut() else {
             return;
@@ -231,7 +249,8 @@ impl State {
             Ok((renderer, mut framebuffer)) => {
                 self.panel_glass
                     .retain(|(surface, _), _| surface.is_alive());
-                let view = Rect::new(0, 0, size.w, size.h);
+                let canvas = scale.logical(ModelSize::new(size.w, size.h));
+                let view = Rect::new(0, 0, canvas.w, canvas.h);
                 let elements = scene::build(
                     renderer,
                     &winit.shaders,
@@ -239,6 +258,7 @@ impl State {
                     &self.theme,
                     Layers {
                         view,
+                        scale: scale.get(),
                         overlay: &overlay,
                         panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
                         panels: &panels,

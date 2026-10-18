@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use coquille_model::{OutputId, OutputRole, Rect, Size};
+use coquille_model::{OutputId, OutputRole, Rect, Scale, Size};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use tiny_skia::{Color, FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
@@ -42,17 +42,19 @@ impl WallpaperManager {
     /// when settings and dimensions have not changed.
     pub fn update(
         &mut self,
-        screens: &[(OutputId, OutputRole, Rect)],
+        screens: &[(OutputId, OutputRole, Rect, Scale)],
         config: &WallpaperConfig,
         backdrop: Rgba,
     ) -> Vec<ScreenWallpaper> {
-        let active_ids: Vec<OutputId> = screens.iter().map(|(id, _, _)| *id).collect();
+        let active_ids: Vec<OutputId> = screens.iter().map(|(id, ..)| *id).collect();
         self.cache.retain(|id, _| active_ids.contains(id));
 
         let mut result = Vec::new();
-        for &(output_id, role, rect) in screens {
-            let size = (rect.w, rect.h);
-            let path = resolve_wallpaper_path(config, role, Size::new(rect.w, rect.h));
+        for &(output_id, role, rect, scale) in screens {
+            // As many pixels as the screen has: the image is never enlarged.
+            let pixels = scale.physical(rect.size());
+            let size = (pixels.w, pixels.h);
+            let path = resolve_wallpaper_path(config, role, pixels);
             let mode = config.mode();
             let key = CacheKey {
                 source: path.clone(),

@@ -19,6 +19,9 @@ uniform vec4 color;
 uniform vec4 radius;
 // 0 fills the shape; otherwise the thickness of the ring.
 uniform float border;
+// One pixel of the screen, in the units of the shape: edges are smoothed over
+// a pixel, whatever the scale.
+uniform float pixel;
 
 float corner_radius(vec2 p) {
     if (p.x < 0.0) {
@@ -38,10 +41,11 @@ void main() {
     vec2 p = v_coords * size + shape_offset - half_size;
     float r = corner_radius(p);
 
-    float coverage = 1.0 - smoothstep(-0.5, 0.5, box(p, half_size, r));
+    float edge = 0.5 * pixel;
+    float coverage = 1.0 - smoothstep(-edge, edge, box(p, half_size, r));
     if (border > 0.0) {
         float inner = box(p, half_size - border, max(r - border, 0.0));
-        coverage *= smoothstep(-0.5, 0.5, inner);
+        coverage *= smoothstep(-edge, edge, inner);
     }
 
     vec4 result = color * coverage * alpha;

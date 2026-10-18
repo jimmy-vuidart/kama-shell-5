@@ -129,6 +129,7 @@ impl State {
             map.arrange();
             map.non_exclusive_zone()
         };
+        self.tell_panels_scale(output);
         let Some(info) = self.shell.desk.screen(output).map(|screen| *screen.info()) else {
             return;
         };

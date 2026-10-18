@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use coquille_apps::Catalog;
 use coquille_model::{
-    AppMemory, OutputId, OutputRole, Point as ModelPoint, Proportions, Rect, WindowId,
+    AppMemory, OutputId, OutputRole, Point as ModelPoint, Proportions, Rect, Scale, WindowId,
 };
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -25,6 +25,7 @@ use smithay::utils::{IsAlive, Logical, Point};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_states};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState};
+use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
@@ -113,6 +114,8 @@ pub struct State {
     /// The number of the X server, for the `DISPLAY` of the programs started
     /// from here.
     pub xdisplay: Option<u32>,
+    /// The scale X11 applications draw at, chosen when XWayland starts.
+    pub x11_scale: Scale,
     // Kept alive for as long as their globals must exist.
     _dmabuf_global: DmabufGlobal,
     _output_manager_state: OutputManagerState,
@@ -121,6 +124,7 @@ pub struct State {
     _pointer_constraints_state: PointerConstraintsState,
     _relative_pointer_state: RelativePointerManagerState,
     _viewporter_state: ViewporterState,
+    _fractional_scale_state: FractionalScaleManagerState,
 
     pub seat: Seat<State>,
     pub cursor_status: CursorImageStatus,
@@ -238,6 +242,9 @@ impl State {
         // Lets a client stretch a small buffer over its surface: how
         // XWayland shows a game that asked for a lower resolution.
         let viewporter_state = ViewporterState::new::<Self>(dh);
+        // Clients learn the scale of their screen, fractions included, and
+        // draw sharp at 125 % as at 200 % (see `scale.rs`).
+        let fractional_scale_state = FractionalScaleManagerState::new::<Self>(dh);
         // An application asks to come forward: its tray icon, a second
         // launch, a notification.
         let xdg_activation_state = XdgActivationState::new::<Self>(dh);
@@ -313,6 +320,7 @@ impl State {
             xdg_activation_state,
             xwm: None,
             xdisplay: None,
+            x11_scale: Scale::ONE,
             _dmabuf_global: dmabuf_global,
             _output_manager_state: output_manager_state,
             _decoration_state: decoration_state,
@@ -320,6 +328,7 @@ impl State {
             _pointer_constraints_state: pointer_constraints_state,
             _relative_pointer_state: relative_pointer_state,
             _viewporter_state: viewporter_state,
+            _fractional_scale_state: fractional_scale_state,
             seat,
             cursor_status: CursorImageStatus::default_named(),
             cursor_images: CursorImages::load(),
@@ -378,12 +387,12 @@ impl State {
 
     /// Re-evaluates wallpapers for all current screens.
     pub fn refresh_wallpapers(&mut self) {
-        let screens: Vec<(OutputId, OutputRole, Rect)> = self
+        let screens: Vec<(OutputId, OutputRole, Rect, Scale)> = self
             .outputs
             .iter()
             .filter_map(|screen| {
                 let info = self.shell.screen(screen.id)?;
-                Some((screen.id, info.role, info.rect))
+                Some((screen.id, info.role, info.rect, info.scale))
             })
             .collect();
         self.wallpapers =
@@ -466,9 +475,10 @@ impl State {
         self.queue_redraw();
     }
 
-    /// What to draw at the pointer. Nested, named cursors are left to the
-    /// host; on real hardware (`draw_named`) the compositor draws them.
-    pub fn cursor(&mut self, draw_named: bool) -> Option<Cursor> {
+    /// What to draw at the pointer, on a screen of `scale`. Nested, named
+    /// cursors are left to the host; on real hardware (`draw_named`) the
+    /// compositor draws them.
+    pub fn cursor(&mut self, draw_named: bool, scale: Scale) -> Option<Cursor> {
         let location = self.pointer_location().to_i32_round();
         match &self.cursor_status {
             CursorImageStatus::Hidden => None,
@@ -488,13 +498,22 @@ impl State {
             // A cursor surface that died: back to the default arrow.
             CursorImageStatus::Surface(_) => {
                 self.set_cursor(CursorImageStatus::default_named());
-                self.cursor(draw_named)
+                self.cursor(draw_named, scale)
             }
             CursorImageStatus::Named(icon) if draw_named => {
-                let sprite = self.cursor_images.get(*icon);
+                // As many pixels as the screen shows it with, at the size
+                // of the theme in logical pixels.
+                let sprite = self.cursor_images.get(*icon, scale);
+                let s = scale.get();
+                let (w, h) = sprite.pixels;
+                let (x, y) = sprite.hotspot;
+                let hotspot = Point::<f64, Logical>::from((f64::from(x) / s, f64::from(y) / s));
+                let logical = |pixels: i32| (f64::from(pixels) / s).round() as i32;
                 Some(Cursor::Image {
                     buffer: sprite.buffer.clone(),
-                    location: location - Point::from(sprite.hotspot),
+                    location: self.pointer_location() - hotspot,
+                    pixels: (w, h).into(),
+                    size: (logical(w), logical(h)).into(),
                 })
             }
             CursorImageStatus::Named(_) => None,
@@ -513,6 +532,9 @@ impl State {
         }
         if let Some(theme) = crate::app_theme::qt_platform_theme() {
             child.env(crate::app_theme::QT_PLATFORM_THEME_VAR, theme);
+        }
+        if let Some(scale) = crate::xwayland::steam_scale(self.x11_scale) {
+            child.env(crate::xwayland::STEAM_SCALE_VAR, scale);
         }
         match self.xdisplay {
             Some(number) => child.env("DISPLAY", crate::xwayland::display_name(number)),

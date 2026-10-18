@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use coquille_model::{OutputId, Rect};
+use coquille_model::{OutputId, Rect, Scale};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -84,7 +84,9 @@ fn save_and_copy(state: &State, pixmap: &tiny_skia::Pixmap) -> anyhow::Result<Pa
 /// Renders a screen offscreen into a pixmap, excluding the drawer and cursor.
 pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<tiny_skia::Pixmap> {
     let screen_info = *state.shell.screen(output_id).context("screen not found")?;
-    let (width, height) = (screen_info.rect.w, screen_info.rect.h);
+    // As many pixels as the screen has, not as many as it has logical ones.
+    let pixels = screen_info.scale.physical(screen_info.rect.size());
+    let (width, height) = (pixels.w, pixels.h);
     let buffer_size: Size<i32, Buffer> = (width, height).into();
     let physical_size: Size<i32, Physical> = (width, height).into();
 
@@ -109,6 +111,7 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
 
     let layers = Layers {
         view: screen_info.rect,
+        scale: screen_info.scale.get(),
         overlay: &[],
         panel: state.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
         panels: &panels,
@@ -131,7 +134,8 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         .bind(&mut offscreen)
         .map_err(|error| anyhow::anyhow!("cannot bind offscreen buffer: {error:?}"))?;
 
-    let mut tracker = OutputDamageTracker::new(physical_size, 1.0, Transform::Normal);
+    let mut tracker =
+        OutputDamageTracker::new(physical_size, screen_info.scale.get(), Transform::Normal);
     let clear = state.theme.backdrop.premultiplied();
     tracker
         .render_output(renderer, &mut target, 0, &elements, clear)
@@ -175,7 +179,9 @@ pub fn capture_screen(state: &mut State, output_id: Option<OutputId>) -> anyhow:
 /// Pre-captured screen buffer for interactive region selection.
 pub struct ScreenFreeze {
     pub output_id: OutputId,
+    /// Logical; the pixmap has as many pixels as the screen.
     pub rect: Rect,
+    pub scale: Scale,
     pub pixmap: tiny_skia::Pixmap,
     pub buffer: MemoryRenderBuffer,
 }
@@ -195,9 +201,14 @@ impl ScreenshotFreeze {
 
 /// Pre-captures all screens into offscreen pixmaps and textures.
 pub fn freeze_screens(state: &mut State) -> ScreenshotFreeze {
-    let screen_ids: Vec<_> = state.shell.screens.iter().map(|s| (s.id, s.rect)).collect();
+    let screen_ids: Vec<_> = state
+        .shell
+        .screens
+        .iter()
+        .map(|s| (s.id, s.rect, s.scale))
+        .collect();
     let mut screens = Vec::new();
-    for (id, rect) in screen_ids {
+    for (id, rect, scale) in screen_ids {
         match capture_output(state, id) {
             Ok(pixmap) => {
                 let buffer = MemoryRenderBuffer::from_slice(
@@ -211,6 +222,7 @@ pub fn freeze_screens(state: &mut State) -> ScreenshotFreeze {
                 screens.push(ScreenFreeze {
                     output_id: id,
                     rect,
+                    scale,
                     pixmap,
                     buffer,
                 });
@@ -236,7 +248,16 @@ pub fn save_frozen_region(
         anyhow::bail!("selection region is empty");
     }
 
-    let (w, h) = (global_rect.w as u32, global_rect.h as u32);
+    // The image has the pixels of the most detailed screen it covers.
+    let scale = freeze
+        .screens
+        .iter()
+        .filter(|screen| screen.rect.intersection(global_rect).is_some())
+        .map(|screen| screen.scale)
+        .max()
+        .unwrap_or(Scale::ONE);
+    let pixels = |length: i32| (f64::from(length) * scale.get()).round() as u32;
+    let (w, h) = (pixels(global_rect.w), pixels(global_rect.h));
     let mut cropped = tiny_skia::Pixmap::new(w, h).context("cannot allocate cropped pixmap")?;
     cropped.fill(tiny_skia::Color::BLACK);
 
@@ -244,12 +265,19 @@ pub fn save_frozen_region(
     for screen in &freeze.screens {
         if let Some(inter) = screen.rect.intersection(global_rect) {
             if inter.w > 0 && inter.h > 0 {
-                let src_x = (inter.x - screen.rect.x) as u32;
-                let src_y = (inter.y - screen.rect.y) as u32;
-                let dst_x = (inter.x - global_rect.x) as u32;
-                let dst_y = (inter.y - global_rect.y) as u32;
-                let copy_w = (inter.w as u32).min(screen.pixmap.width().saturating_sub(src_x));
-                let copy_h = (inter.h as u32).min(screen.pixmap.height().saturating_sub(src_y));
+                // A screen of another scale is copied pixel for pixel, not
+                // resized: only a selection over two screens can have one.
+                let own = |length: i32| (f64::from(length) * screen.scale.get()).round() as u32;
+                let src_x = own(inter.x - screen.rect.x);
+                let src_y = own(inter.y - screen.rect.y);
+                let dst_x = pixels(inter.x - global_rect.x);
+                let dst_y = pixels(inter.y - global_rect.y);
+                let copy_w = own(inter.w)
+                    .min(screen.pixmap.width().saturating_sub(src_x))
+                    .min(w.saturating_sub(dst_x));
+                let copy_h = own(inter.h)
+                    .min(screen.pixmap.height().saturating_sub(src_y))
+                    .min(h.saturating_sub(dst_y));
                 if copy_w > 0 && copy_h > 0 {
                     copy_rect(
                         &screen.pixmap,

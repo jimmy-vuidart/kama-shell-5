@@ -5,7 +5,7 @@
 
 use coquille_model::{
     AppKey, AppMemory, CapsuleGroup, Desk, Metrics, OpenRequest, OutputId, OutputInfo, OutputRole,
-    Placement, Point as ModelPoint, Proportions, Rect, Size as ModelSize, SlotId, StackId,
+    Placement, Point as ModelPoint, Proportions, Rect, Scale, Size as ModelSize, SlotId, StackId,
     WindowGeometry, WindowId,
 };
 use smithay::backend::allocator::Fourcc;
@@ -38,8 +38,10 @@ use crate::theme::Theme;
 pub struct ScreenInfo {
     pub id: OutputId,
     pub role: OutputRole,
-    /// In the global space shared by every screen.
+    /// In the global space shared by every screen, in logical pixels.
     pub rect: Rect,
+    /// How many pixels of the screen a logical pixel takes.
+    pub scale: Scale,
 }
 
 /// A window the model knows about.
@@ -121,6 +123,11 @@ impl CapsuleGroupView {
     /// The band the group sits in, in the global space.
     pub fn band(&self) -> Rect {
         self.group.band.translated(self.origin)
+    }
+
+    /// The scale `buffer` was painted at.
+    pub fn painted_scale(&self) -> Scale {
+        self.spec.as_ref().map_or(Scale::ONE, |spec| spec.scale)
     }
 }
 
@@ -210,6 +217,11 @@ impl Shell {
 
     pub fn screen(&self, id: OutputId) -> Option<&ScreenInfo> {
         self.screens.iter().find(|screen| screen.id == id)
+    }
+
+    /// The scale of a screen; 100 % for one that is gone.
+    pub fn scale_of(&self, id: OutputId) -> Scale {
+        self.screen(id).map_or(Scale::ONE, |screen| screen.scale)
     }
 
     /// The X11 menus and tooltips to show and point at, bottom to top. One
@@ -368,7 +380,10 @@ impl Shell {
         hover: Option<CapsuleHit>,
     ) {
         let Self {
-            windows, capsules, ..
+            windows,
+            capsules,
+            screens,
+            ..
         } = self;
         // The box of each group of maximized windows, relative to its screen.
         let mut maximized: Vec<(OutputId, Rect)> = Vec::new();
@@ -403,6 +418,10 @@ impl Shell {
                 accent: theme.accent,
                 maximized: is_maximized,
                 avoid,
+                scale: screens
+                    .iter()
+                    .find(|screen| screen.id == output)
+                    .map_or(Scale::ONE, |screen| screen.scale),
             };
             if view.spec.as_ref() != Some(&spec) {
                 let painted = painter.capsule_group(&spec);
@@ -427,6 +446,11 @@ impl Shell {
     ) {
         self.refresh_capsules(painter, theme, capsule_hover);
         let corner_radius = self.desk.metrics().corner_radius;
+        let scales: Vec<(OutputId, Scale)> = self
+            .screens
+            .iter()
+            .map(|screen| (screen.id, screen.scale))
+            .collect();
         for managed in &mut self.windows {
             let geometry = managed.geometry;
             let Some(bar) = geometry.titlebar.filter(|_| geometry.visible) else {
@@ -452,6 +476,10 @@ impl Shell {
                 theme: theme.kind,
                 accent: theme.accent,
                 corner_radius,
+                scale: scales
+                    .iter()
+                    .find(|(id, _)| *id == geometry.output)
+                    .map_or(Scale::ONE, |(_, scale)| *scale),
             };
             if managed.chrome.spec.as_ref() == Some(&spec) {
                 continue;
@@ -766,6 +794,14 @@ impl State {
             let Some(toplevel) = managed.window.toplevel() else {
                 continue;
             };
+            // X11 windows draw at the scale of XWayland, chosen once.
+            let scale = self
+                .shell
+                .screens
+                .iter()
+                .find(|screen| screen.id == geometry.output)
+                .map_or(Scale::ONE, |screen| screen.scale);
+            crate::scale::tell_scale(toplevel.wl_surface(), scale);
             // A floating window has the size its client chooses, unless that
             // is more than the screen offers.
             let imposed = managed.oversized || managed.user_sized;

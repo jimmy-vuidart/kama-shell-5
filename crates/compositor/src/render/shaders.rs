@@ -154,6 +154,7 @@ impl Shaders {
                 UniformName::new("color", UniformType::_4f),
                 UniformName::new("radius", UniformType::_4f),
                 UniformName::new("border", UniformType::_1f),
+                UniformName::new("pixel", UniformType::_1f),
             ],
         )?;
         let clip = renderer.compile_custom_texture_shader(

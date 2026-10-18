@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use coquille_ipc::ThemeName;
-use coquille_model::{LayoutKind, OutputRole};
+use coquille_model::{LayoutKind, OutputRole, Scale};
 use toml_edit::{DocumentMut, Item, Value};
 
 use crate::edit::{with_value, without};
@@ -165,6 +165,8 @@ pub struct Settings {
     pub docks: PerScreen<Option<DockPlace>>,
     /// How each screen arranges the windows tidied into it.
     pub layouts: PerScreen<Option<LayoutKind>>,
+    /// How much bigger each screen draws everything.
+    pub scales: PerScreen<Option<Scale>>,
     pub dock_icon_size: Option<u32>,
     pub mouse_accel_speed: Option<f64>,
     pub mouse_accel_profile: Option<MouseAccelProfile>,
@@ -247,6 +249,9 @@ impl Settings {
                 let said = text_of(&["layout", role_name(role)])?;
                 LayoutKind::named(&said)
             }),
+            scales: PerScreen::from_roles(|role| {
+                float_of(&["scale", role_name(role)]).map(Scale::new)
+            }),
             dock_icon_size: item(&["dock", "icon_size"])
                 .and_then(Item::as_integer)
                 .and_then(|size| u32::try_from(size).ok()),
@@ -295,6 +300,10 @@ impl Settings {
         self.layouts
             .get(role)
             .unwrap_or(LayoutKind::default_for(role))
+    }
+
+    pub fn scale(&self, role: OutputRole) -> Scale {
+        self.scales.get(role).unwrap_or_default()
     }
 
     pub fn dock_icon_size(&self) -> u32 {
@@ -370,6 +379,7 @@ pub enum Change {
     Vrr(bool),
     Dock(OutputRole, DockPlace),
     Layout(OutputRole, LayoutKind),
+    Scale(OutputRole, Scale),
     DockIconSize(u32),
     MouseAccelSpeed(f64),
     MouseAccelProfile(MouseAccelProfile),
@@ -440,6 +450,10 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
         Change::Layout(role, kind) => {
             let path = ["layout", role_name(*role)];
             with_value(text, &path, kind.name().into())
+        }
+        Change::Scale(role, scale) => {
+            let path = ["scale", role_name(*role)];
+            with_value(text, &path, scale.get().into())
         }
         Change::DockIconSize(size) => {
             let path = ["dock", "icon_size"];
@@ -629,6 +643,7 @@ mod tests {
             Change::Dock(OutputRole::Center, DockPlace::VerticalRight),
             Change::Dock(OutputRole::Right, DockPlace::Horizontal),
             Change::Layout(OutputRole::Right, LayoutKind::MainSide),
+            Change::Scale(OutputRole::Center, Scale::new(2.0)),
             Change::MouseAccelSpeed(0.5),
             Change::MouseAccelProfile(MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
@@ -668,6 +683,10 @@ mod tests {
             },
             layouts: PerScreen {
                 right: Some(LayoutKind::MainSide),
+                ..PerScreen::default()
+            },
+            scales: PerScreen {
+                center: Some(Scale::new(2.0)),
                 ..PerScreen::default()
             },
             dock_icon_size: None,
@@ -828,6 +847,31 @@ mod tests {
         assert_eq!(
             Settings::parse("[layout]\nleft = \"rows\"\n").layouts.left,
             None
+        );
+    }
+
+    #[test]
+    fn scales_are_read_and_written_under_their_explanation() {
+        let settings = Settings::parse(SAMPLE);
+        assert_eq!(settings.scale(OutputRole::Center), Scale::ONE);
+
+        let changed = apply(SAMPLE, &Change::Scale(OutputRole::Center, Scale::new(1.75))).unwrap();
+
+        let settings = Settings::parse(&changed);
+        assert_eq!(settings.scale(OutputRole::Center).get(), 1.75);
+        assert_eq!(settings.scales.left, None);
+        assert!(changed.contains("[scale]\n# left = 1.0\ncenter = 1.75\n"));
+        assert_eq!(
+            Settings::parse("[scale]\nleft = 2\n")
+                .scale(OutputRole::Left)
+                .get(),
+            2.0
+        );
+        assert_eq!(
+            Settings::parse("[scale]\nleft = 9.0\n")
+                .scale(OutputRole::Left)
+                .get(),
+            3.0
         );
     }
 

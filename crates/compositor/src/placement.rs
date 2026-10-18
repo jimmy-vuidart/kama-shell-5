@@ -109,6 +109,7 @@ impl State {
             hovered: self.bar_hover,
             theme: self.theme.kind,
             accent: self.theme.accent,
+            scale: self.shell.scale_of(output),
         };
         if self
             .bar
@@ -124,10 +125,7 @@ impl State {
             self.bar = None;
             return;
         };
-        let size = ModelSize::new(
-            painted.pixmap.width() as i32,
-            painted.pixmap.height() as i32,
-        );
+        let size = painted.size;
         let corner = bar_position(frame, size, screen);
         let buttons = choices
             .iter()
@@ -141,7 +139,10 @@ impl State {
             buffer: MemoryRenderBuffer::from_slice(
                 painted.pixmap.data(),
                 Fourcc::Abgr8888,
-                (size.w, size.h),
+                (
+                    painted.pixmap.width() as i32,
+                    painted.pixmap.height() as i32,
+                ),
                 1,
                 Transform::Normal,
                 None,

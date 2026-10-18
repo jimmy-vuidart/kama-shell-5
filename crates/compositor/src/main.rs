@@ -19,6 +19,7 @@ mod placement;
 mod reload;
 mod render;
 mod resize;
+mod scale;
 mod screenshot;
 mod shell;
 mod shortcuts;
@@ -34,7 +35,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use coquille_model::OutputRole;
+use coquille_model::{OutputRole, Scale};
 use smithay::backend::winit::WinitEvent;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -149,6 +150,12 @@ struct Cli {
     #[arg(long, requires = "keyboard_layout")]
     keyboard_variant: Option<String>,
 
+    /// Mise à l'échelle de tous les écrans (de 1 à 3, par pas de 0.25 ; par
+    /// exemple 2 pour un écran 4K de portable). Par défaut, celle de chaque
+    /// écran dans la configuration.
+    #[arg(long, value_name = "ÉCHELLE")]
+    scale: Option<f64>,
+
     /// Fichier de configuration (défaut : ~/.config/coquille/config.toml).
     #[arg(long, value_name = "FICHIER")]
     config: Option<PathBuf>,
@@ -211,9 +218,12 @@ struct Cli {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_logging(cli.log_file.as_deref())?;
-    let config = config::load(cli.config.as_deref());
+    let mut config = config::load(cli.config.as_deref());
+    if let Some(scale) = cli.scale {
+        config.scale = config::ScaleConfig::everywhere(Scale::new(scale));
+    }
     if cli.probe {
-        return backend::udev::probe(&config.outputs);
+        return backend::udev::probe(&config.outputs, &config.scale);
     }
 
     let mut event_loop: EventLoop<'static, State> = EventLoop::try_new()?;
@@ -257,10 +267,21 @@ fn main() -> anyhow::Result<()> {
         // A script must not be disturbed by the real mouse passing over the
         // window.
         let scripted = cli.debug_input.is_some();
-        init_nested(&handle, simulated, cli.fullscreen, scripted)?
+        // Drawn in one pass, the window has a single scale: the one of the
+        // screen it stands for, the center when it stands for three.
+        let scale = match simulated {
+            Simulated::One(role) => config.scale.of(role),
+            Simulated::Three => config.scale.of(OutputRole::Center),
+        };
+        init_nested(&handle, simulated, cli.fullscreen, scripted, scale)?
     } else {
-        let (udev, screens) =
-            backend::udev::init(&handle, &config.outputs, &config.game, &config.mouse)?;
+        let (udev, screens) = backend::udev::init(
+            &handle,
+            &config.outputs,
+            &config.scale,
+            &config.game,
+            &config.mouse,
+        )?;
         (Backend::Udev(Box::new(udev)), screens)
     };
 
@@ -396,6 +417,9 @@ fn export_environment(state: &State) {
     // Where X11 applications started by those services find the X server.
     if let Some(number) = state.xdisplay {
         variables.push(format!("DISPLAY={}", xwayland::display_name(number)));
+        if let Some(scale) = xwayland::steam_scale(state.x11_scale) {
+            variables.push(format!("{}={scale}", xwayland::STEAM_SCALE_VAR));
+        }
     }
     let result = std::process::Command::new("dbus-update-activation-environment")
         .arg("--systemd")
@@ -414,8 +438,9 @@ fn init_nested(
     simulated: Simulated,
     fullscreen: bool,
     ignore_input: bool,
+    scale: Scale,
 ) -> anyhow::Result<(Backend, Vec<(shell::ScreenInfo, smithay::output::Output)>)> {
-    let (winit, events) = backend::winit::init(simulated, fullscreen)?;
+    let (winit, events) = backend::winit::init(simulated, fullscreen, scale)?;
     let screens = winit.screens();
 
     handle

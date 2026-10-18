@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use coquille_model::{Point as ModelPoint, Rect};
+use coquille_model::{Point as ModelPoint, Rect, Scale};
 use smithay::backend::renderer::{
     element::{
         Element, Kind,
@@ -12,7 +12,7 @@ use smithay::backend::renderer::{
             WaylandSurfaceRenderElement, WaylandSurfaceTexture, render_elements_from_surface_tree,
         },
     },
-    gles::{GlesPixelProgram, GlesRenderer, Uniform, element::PixelShaderElement},
+    gles::{GlesError, GlesPixelProgram, GlesRenderer, Uniform, element::PixelShaderElement},
 };
 use smithay::desktop::PopupManager;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -22,7 +22,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use tracing::warn;
 
 use super::clipped::ClippedSurface;
-use super::glass::{GlassCache, GlassElement, Mask};
+use super::glass::{Blur, GlassCache, GlassElement, Mask};
 use super::per_view::PerView;
 use super::shaders::Shaders;
 use super::shadow::{Shadow, ShadowCache};
@@ -32,8 +32,6 @@ use crate::panels::Panel;
 use crate::shell::Shell;
 use crate::theme::{Rgba, Theme};
 
-/// The compositor draws at scale 1 for now.
-const SCALE: f64 = 1.0;
 /// How far from a view the pointer may be and still show on it: more than
 /// any pointer image is large.
 const CURSOR_REACH: i32 = 256;
@@ -64,22 +62,27 @@ pub struct Shape {
 /// Keeps a shape's element between frames, so that an unchanged shape
 /// causes no damage.
 #[derive(Default)]
-pub struct ShapeCache(Option<(Shape, PixelShaderElement)>);
+pub struct ShapeCache(Option<((Shape, f64), PixelShaderElement)>);
 
 impl ShapeCache {
-    fn element(&mut self, program: &GlesPixelProgram, shape: Shape) -> PixelShaderElement {
+    fn element(
+        &mut self,
+        program: &GlesPixelProgram,
+        shape: Shape,
+        scale: f64,
+    ) -> PixelShaderElement {
         if let Some((cached, element)) = &self.0 {
-            if *cached == shape {
+            if *cached == (shape, scale) {
                 return element.clone();
             }
         }
-        let element = shape_element(program, shape);
-        self.0 = Some((shape, element.clone()));
+        let element = shape_element(program, shape, scale);
+        self.0 = Some(((shape, scale), element.clone()));
         element
     }
 }
 
-fn shape_element(program: &GlesPixelProgram, shape: Shape) -> PixelShaderElement {
+fn shape_element(program: &GlesPixelProgram, shape: Shape, scale: f64) -> PixelShaderElement {
     let (outline, area) = (shape.outline, shape.area);
     PixelShaderElement::new(
         program.clone(),
@@ -95,6 +98,7 @@ fn shape_element(program: &GlesPixelProgram, shape: Shape) -> PixelShaderElement
             Uniform::new("color", shape.color.premultiplied()),
             Uniform::new("radius", shape.radii.map(|radius| radius as f32)),
             Uniform::new("border", shape.border as f32),
+            Uniform::new("pixel", (1.0 / scale) as f32),
         ],
         Kind::Unspecified,
     )
@@ -124,10 +128,12 @@ pub enum Cursor {
         surface: WlSurface,
         location: Point<i32, Logical>,
     },
-    /// An image from the cursor theme.
+    /// An image from the cursor theme, of `pixels` drawn over `size`.
     Image {
         buffer: MemoryRenderBuffer,
-        location: Point<i32, Logical>,
+        location: Point<f64, Logical>,
+        pixels: Size<i32, Logical>,
+        size: Size<i32, Logical>,
     },
 }
 
@@ -136,6 +142,8 @@ pub struct Layers<'a> {
     /// The part of the global space the frame shows: one screen, or all of
     /// them nested.
     pub view: Rect,
+    /// How many pixels of the frame a logical pixel of the view takes.
+    pub scale: f64,
     /// Shell hints above the windows (drop zones), in the global space.
     pub overlay: &'a [Shape],
     /// A panel of the shell above everything but the cursor (the placement
@@ -162,8 +170,56 @@ pub fn rectangle(rect: Rect) -> Rectangle<i32, Logical> {
     Rectangle::new((rect.x, rect.y).into(), (rect.w, rect.h).into())
 }
 
-fn physical(point: Point<i32, Logical>) -> Point<i32, Physical> {
-    point.to_physical_precise_round(SCALE)
+fn physical(point: Point<i32, Logical>, scale: f64) -> Point<i32, Physical> {
+    point.to_physical_precise_round(scale)
+}
+
+/// Where in the frame a logical rectangle of the view lands.
+fn physical_rect(rect: Rect, scale: f64) -> Rectangle<i32, Physical> {
+    rectangle(rect).to_physical_precise_round(scale)
+}
+
+/// An image the compositor painted for a screen of scale `at`, with as many
+/// pixels as `rect` takes there: shown over `rect`, in a view of `scale`.
+fn painted(
+    renderer: &mut GlesRenderer,
+    buffer: &MemoryRenderBuffer,
+    rect: Rect,
+    scale: f64,
+    at: Scale,
+    kind: Kind,
+) -> Result<MemoryRenderBufferRenderElement<GlesRenderer>, GlesError> {
+    let pixels = at.physical(rect.size());
+    image(
+        renderer,
+        buffer,
+        physical((rect.x, rect.y).into(), scale).to_f64(),
+        (pixels.w, pixels.h).into(),
+        (rect.w, rect.h).into(),
+        kind,
+    )
+}
+
+/// An image of `pixels` shown over `size`, logical, at `location`.
+fn image(
+    renderer: &mut GlesRenderer,
+    buffer: &MemoryRenderBuffer,
+    location: Point<f64, Physical>,
+    pixels: Size<i32, Logical>,
+    size: Size<i32, Logical>,
+    kind: Kind,
+) -> Result<MemoryRenderBufferRenderElement<GlesRenderer>, GlesError> {
+    // The buffer has scale 1: its source, in logical units, is its pixels.
+    let src = Rectangle::from_size(pixels.to_f64());
+    MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        location,
+        buffer,
+        None,
+        Some(src),
+        Some(size),
+        kind,
+    )
 }
 
 fn overlaps(a: Rect, b: Rect) -> bool {
@@ -180,6 +236,7 @@ pub type OverlayShapes = HashMap<(Rect, i32), PerView<ShapeCache>>;
 
 /// The glass under a client surface, shaped by its alpha, when it has a
 /// texture.
+#[allow(clippy::too_many_arguments)]
 fn alpha_glass(
     element: &WaylandSurfaceRenderElement<GlesRenderer>,
     cache: &mut GlassCache,
@@ -188,6 +245,7 @@ fn alpha_glass(
     output_size: Size<i32, Physical>,
     shape: Rectangle<i32, Physical>,
     radii: [f32; 4],
+    scale: f64,
 ) -> Option<SceneElement> {
     let WaylandSurfaceTexture::Texture(texture) = element.texture() else {
         return None;
@@ -195,7 +253,7 @@ fn alpha_glass(
     let mask = Mask::Alpha {
         texture: texture.clone(),
         src: element.src(),
-        dst: element.geometry(SCALE.into()),
+        dst: element.geometry(scale.into()),
         transform: element.transform(),
         commit: element.current_commit(),
         radii,
@@ -205,7 +263,7 @@ fn alpha_glass(
         shape,
         output_size,
         mask,
-        glass.strength,
+        Blur::new(glass.strength, scale),
     )))
 }
 
@@ -218,6 +276,7 @@ fn push_with_glass(
     shaders: &Shaders,
     glass: &GlassConfig,
     output_size: Size<i32, Physical>,
+    scale: f64,
 ) {
     let Some((surface, caches)) = glass_of else {
         elements.extend(rendered.into_iter().map(SceneElement::Surface));
@@ -227,7 +286,7 @@ fn push_with_glass(
         // One cache per element of the tree: two elements sharing an Id
         // would be captured again at every frame.
         let cache = caches.entry((surface.clone(), index)).or_default();
-        let shape = element.geometry(SCALE.into());
+        let shape = element.geometry(scale.into());
         let under = alpha_glass(
             &element,
             cache,
@@ -236,6 +295,7 @@ fn push_with_glass(
             output_size,
             shape,
             [0.0; 4],
+            scale,
         );
         elements.push(SceneElement::Surface(element));
         elements.extend(under);
@@ -254,6 +314,7 @@ fn panel_elements(
     panels: &[Panel],
     layers: &[Layer],
     view: Rect,
+    scale: f64,
 ) -> Vec<SceneElement> {
     let to_view = Point::<i32, Logical>::from((-view.x, -view.y));
     let mut elements = Vec::new();
@@ -270,13 +331,13 @@ fn panel_elements(
 
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
             let popup_surface = popup.wl_surface();
-            let location = physical(origin + offset - popup.geometry().loc);
+            let location = physical(origin + offset - popup.geometry().loc, scale);
             let rendered =
                 render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<GlesRenderer>>(
                     renderer,
                     popup_surface,
                     location,
-                    SCALE,
+                    scale,
                     1.0,
                     Kind::Unspecified,
                 );
@@ -287,6 +348,7 @@ fn panel_elements(
                 shaders,
                 glass,
                 output_size,
+                scale,
             );
         }
 
@@ -294,8 +356,8 @@ fn panel_elements(
             render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<GlesRenderer>>(
                 renderer,
                 surface,
-                physical(origin),
-                SCALE,
+                physical(origin, scale),
+                scale,
                 1.0,
                 Kind::Unspecified,
             );
@@ -306,6 +368,7 @@ fn panel_elements(
             shaders,
             glass,
             output_size,
+            scale,
         );
     }
     elements
@@ -324,6 +387,7 @@ pub fn build(
 ) -> Vec<SceneElement> {
     let Layers {
         view,
+        scale,
         overlay,
         panel,
         panels,
@@ -337,7 +401,7 @@ pub fn build(
         bar_shadow,
         overlay_shapes,
     } = layers;
-    let output_size = Size::from((view.w, view.h));
+    let output_size = physical_rect(Rect::from_size(view.size()), scale).size;
 
     if !freeze.is_empty() {
         let shift = ModelPoint::new(-view.x, -view.y);
@@ -348,39 +412,10 @@ pub fn build(
             view.w + 2 * CURSOR_REACH,
             view.h + 2 * CURSOR_REACH,
         );
-        let cursor = cursor.filter(|cursor| {
-            let (Cursor::Surface { location, .. } | Cursor::Image { location, .. }) = cursor;
-            near_view.contains(ModelPoint::new(location.x, location.y))
-        });
+        let cursor = cursor.filter(|cursor| near_view.contains(cursor.point()));
 
         let mut elements = Vec::new();
-        match cursor {
-            Some(Cursor::Surface { surface, location }) => {
-                elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
-                    renderer,
-                    &surface,
-                    physical(location + to_view),
-                    SCALE,
-                    1.0,
-                    Kind::Cursor,
-                ));
-            }
-            Some(Cursor::Image { buffer, location }) => {
-                match MemoryRenderBufferRenderElement::from_buffer(
-                    renderer,
-                    physical(location + to_view).to_f64(),
-                    &buffer,
-                    None,
-                    None,
-                    None,
-                    Kind::Cursor,
-                ) {
-                    Ok(element) => elements.push(SceneElement::Texture(element)),
-                    Err(error) => warn!(?error, "cannot upload the cursor"),
-                }
-            }
-            None => {}
-        }
+        push_cursor(&mut elements, renderer, cursor, to_view, scale);
 
         for shape in overlay {
             let shape = Shape {
@@ -389,23 +424,19 @@ pub fn build(
                 ..*shape
             };
             if overlaps(shape.area, Rect::new(0, 0, view.w, view.h)) {
-                elements.push(SceneElement::Shape(shape_element(&shaders.rounded, shape)));
+                elements.push(SceneElement::Shape(shape_element(
+                    &shaders.rounded,
+                    shape,
+                    scale,
+                )));
             }
         }
 
         for (buffer, rect) in freeze {
             if overlaps(*rect, view) {
-                let corner = ModelPoint::new(rect.x + shift.x, rect.y + shift.y);
-                let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
-                match MemoryRenderBufferRenderElement::from_buffer(
-                    renderer,
-                    location,
-                    buffer,
-                    None,
-                    None,
-                    None,
-                    Kind::Unspecified,
-                ) {
+                let place = rect.translated(shift);
+                let at = Scale::new(scale);
+                match painted(renderer, buffer, place, scale, at, Kind::Unspecified) {
                     Ok(element) => elements.push(SceneElement::Texture(element)),
                     Err(error) => warn!(?error, "cannot upload the frozen screenshot buffer"),
                 }
@@ -442,12 +473,12 @@ pub fn build(
         let origin: Point<i32, Logical> = (client.x, client.y).into();
 
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
-            let location = physical(origin + offset - popup.geometry().loc);
+            let location = physical(origin + offset - popup.geometry().loc, scale);
             popups.extend(render_elements_from_surface_tree::<_, SceneElement>(
                 renderer,
                 popup.wl_surface(),
                 location,
-                SCALE,
+                scale,
                 1.0,
                 Kind::Unspecified,
             ));
@@ -472,13 +503,11 @@ pub fn build(
                 radii: [radius + ring; 4],
                 border: ring,
             };
-            windows.push(SceneElement::Shape(
-                managed
-                    .chrome
-                    .ring
-                    .get(view)
-                    .element(&shaders.rounded, shape),
-            ));
+            windows.push(SceneElement::Shape(managed.chrome.ring.get(view).element(
+                &shaders.rounded,
+                shape,
+                scale,
+            )));
         }
 
         let bar = managed.titlebar().map(|bar| bar.translated(shift));
@@ -487,28 +516,25 @@ pub fn build(
         // content next to the bar.
         let mut titlebar_glass = None;
         if let (Some(bar), Some(buffer)) = (bar, &managed.chrome.titlebar) {
-            let location = Point::<i32, Physical>::from((bar.x, bar.y)).to_f64();
-            match MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                location,
-                buffer,
-                None,
-                None,
-                None,
-                Kind::Unspecified,
-            ) {
+            let at = managed
+                .chrome
+                .spec
+                .as_ref()
+                .map_or(Scale::ONE, |spec| spec.scale);
+            match painted(renderer, buffer, bar, scale, at, Kind::Unspecified) {
                 Ok(element) => {
                     windows.push(SceneElement::Texture(element));
                     if glass.blur {
-                        let bar_rect = rectangle(bar).to_physical_precise_round(SCALE);
-                        let radii = [radius as f32, radius as f32, 0.0, 0.0];
+                        let bar_rect = physical_rect(bar, scale);
+                        let r = (f64::from(radius) * scale) as f32;
+                        let radii = [r, r, 0.0, 0.0];
                         titlebar_glass = Some(SceneElement::Glass(
                             managed.chrome.titlebar_glass.get(view).element(
                                 shaders,
                                 bar_rect,
                                 output_size,
                                 Mask::Rounded { radii },
-                                glass.strength,
+                                Blur::new(glass.strength, scale),
                             ),
                         ));
                     }
@@ -517,18 +543,22 @@ pub fn build(
             }
         }
 
-        let location = physical(origin - managed.window.geometry().loc);
+        let location = physical(origin - managed.window.geometry().loc, scale);
         let surfaces = render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
             renderer,
             surface,
             location,
-            SCALE,
+            scale,
             1.0,
             Kind::Unspecified,
         );
         let is_settings = managed.app_id == "coquille-settings";
-        let client_rect = rectangle(client).to_physical_precise_round(SCALE);
-        let radii = [top as f32, top as f32, radius as f32, radius as f32];
+        let client_rect = physical_rect(client, scale);
+        let (top_px, radius_px) = (
+            (f64::from(top) * scale) as f32,
+            (f64::from(radius) * scale) as f32,
+        );
+        let radii = [top_px, top_px, radius_px, radius_px];
 
         let client_glass = if is_settings && glass.blur {
             surfaces.first().and_then(|element| {
@@ -540,6 +570,7 @@ pub fn build(
                     output_size,
                     client_rect,
                     radii,
+                    scale,
                 )
             })
         } else {
@@ -585,19 +616,17 @@ pub fn build(
                     .chrome
                     .beside
                     .get(view)
-                    .element(&shaders.rounded, shape),
+                    .element(&shaders.rounded, shape, scale),
             ));
         }
         if drawn_h < client.h {
             let area = Rect::new(client.x, client.y + drawn_h, client.w, client.h - drawn_h);
             let shape = Shape { area, ..background };
-            windows.push(SceneElement::Shape(
-                managed
-                    .chrome
-                    .below
-                    .get(view)
-                    .element(&shaders.rounded, shape),
-            ));
+            windows.push(SceneElement::Shape(managed.chrome.below.get(view).element(
+                &shaders.rounded,
+                shape,
+                scale,
+            )));
         }
 
         let has_x11_shadows = managed.window.x11_surface().is_some_and(|s| {
@@ -646,37 +675,8 @@ pub fn build(
         view.w + 2 * CURSOR_REACH,
         view.h + 2 * CURSOR_REACH,
     );
-    let cursor = cursor.filter(|cursor| {
-        let (Cursor::Surface { location, .. } | Cursor::Image { location, .. }) = cursor;
-        near_view.contains(ModelPoint::new(location.x, location.y))
-    });
-    match cursor {
-        Some(Cursor::Surface { surface, location }) => {
-            elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
-                renderer,
-                &surface,
-                physical(location + to_view),
-                SCALE,
-                1.0,
-                Kind::Cursor,
-            ));
-        }
-        Some(Cursor::Image { buffer, location }) => {
-            match MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                physical(location + to_view).to_f64(),
-                &buffer,
-                None,
-                None,
-                None,
-                Kind::Cursor,
-            ) {
-                Ok(element) => elements.push(SceneElement::Texture(element)),
-                Err(error) => warn!(?error, "cannot upload the cursor"),
-            }
-        }
-        None => {}
-    }
+    let cursor = cursor.filter(|cursor| near_view.contains(cursor.point()));
+    push_cursor(&mut elements, renderer, cursor, to_view, scale);
     elements.extend(panel_elements(
         renderer,
         shaders,
@@ -686,33 +686,25 @@ pub fn build(
         panels,
         &[Layer::Overlay],
         view,
+        scale,
     ));
     if let Some((buffer, place)) = panel.filter(|(_, place)| overlaps(*place, view)) {
-        let corner = ModelPoint::new(place.x + shift.x, place.y + shift.y);
-        let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
-        match MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            location,
-            buffer,
-            None,
-            None,
-            None,
-            Kind::Unspecified,
-        ) {
+        let place_rect = place.translated(shift);
+        let at = Scale::new(scale);
+        match painted(renderer, buffer, place_rect, scale, at, Kind::Unspecified) {
             Ok(element) => {
                 elements.push(SceneElement::Texture(element));
                 if glass.blur {
-                    let place_rect = Rect::new(corner.x, corner.y, place.w, place.h);
-                    let shape = rectangle(place_rect).to_physical_precise_round(SCALE);
+                    let shape = physical_rect(place_rect, scale);
+                    let radii = [(14.0 * scale) as f32; 4];
                     elements.push(SceneElement::Glass(bar_glass.get(view).element(
                         shaders,
                         shape,
                         output_size,
-                        Mask::Rounded { radii: [14.0; 4] },
-                        glass.strength,
+                        Mask::Rounded { radii },
+                        Blur::new(glass.strength, scale),
                     )));
                 }
-                let place_rect = Rect::new(corner.x, corner.y, place.w, place.h);
                 let shadow = Shadow {
                     shape: place_rect,
                     offset: ModelPoint::new(0, 4),
@@ -749,17 +741,21 @@ pub fn build(
                 .entry((global.outline, global.border))
                 .or_default()
                 .get(view);
-            elements.push(SceneElement::Shape(cache.element(&shaders.rounded, shape)));
+            elements.push(SceneElement::Shape(cache.element(
+                &shaders.rounded,
+                shape,
+                scale,
+            )));
             if shape.border == 0 && glass.blur {
                 let cache = drop_glass.entry(global.outline).or_default();
-                let rect = rectangle(shape.outline).to_physical_precise_round(SCALE);
-                let radii = shape.radii.map(|r| r as f32);
+                let rect = physical_rect(shape.outline, scale);
+                let radii = shape.radii.map(|r| (f64::from(r) * scale) as f32);
                 elements.push(SceneElement::Glass(cache.element(
                     shaders,
                     rect,
                     output_size,
                     Mask::Rounded { radii },
-                    glass.strength,
+                    Blur::new(glass.strength, scale),
                 )));
             }
         }
@@ -779,8 +775,8 @@ pub fn build(
         elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
             renderer,
             &surface,
-            physical(location),
-            SCALE,
+            physical(location, scale),
+            scale,
             1.0,
             Kind::Unspecified,
         ));
@@ -795,6 +791,7 @@ pub fn build(
         panels,
         &[Layer::Top],
         view,
+        scale,
     ));
     elements.extend(windows);
     // The capsules never cover a tidied window: under all of them is under
@@ -805,16 +802,8 @@ pub fn build(
             continue;
         };
         let corner = band.translated(shift);
-        let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
-        match MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            location,
-            buffer,
-            None,
-            None,
-            None,
-            Kind::Unspecified,
-        ) {
+        let at = group.painted_scale();
+        match painted(renderer, buffer, corner, scale, at, Kind::Unspecified) {
             Ok(element) => {
                 elements.push(SceneElement::Texture(element));
                 if glass.blur {
@@ -822,14 +811,14 @@ pub fn build(
                         .layout
                         .rect
                         .translated(ModelPoint::new(corner.x, corner.y));
-                    let shape = rectangle(box_rect).to_physical_precise_round(SCALE);
-                    let radius = box_rect.h as f32 / 2.0;
+                    let shape = physical_rect(box_rect, scale);
+                    let radius = (f64::from(box_rect.h) * scale / 2.0) as f32;
                     elements.push(SceneElement::Glass(group.glass.get(view).element(
                         shaders,
                         shape,
                         output_size,
                         Mask::Rounded { radii: [radius; 4] },
-                        glass.strength,
+                        Blur::new(glass.strength, scale),
                     )));
                 }
             }
@@ -846,18 +835,17 @@ pub fn build(
         panels,
         &under,
         view,
+        scale,
     ));
     for (buffer, rect) in wallpapers {
         if overlaps(*rect, view) {
-            let corner = ModelPoint::new(rect.x + shift.x, rect.y + shift.y);
-            let location = Point::<i32, Physical>::from((corner.x, corner.y)).to_f64();
-            match MemoryRenderBufferRenderElement::from_buffer(
+            let place = rect.translated(shift);
+            match painted(
                 renderer,
-                location,
                 buffer,
-                None,
-                None,
-                None,
+                place,
+                scale,
+                Scale::new(scale),
                 Kind::Unspecified,
             ) {
                 Ok(element) => elements.push(SceneElement::Texture(element)),
@@ -873,4 +861,51 @@ pub fn build(
         tracing::trace!(?view, glass_count, "built scene elements");
     }
     elements
+}
+
+impl Cursor {
+    /// Where the pointer image starts, in the global space.
+    fn point(&self) -> ModelPoint {
+        match self {
+            Cursor::Surface { location, .. } => ModelPoint::new(location.x, location.y),
+            Cursor::Image { location, .. } => {
+                ModelPoint::new(location.x.floor() as i32, location.y.floor() as i32)
+            }
+        }
+    }
+}
+
+/// The pointer image, `to_view` moving it from the global space to the view.
+fn push_cursor(
+    elements: &mut Vec<SceneElement>,
+    renderer: &mut GlesRenderer,
+    cursor: Option<Cursor>,
+    to_view: Point<i32, Logical>,
+    scale: f64,
+) {
+    match cursor {
+        Some(Cursor::Surface { surface, location }) => {
+            elements.extend(render_elements_from_surface_tree::<_, SceneElement>(
+                renderer,
+                &surface,
+                physical(location + to_view, scale),
+                scale,
+                1.0,
+                Kind::Cursor,
+            ));
+        }
+        Some(Cursor::Image {
+            buffer,
+            location,
+            pixels,
+            size,
+        }) => {
+            let location = (location + to_view.to_f64()).to_physical(scale);
+            match image(renderer, &buffer, location, pixels, size, Kind::Cursor) {
+                Ok(element) => elements.push(SceneElement::Texture(element)),
+                Err(error) => warn!(?error, "cannot upload the cursor"),
+            }
+        }
+        None => {}
+    }
 }

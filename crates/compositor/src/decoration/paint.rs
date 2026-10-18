@@ -1,7 +1,7 @@
 //! Painting title bars and capsules to pixels, with tiny-skia for shapes and
 //! cosmic-text for text.
 
-use coquille_model::{Rect, Size};
+use coquille_model::{Rect, Scale, Size};
 use cosmic_text::{
     Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics as TextMetrics, Shaping,
     SwashCache, Weight, Wrap,
@@ -45,6 +45,8 @@ pub struct TitlebarSpec {
     pub theme: ThemeKind,
     pub accent: Rgba,
     pub corner_radius: i32,
+    /// The scale of its screen: painted that many times larger.
+    pub scale: Scale,
 }
 
 /// Everything the look of a group of capsules depends on: repaint only when
@@ -64,6 +66,8 @@ pub struct GroupSpec {
     /// The box of the group of maximized windows in the same band, relative
     /// to it: this group keeps clear of it.
     pub avoid: Option<Rect>,
+    /// The scale of its screen: painted that many times larger.
+    pub scale: Scale,
 }
 
 /// One window of a stack.
@@ -89,8 +93,8 @@ impl CapsuleSpec {
     }
 }
 
-/// A group painted to pixels, as large as its band, with where its capsules
-/// ended up.
+/// A group painted to pixels, as large as its band (times the scale), with
+/// where its capsules ended up.
 pub struct PaintedGroup {
     pub pixmap: Pixmap,
     pub layout: GroupLayout,
@@ -104,11 +108,15 @@ pub struct BarSpec {
     pub hovered: Option<usize>,
     pub theme: ThemeKind,
     pub accent: Rgba,
+    /// The scale of its screen: painted that many times larger.
+    pub scale: Scale,
 }
 
 /// A bar painted to pixels, with where its buttons ended up.
 pub struct PaintedBar {
     pub pixmap: Pixmap,
+    /// Its logical size; the pixmap is that times the scale.
+    pub size: Size,
     /// Relative to the bar's top-left corner, in the order of the labels.
     pub buttons: Vec<Rect>,
 }
@@ -145,17 +153,18 @@ impl Painter {
         let theme = Theme::new(spec.theme).with_accent(spec.accent);
         self.icons.follow(spec.theme, spec.accent);
         let (width, height) = (spec.size.w as f32, spec.size.h as f32);
-        let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
+        let s = spec.scale.get() as f32;
+        let mut pixmap = canvas(spec.size, spec.scale)?;
         let layout = TitlebarLayout::new(spec.size, spec.buttons);
 
         let radius = spec.corner_radius as f32;
         let background = rounded_rect(0.0, 0.0, width, height, [radius, radius, 0.0, 0.0])?;
-        fill(&mut pixmap, &background, theme.glass);
+        fill(&mut pixmap, &background, theme.glass, s);
         if let Some(rim) = titlebar_rim(width, height, radius) {
-            outline(&mut pixmap, &rim, theme.rim, 1.0);
+            outline(&mut pixmap, &rim, theme.rim, 1.0, s);
         }
         if let Some(line) = rounded_rect(0.0, height - 1.0, width, 1.0, [0.0; 4]) {
-            fill(&mut pixmap, &line, theme.separator);
+            fill(&mut pixmap, &line, theme.separator, s);
         }
 
         let place = layout.icon;
@@ -166,8 +175,9 @@ impl Painter {
             place,
             BADGE_RADIUS,
             1.0,
+            s,
         );
-        self.texts(&mut pixmap, spec, &theme, layout.text);
+        self.texts(&mut pixmap, spec, &theme, layout.text, s);
 
         for (button, cell) in &layout.buttons {
             let hovered = spec.hovered == Some(*button);
@@ -184,13 +194,13 @@ impl Painter {
                 [7.0; 4],
             );
             if let (Some(highlight), Some(pill)) = (highlight, pill) {
-                fill(&mut pixmap, &pill, highlight);
+                fill(&mut pixmap, &pill, highlight, s);
             }
             // White on the colored highlight, the text color otherwise.
             let on_color = hovered && *button == TitlebarButton::Close;
             let color = if on_color { Rgba::WHITE } else { theme.text };
             if let Some(icon) = button_icon(*button, *cell) {
-                stroke(&mut pixmap, &icon, color);
+                stroke(&mut pixmap, &icon, color, s);
             }
         }
         Some(pixmap)
@@ -198,6 +208,7 @@ impl Painter {
 
     /// Draws what stands for an application in `place`: its icon, or a
     /// rounded square of its color when it has none.
+    #[allow(clippy::too_many_arguments)]
     fn app_mark(
         &mut self,
         pixmap: &mut Pixmap,
@@ -206,16 +217,19 @@ impl Painter {
         place: Rect,
         radius: f32,
         opacity: f32,
+        s: f32,
     ) {
-        let size = u32::try_from(place.w.min(place.h)).unwrap_or(0);
+        // Icons are drawn at the size of their pixels, never stretched.
+        let size = (place.w.min(place.h) as f32 * s).round();
+        let size = u32::try_from(size as i64).unwrap_or(0);
         if let Some(icon) = icon.and_then(|name| self.icons.get(name, size)) {
             let paint = PixmapPaint {
                 opacity,
                 ..PixmapPaint::default()
             };
             pixmap.draw_pixmap(
-                place.x,
-                place.y,
+                (place.x as f32 * s).round() as i32,
+                (place.y as f32 * s).round() as i32,
                 icon.as_ref(),
                 &paint,
                 Transform::identity(),
@@ -230,7 +244,7 @@ impl Painter {
             place.h as f32,
         );
         if let Some(square) = rounded_rect(x, y, w, h, [radius; 4]) {
-            fill(pixmap, &square, Rgba::from_array(badge));
+            fill(pixmap, &square, Rgba::from_array(badge), s);
         }
     }
 
@@ -242,7 +256,7 @@ impl Painter {
         let label_widths: Vec<i32> = spec
             .capsules
             .iter()
-            .map(|capsule| self.shaped(&capsule.label, capsule.weight()).1.ceil() as i32)
+            .map(|capsule| self.shaped(&capsule.label, capsule.weight(), 1.0).1.ceil() as i32)
             .collect();
         let layout = match spec.avoid {
             Some(avoid) => GroupLayout::beside(spec.size, &label_widths, avoid),
@@ -251,13 +265,14 @@ impl Painter {
         if layout.capsules.is_empty() {
             return None;
         }
-        let mut pixmap = Pixmap::new(spec.size.w.try_into().ok()?, spec.size.h.try_into().ok()?)?;
+        let s = spec.scale.get() as f32;
+        let mut pixmap = canvas(spec.size, spec.scale)?;
 
         if let Some(frame_path) = pill(layout.rect, 0.0) {
-            fill(&mut pixmap, &frame_path, theme.glass);
+            fill(&mut pixmap, &frame_path, theme.glass, s);
         }
         if let Some(rim_path) = pill(layout.rect, 0.5) {
-            outline(&mut pixmap, &rim_path, theme.rim, 1.0);
+            outline(&mut pixmap, &rim_path, theme.rim, 1.0, s);
         }
         for (index, (capsule, cell)) in spec.capsules.iter().zip(&layout.capsules).enumerate() {
             let hover = spec.hovered.filter(|(under, _)| *under == index);
@@ -268,6 +283,7 @@ impl Painter {
                 hover.map(|(_, button)| button),
                 spec.maximized,
                 &theme,
+                s,
             );
         }
         Some(PaintedGroup { pixmap, layout })
@@ -275,6 +291,7 @@ impl Painter {
 
     /// Draws one capsule: its icon and its name, on a pill when its slot
     /// shows it, with its buttons when it is shown or under the pointer.
+    #[allow(clippy::too_many_arguments)]
     fn capsule(
         &mut self,
         pixmap: &mut Pixmap,
@@ -283,6 +300,7 @@ impl Painter {
         hover: Option<Option<CapsuleButton>>,
         maximized: bool,
         theme: &Theme,
+        s: f32,
     ) {
         // The capsule is under the pointer, on this button of it if any.
         let (hovered, hovered_button) = (hover.is_some(), hover.flatten());
@@ -292,12 +310,12 @@ impl Painter {
             (false, false) => None,
         };
         if let (Some(background), Some(path)) = (background, pill(cell.rect, 0.0)) {
-            fill(pixmap, &path, background);
+            fill(pixmap, &path, background, s);
         }
         if capsule.shown && capsule.focused {
             // Inside the capsule, so that the box keeps its margin.
             if let Some(path) = pill(cell.rect, RING_WIDTH / 2.0) {
-                outline(pixmap, &path, theme.accent, RING_WIDTH);
+                outline(pixmap, &path, theme.accent, RING_WIDTH, s);
             }
         }
 
@@ -310,6 +328,7 @@ impl Painter {
             cell.icon,
             4.0,
             opacity,
+            s,
         );
 
         let room = cell.label;
@@ -326,6 +345,7 @@ impl Painter {
             room,
             capsule.weight(),
             color,
+            s,
         );
 
         if !(capsule.shown || hovered) {
@@ -339,7 +359,7 @@ impl Painter {
                 (_, false) => None,
             };
             if let (Some(highlight), Some(path)) = (highlight, pill(*place, 0.0)) {
-                fill(pixmap, &path, highlight);
+                fill(pixmap, &path, highlight, s);
             }
             // White on the colored highlight, the text color otherwise.
             let on_color = under && *button == CapsuleButton::Close;
@@ -351,7 +371,7 @@ impl Painter {
                 CapsuleButton::Close => Glyph::Cross,
             };
             if let Some(icon) = line_icon(glyph, *place, 3.5) {
-                stroke(pixmap, &icon, color);
+                stroke(pixmap, &icon, color, s);
             }
         }
     }
@@ -370,18 +390,22 @@ impl Painter {
         let widths: Vec<i32> = spec
             .labels
             .iter()
-            .map(|label| self.shaped(label, Weight::MEDIUM).1.ceil() as i32 + 2 * BUTTON_PADDING)
+            .map(|label| {
+                self.shaped(label, Weight::MEDIUM, 1.0).1.ceil() as i32 + 2 * BUTTON_PADDING
+            })
             .collect();
         let gaps = GAP * (widths.len() as i32 - 1);
         let width = 2 * PADDING + widths.iter().sum::<i32>() + gaps;
-        let mut pixmap = Pixmap::new(width.try_into().ok()?, HEIGHT as u32)?;
+        let size = Size::new(width, HEIGHT);
+        let s = spec.scale.get() as f32;
+        let mut pixmap = canvas(size, spec.scale)?;
 
         let (w, h) = (width as f32, HEIGHT as f32);
         if let Some(bg) = rounded_rect(0.0, 0.0, w, h, [14.0; 4]) {
-            fill(&mut pixmap, &bg, theme.glass_strong);
+            fill(&mut pixmap, &bg, theme.glass_strong, s);
         }
         if let Some(rim) = rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, [13.5; 4]) {
-            outline(&mut pixmap, &rim, theme.rim, 1.0);
+            outline(&mut pixmap, &rim, theme.rim, 1.0, s);
         }
 
         let mut buttons = Vec::new();
@@ -402,18 +426,29 @@ impl Painter {
                 [8.0; 4],
             );
             if let (Some(background), Some(pill)) = (background, pill) {
-                fill(&mut pixmap, &pill, background);
+                fill(&mut pixmap, &pill, background, s);
             }
             let left = (x + BUTTON_PADDING) as f32;
             let room = (width - BUTTON_PADDING) as f32;
-            self.text(&mut pixmap, label, left, room, cell, Weight::MEDIUM, ink);
+            self.text(&mut pixmap, label, left, room, cell, Weight::MEDIUM, ink, s);
             buttons.push(cell);
             x += width + GAP;
         }
-        Some(PaintedBar { pixmap, buttons })
+        Some(PaintedBar {
+            pixmap,
+            size,
+            buttons,
+        })
     }
 
-    fn texts(&mut self, pixmap: &mut Pixmap, spec: &TitlebarSpec, theme: &Theme, area: Rect) {
+    fn texts(
+        &mut self,
+        pixmap: &mut Pixmap,
+        spec: &TitlebarSpec,
+        theme: &Theme,
+        area: Rect,
+        s: f32,
+    ) {
         let title_color = if spec.focused {
             theme.text
         } else {
@@ -429,6 +464,7 @@ impl Painter {
             area,
             Weight::SEMIBOLD,
             title_color,
+            s,
         );
 
         let rest = room - used - SUBTITLE_GAP;
@@ -442,12 +478,13 @@ impl Painter {
                 area,
                 Weight::NORMAL,
                 theme.text_muted,
+                s,
             );
         }
     }
 
-    /// Lays out one line of text and measures it.
-    fn shaped(&mut self, text: &str, weight: Weight) -> (Buffer, f32) {
+    /// Lays out one line of text, `s` times larger, and measures it.
+    fn shaped(&mut self, text: &str, weight: Weight, s: f32) -> (Buffer, f32) {
         let family = if self.has_ui_font {
             Family::Name(UI_FONT)
         } else {
@@ -455,9 +492,10 @@ impl Painter {
         };
         let attrs = Attrs::new().family(family).weight(weight);
 
-        let mut buffer = Buffer::new(&mut self.fonts, TextMetrics::new(FONT_SIZE, LINE_HEIGHT));
+        let metrics = TextMetrics::new(FONT_SIZE * s, LINE_HEIGHT * s);
+        let mut buffer = Buffer::new(&mut self.fonts, metrics);
         buffer.set_wrap(Wrap::None);
-        buffer.set_size(None, Some(LINE_HEIGHT));
+        buffer.set_size(None, Some(LINE_HEIGHT * s));
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.fonts, false);
         let width = buffer
@@ -467,7 +505,8 @@ impl Painter {
         (buffer, width)
     }
 
-    /// Draws one line of text, cut at `room` pixels. Returns the width used.
+    /// Draws one line of text, cut at `room` pixels (logical, like every
+    /// place given), on a pixmap `s` times larger. Returns the width used.
     #[allow(clippy::too_many_arguments)]
     fn text(
         &mut self,
@@ -478,15 +517,18 @@ impl Painter {
         area: Rect,
         weight: Weight,
         color: Rgba,
+        s: f32,
     ) -> f32 {
         if text.is_empty() || room <= 0.0 {
             return 0.0;
         }
-        let (mut buffer, width) = self.shaped(text, weight);
+        let (mut buffer, width) = self.shaped(text, weight, s);
+        let width = width / s;
 
-        let origin_x = left.round() as i32;
-        let origin_y = area.y + ((area.h as f32 - LINE_HEIGHT) / 2.0).round() as i32;
-        let clip_right = (left + room).floor() as i32;
+        let origin_x = (left * s).round() as i32;
+        let top = area.y as f32 + ((area.h as f32 - LINE_HEIGHT) / 2.0).round();
+        let origin_y = (top * s).round() as i32;
+        let clip_right = ((left + room) * s).floor() as i32;
         let pixmap_width = pixmap.width() as i32;
         let pixmap_height = pixmap.height() as i32;
         let ink = TextColor::rgba(color.r, color.g, color.b, color.a);
@@ -540,28 +582,42 @@ fn paint(color: Rgba) -> Paint<'static> {
     paint
 }
 
-fn fill(pixmap: &mut Pixmap, path: &Path, color: Rgba) {
+/// A transparent pixmap for something of logical `size`: as many pixels as
+/// its screen shows it with. Everything is then drawn in logical units,
+/// `s` times larger (`fill`, `stroke`, `outline`, `text`).
+fn canvas(size: Size, scale: Scale) -> Option<Pixmap> {
+    let pixels = scale.physical(size);
+    Pixmap::new(pixels.w.try_into().ok()?, pixels.h.try_into().ok()?)
+}
+
+fn fill(pixmap: &mut Pixmap, path: &Path, color: Rgba, s: f32) {
     pixmap.fill_path(
         path,
         &paint(color),
         FillRule::Winding,
-        Transform::identity(),
+        Transform::from_scale(s, s),
         None,
     );
 }
 
-fn stroke(pixmap: &mut Pixmap, path: &Path, color: Rgba) {
-    outline(pixmap, path, color, ICON_STROKE);
+fn stroke(pixmap: &mut Pixmap, path: &Path, color: Rgba, s: f32) {
+    outline(pixmap, path, color, ICON_STROKE, s);
 }
 
-fn outline(pixmap: &mut Pixmap, path: &Path, color: Rgba, width: f32) {
+fn outline(pixmap: &mut Pixmap, path: &Path, color: Rgba, width: f32, s: f32) {
     let stroke = Stroke {
         width,
         line_cap: LineCap::Round,
         line_join: LineJoin::Round,
         ..Stroke::default()
     };
-    pixmap.stroke_path(path, &paint(color), &stroke, Transform::identity(), None);
+    pixmap.stroke_path(
+        path,
+        &paint(color),
+        &stroke,
+        Transform::from_scale(s, s),
+        None,
+    );
 }
 
 /// A rectangle with fully rounded ends, drawn `inset` pixels inside `rect`.
@@ -717,7 +773,7 @@ mod tests {
         let path = rounded_rect(0.0, 0.0, 100.0, 38.0, [12.0, 12.0, 0.0, 0.0]).unwrap();
         let mut pixmap = Pixmap::new(100, 38).unwrap();
 
-        fill(&mut pixmap, &path, Rgba::WHITE);
+        fill(&mut pixmap, &path, Rgba::WHITE, 1.0);
 
         assert_eq!(pixel(&pixmap, 0, 0), [0, 0, 0, 0]);
         assert_eq!(pixel(&pixmap, 99, 0), [0, 0, 0, 0]);
@@ -781,6 +837,7 @@ mod tests {
             hovered: Some(1),
             theme: ThemeKind::Light,
             accent: Theme::new(ThemeKind::Light).accent,
+            scale: Scale::ONE,
         };
 
         let bar = Painter::new().placement_bar(&spec).unwrap();
@@ -809,6 +866,7 @@ mod tests {
             hovered: None,
             theme: ThemeKind::Dark,
             accent: Theme::new(ThemeKind::Dark).accent,
+            scale: Scale::ONE,
         };
 
         assert!(Painter::new().placement_bar(&spec).is_none());
@@ -841,6 +899,7 @@ mod tests {
             accent: Theme::new(ThemeKind::Light).accent,
             maximized: false,
             avoid: None,
+            scale: Scale::ONE,
         }
     }
 
@@ -878,6 +937,47 @@ mod tests {
         let cell = painted.layout.capsules[0].rect;
         let top = pixel(&painted.pixmap, (cell.x + cell.w / 2) as u32, cell.y as u32);
         assert_eq!(&top[..3], &[0x5b, 0x63, 0xe6]);
+    }
+
+    #[test]
+    fn at_twice_the_scale_a_group_has_twice_the_pixels_and_the_same_layout() {
+        let spec = group(vec![capsule("kitty", true), capsule("Discord", false)]);
+        let doubled = GroupSpec {
+            scale: Scale::new(2.0),
+            ..spec.clone()
+        };
+        let mut painter = Painter::new();
+
+        let single = painter.capsule_group(&spec).unwrap();
+        let double = painter.capsule_group(&doubled).unwrap();
+
+        assert_eq!((double.pixmap.width(), double.pixmap.height()), (1200, 64));
+        assert_eq!(double.layout, single.layout);
+        let middle = single.layout.rect.x + single.layout.rect.w / 2;
+        assert_ne!(pixel(&double.pixmap, middle as u32 * 2, 2)[3], 0);
+        assert_eq!(pixel(&double.pixmap, 4, 32), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn the_bar_keeps_its_logical_size_at_any_scale() {
+        let spec = |scale| BarSpec {
+            labels: vec!["Laisser flottante".into(), "Ranger ici".into()],
+            hovered: None,
+            theme: ThemeKind::Light,
+            accent: Theme::new(ThemeKind::Light).accent,
+            scale,
+        };
+        let mut painter = Painter::new();
+
+        let single = painter.placement_bar(&spec(Scale::ONE)).unwrap();
+        let larger = painter.placement_bar(&spec(Scale::new(1.5))).unwrap();
+
+        assert_eq!(larger.size, single.size);
+        assert_eq!(larger.buttons, single.buttons);
+        assert_eq!(
+            larger.pixmap.width() as i32,
+            (single.size.w as f64 * 1.5).round() as i32
+        );
     }
 
     #[test]

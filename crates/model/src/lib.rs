@@ -17,6 +17,7 @@ pub mod memory;
 pub mod metrics;
 pub mod output;
 pub mod proportions;
+pub mod scale;
 pub mod screen;
 pub mod stack;
 
@@ -30,5 +31,6 @@ pub use memory::{AppMemory, RememberedPlace};
 pub use metrics::Metrics;
 pub use output::{OutputInfo, OutputRole};
 pub use proportions::Proportions;
+pub use scale::Scale;
 pub use screen::{FloatingWindow, Screen};
 pub use stack::TabStack;

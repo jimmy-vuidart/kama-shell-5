@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use coquille_model::{OutputId, Rect, Size as ModelSize};
+use coquille_model::{OutputId, Rect, Scale, Size as ModelSize};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::VrrSupport;
@@ -24,7 +24,7 @@ use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{all_gpus, primary_gpu};
-use smithay::output::{Mode as OutputMode, Output, PhysicalProperties};
+use smithay::output::{Mode as OutputMode, Output, PhysicalProperties, Scale as OutputScale};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::drm::Device as _;
@@ -41,7 +41,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use tracing::{debug, error, info, warn};
 
 use super::Backend;
-use crate::config::{GameConfig, MouseConfig};
+use crate::config::{GameConfig, MouseConfig, ScaleConfig};
 use crate::game::{Boost, FrameNote};
 use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
 use crate::render::scene::{self, Layers, SceneElement};
@@ -163,7 +163,8 @@ fn prepare(fd: OwnedFd, reset: bool) -> anyhow::Result<(Gpu, DrmDeviceNotifier)>
 }
 
 /// The role and place of each screen found; `None` for a screen left off.
-fn plan(found: &[Found], roles: &RoleConfig) -> Vec<Option<ScreenInfo>> {
+/// Roles go by the shape of the screens, places by their logical size.
+fn plan(found: &[Found], roles: &RoleConfig, scales: &ScaleConfig) -> Vec<Option<ScreenInfo>> {
     let connected: Vec<Connected> = found
         .iter()
         .map(|screen| {
@@ -178,18 +179,23 @@ fn plan(found: &[Found], roles: &RoleConfig) -> Vec<Option<ScreenInfo>> {
     let placed: Vec<_> = connected
         .iter()
         .zip(&roles)
-        .filter_map(|(screen, role)| Some(((*role)?, screen.size)))
+        .filter_map(|(screen, role)| {
+            let role = (*role)?;
+            Some((role, scales.of(role).logical(screen.size)))
+        })
         .collect();
-    let mut corners = origins(&placed).into_iter();
+    let mut places = origins(&placed).into_iter().zip(&placed);
 
-    let screens = found.iter().zip(connected).zip(roles);
+    let screens = found.iter().zip(roles);
     screens
-        .map(|((found, connected), role)| {
-            let corner = corners.next().filter(|_| role.is_some())?;
+        .map(|(found, role)| {
+            let role = role?;
+            let (corner, (_, size)) = places.next()?;
             Some(ScreenInfo {
                 id: OutputId(found.crtc.into()),
-                role: role?,
-                rect: Rect::new(corner.x, corner.y, connected.size.w, connected.size.h),
+                role,
+                rect: Rect::new(corner.x, corner.y, size.w, size.h),
+                scale: scales.of(role),
             })
         })
         .collect()
@@ -198,7 +204,7 @@ fn plan(found: &[Found], roles: &RoleConfig) -> Vec<Option<ScreenInfo>> {
 /// Debug aid: examines the GPU and the screens without showing anything,
 /// which works from inside another session. Everything short of taking the
 /// seat and setting modes is exercised.
-pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
+pub fn probe(roles: &RoleConfig, scales: &ScaleConfig) -> anyhow::Result<()> {
     let path = gpu_path("seat0")?;
     info!(gpu = %path.display(), "probing this GPU");
     let flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NONBLOCK;
@@ -209,7 +215,7 @@ pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
     gpu.manager.pause();
 
     let found = scan(&gpu.manager)?;
-    for (screen, info) in found.iter().zip(plan(&found, roles)) {
+    for (screen, info) in found.iter().zip(plan(&found, roles, scales)) {
         let mode = OutputMode::from(screen.mode);
         info!(
             name = screen.name,
@@ -218,6 +224,7 @@ pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
             refresh_mhz = mode.refresh,
             role = ?info.map(|info| info.role),
             position = ?info.map(|info| (info.rect.x, info.rect.y)),
+            scale = ?info.map(|info| info.scale.get()),
             vrr_capable = ?flag(
                 gpu.manager.device(),
                 screen.connector.handle(),
@@ -240,6 +247,7 @@ pub fn probe(roles: &RoleConfig) -> anyhow::Result<()> {
 pub fn init(
     handle: &LoopHandle<'static, State>,
     roles: &RoleConfig,
+    scales: &ScaleConfig,
     game: &GameConfig,
     mouse: &MouseConfig,
 ) -> anyhow::Result<(Udev, Vec<(ScreenInfo, Output)>)> {
@@ -263,7 +271,7 @@ pub fn init(
     let found = scan(&manager)?;
     let mut screens = Vec::new();
     let mut outputs = Vec::new();
-    for (found, info) in found.iter().zip(plan(&found, roles)) {
+    for (found, info) in found.iter().zip(plan(&found, roles, scales)) {
         let Some(info) = info else {
             warn!(name = found.name, "this screen has no role and stays off");
             continue;
@@ -454,7 +462,8 @@ fn light(
     let mode = OutputMode::from(found.mode);
     let position = (info.rect.x, info.rect.y).into();
     output.set_preferred(mode);
-    output.change_current_state(Some(mode), None, None, Some(position));
+    let scale = OutputScale::Fractional(info.scale.get());
+    output.change_current_state(Some(mode), None, Some(scale), Some(position));
 
     let mut planes = device.planes(&found.crtc).context("cannot list planes")?;
     let driver = device.get_driver().context("cannot identify the driver")?;
@@ -490,6 +499,7 @@ fn light(
         width = mode.size.w,
         height = mode.size.h,
         refresh_mhz = mode.refresh,
+        scale = info.scale.get(),
         vrr = ?vrr,
         vrr_for_games = game.vrr() && vrr_usable,
         direct_scanout_for_games = game.direct_scanout(),
@@ -631,7 +641,12 @@ impl State {
             self.hover,
             self.capsule_hover,
         );
-        let cursor = self.cursor(true);
+        let scale = match &self.backend {
+            Backend::Udev(udev) => udev.screens.get(index).map(|screen| screen.id),
+            Backend::Winit(_) => None,
+        }
+        .map_or(Scale::ONE, |id| self.shell.scale_of(id));
+        let cursor = self.cursor(true, scale);
         self.refresh_bar();
         let overlay = self.overlay();
         let panels = self.panels();
@@ -646,6 +661,7 @@ impl State {
         let Some(view) = self.shell.screen(screen.id).map(|info| info.rect) else {
             return;
         };
+        let scale = scale.get();
 
         self.panel_glass
             .retain(|(surface, _), _| surface.is_alive());
@@ -656,6 +672,7 @@ impl State {
             &self.theme,
             Layers {
                 view,
+                scale,
                 overlay: &overlay,
                 panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
                 panels: &panels,

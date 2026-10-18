@@ -6,16 +6,18 @@
 //! are only shown where they ask, above everything, and receive input.
 
 use std::fs::File;
+use std::io::Write;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
-use coquille_model::{OutputId, OutputRole, Placement, Rect, Size as ModelSize, WindowId};
+use coquille_model::{OutputId, OutputRole, Placement, Rect, Scale, Size as ModelSize, WindowId};
 use smithay::desktop::Window;
 use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Rectangle};
+use smithay::wayland::compositor::CompositorHandler;
 use smithay::wayland::selection::SelectionTarget;
 use smithay::wayland::selection::data_device::{
     clear_data_device_selection, current_data_device_selection_userdata,
@@ -36,12 +38,79 @@ pub fn follows_habits(kind: Option<WmWindowType>, transient: bool) -> bool {
 }
 
 /// The screen an X11 window covers exactly, which is how games say where
-/// they want to be fullscreen.
+/// they want to be fullscreen. A pixel off is still exact: X11 counts in
+/// real pixels, rounded once more on a scaled screen.
 pub fn covered_screen(window: Rect, screens: &[ScreenInfo]) -> Option<OutputId> {
+    let near = |a: i32, b: i32| (a - b).abs() <= 1;
     screens
         .iter()
-        .find(|screen| screen.rect == window)
+        .find(|screen| {
+            let rect = screen.rect;
+            near(rect.x, window.x)
+                && near(rect.y, window.y)
+                && near(rect.right(), window.right())
+                && near(rect.bottom(), window.bottom())
+        })
         .map(|screen| screen.id)
+}
+
+/// Steam draws its own interface at this scale, which it does not take from
+/// X11; Steam's own variable.
+pub const STEAM_SCALE_VAR: &str = "STEAM_FORCE_DESKTOPUI_SCALING";
+
+/// What Steam is told of the scale of X11, unless told already.
+pub fn steam_scale(scale: Scale) -> Option<String> {
+    let told = std::env::var_os(STEAM_SCALE_VAR).is_some();
+    (scale > Scale::ONE && !told).then(|| scale.get().to_string())
+}
+
+/// The text resolution X11 applications read (`Xft.dpi`): 96 at 100 %.
+fn x11_dpi(scale: Scale) -> u32 {
+    (96.0 * scale.get()).round() as u32
+}
+
+/// Gives X11 applications the resolution of the scale, on a thread of its
+/// own: `xrdb` talks to the X server, which the compositor serves.
+fn tell_x11_resolution(display: String, scale: Scale) {
+    let resources = format!("Xft.dpi: {}\n", x11_dpi(scale));
+    let spawned = std::thread::Builder::new()
+        .name("xrdb".into())
+        .spawn(move || {
+            let child = Command::new("xrdb")
+                .arg("-merge")
+                .env("DISPLAY", &display)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            let mut child = match child {
+                Ok(child) => child,
+                Err(error) => {
+                    warn!(
+                        %error,
+                        "cannot run xrdb: X11 applications keep small text \
+                         (it comes with: sudo pacman -S xorg-xrdb)"
+                    );
+                    return;
+                }
+            };
+            if let Some(mut input) = child.stdin.take() {
+                let _ = input.write_all(resources.as_bytes());
+            }
+            match child.wait() {
+                Ok(status) if status.success() => {
+                    info!(
+                        dpi = resources.trim(),
+                        "resolution given to X11 applications"
+                    );
+                }
+                Ok(status) => warn!(%status, "xrdb failed: X11 applications keep small text"),
+                Err(error) => warn!(%error, "xrdb failed: X11 applications keep small text"),
+            }
+        });
+    if let Err(error) = spawned {
+        warn!(%error, "cannot start the thread that runs xrdb");
+    }
 }
 
 /// The value of `DISPLAY` for an X server number.
@@ -58,6 +127,15 @@ impl State {
     /// programs started from now on find it; windows are managed as soon as
     /// it is ready. `log` receives what the X server has to say.
     pub fn start_xwayland(&mut self, log: Option<&Path>) {
+        // X11 sees the real pixels of the most detailed screen, for the whole
+        // session: its applications would not follow a change.
+        self.x11_scale = self
+            .shell
+            .screens
+            .iter()
+            .map(|screen| screen.scale)
+            .max()
+            .unwrap_or_default();
         let errors = log
             .and_then(|path| File::create(path).ok())
             .map_or_else(Stdio::null, Stdio::from);
@@ -101,6 +179,17 @@ impl State {
 
     /// The X server runs: becomes its window manager.
     fn xwayland_ready(&mut self, socket: UnixStream, client: Client) {
+        // X11 applications draw in real pixels, as many as the screen has:
+        // sharp text, and a game as large as the screen, which can then be
+        // shown directly. Smithay turns their places into logical ones.
+        let scale = self.x11_scale;
+        self.client_compositor_state(&client)
+            .set_client_scale(scale.get());
+        if scale > Scale::ONE {
+            if let Some(number) = self.xdisplay {
+                tell_x11_resolution(display_name(number), scale);
+            }
+        }
         let started = X11Wm::start_wm(
             self.loop_handle.clone(),
             &self.display_handle,
@@ -117,7 +206,8 @@ impl State {
         };
 
         // What X11 clients show when they set no pointer image themselves.
-        if let Some(image) = self.cursor_images.default_image() {
+        let pixels = self.cursor_images.pixels(scale);
+        if let Some(image) = self.cursor_images.default_image(pixels) {
             let size = (image.width as u16, image.height as u16).into();
             let hotspot = (image.xhot as u16, image.yhot as u16).into();
             if let Err(error) = xwm.set_cursor(&image.pixels_rgba, size, hotspot) {
@@ -145,7 +235,11 @@ impl State {
             }
         }
 
-        info!(display = ?self.xdisplay.map(display_name), "XWayland is ready");
+        info!(
+            display = ?self.xdisplay.map(display_name),
+            scale = scale.get(),
+            "XWayland is ready"
+        );
         self.xwm = Some(xwm);
     }
 
@@ -492,6 +586,7 @@ mod tests {
             id: OutputId(id),
             role,
             rect,
+            scale: coquille_model::Scale::ONE,
         };
         vec![
             screen(1, OutputRole::Left, Rect::new(0, 0, 1920, 1080)),
@@ -536,6 +631,32 @@ mod tests {
         assert_eq!(covered_screen(Rect::new(0, 0, 800, 600), &screens), None);
         assert_eq!(covered_screen(Rect::new(10, 0, 1920, 1080), &screens), None);
         assert_eq!(covered_screen(Rect::new(0, 0, 1920, 1080), &[]), None);
+    }
+
+    #[test]
+    fn a_game_on_a_scaled_screen_covers_it_a_pixel_off() {
+        // A 4K screen at 175 %: 3840 / 1.75 is 2194.3 logical pixels.
+        let laptop = [ScreenInfo {
+            id: OutputId(1),
+            role: OutputRole::Center,
+            rect: Rect::new(0, 0, 2194, 1234),
+            scale: Scale::new(1.75),
+        }];
+
+        assert_eq!(
+            covered_screen(Rect::new(0, 0, 2195, 1234), &laptop),
+            Some(OutputId(1))
+        );
+        assert_eq!(covered_screen(Rect::new(0, 0, 2190, 1234), &laptop), None);
+    }
+
+    #[test]
+    fn x11_reads_the_scale_as_a_resolution_and_steam_as_a_number() {
+        assert_eq!(x11_dpi(Scale::ONE), 96);
+        assert_eq!(x11_dpi(Scale::new(2.0)), 192);
+        assert_eq!(x11_dpi(Scale::new(1.25)), 120);
+        assert_eq!(Scale::new(1.5).get().to_string(), "1.5");
+        assert_eq!(Scale::new(2.0).get().to_string(), "2");
     }
 
     #[test]

@@ -77,16 +77,38 @@ pub fn pass_offset(strength: u8, level: usize) -> f32 {
     1.0 + f32::from(clamp_strength(strength)) * 0.15 + level as f32 * 0.25
 }
 
+/// How much a glass blurs: the strength the user chose, and as many more
+/// passes as the screen's scale asks, so that the glass looks as frosted at
+/// 200 % as at 100 % (each pass reaches twice as far as the one before).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blur {
+    pub strength: u8,
+    extra: u8,
+}
+
+impl Blur {
+    pub fn new(strength: u8, scale: f64) -> Self {
+        let extra = scale.max(1.0).log2().round() as u8;
+        Self {
+            strength: clamp_strength(strength),
+            extra,
+        }
+    }
+
+    pub fn passes(self) -> usize {
+        usize::from(self.strength + self.extra)
+    }
+}
+
 /// How far, in pixels of the screen, the blur reaches: what a pixel of the
 /// glass may take from around it. Down pass `i` reads half its offset away in
 /// texels of level `i` (2^i pixels); up pass `i` reads its whole offset away
 /// in texels of level `i + 1`.
-pub fn blur_reach(strength: u8) -> i32 {
-    let passes = usize::from(clamp_strength(strength));
-    let reach: f32 = (0..passes)
+pub fn blur_reach(blur: Blur) -> i32 {
+    let reach: f32 = (0..blur.passes())
         .map(|level| {
             let scale = (1u32 << level) as f32;
-            let offset = pass_offset(strength, level);
+            let offset = pass_offset(blur.strength, level);
             0.5 * offset * scale + offset * 2.0 * scale
         })
         .sum();
@@ -96,8 +118,8 @@ pub fn blur_reach(strength: u8) -> i32 {
 /// Margin captured around the shape: the reach of the blur, so that the
 /// edges of the glass blur what is really there instead of a stretched
 /// border.
-pub fn blur_margin(strength: u8) -> i32 {
-    blur_reach(strength)
+pub fn blur_margin(blur: Blur) -> i32 {
+    blur_reach(blur)
 }
 
 /// Expand the shape by the blur margin and clip it to output bounds.
@@ -181,7 +203,7 @@ pub struct GlassElement {
     shape: Rectangle<i32, Physical>,
     geometry: Rectangle<i32, Physical>,
     mask: Mask,
-    strength: u8,
+    blur: Blur,
 }
 
 impl GlassElement {
@@ -192,9 +214,9 @@ impl GlassElement {
         shape: Rectangle<i32, Physical>,
         output_size: Size<i32, Physical>,
         mask: Mask,
-        strength: u8,
+        blur: Blur,
     ) -> Self {
-        let margin = blur_margin(strength);
+        let margin = blur_margin(blur);
         let geometry = expanded_and_clipped_geometry(shape, margin, output_size);
         Self {
             id,
@@ -203,7 +225,7 @@ impl GlassElement {
             shape,
             geometry,
             mask,
-            strength,
+            blur,
         }
     }
 }
@@ -213,7 +235,7 @@ impl GlassElement {
 pub struct GlassCache {
     id: Id,
     commit: CommitCounter,
-    last_spec: Option<(Rectangle<i32, Physical>, MaskKey, u8)>,
+    last_spec: Option<(Rectangle<i32, Physical>, MaskKey, Blur)>,
 }
 
 impl Default for GlassCache {
@@ -233,9 +255,9 @@ impl GlassCache {
         shape: Rectangle<i32, Physical>,
         output_size: Size<i32, Physical>,
         mask: Mask,
-        strength: u8,
+        blur: Blur,
     ) -> GlassElement {
-        let spec = (shape, mask.key(), strength);
+        let spec = (shape, mask.key(), blur);
         if self.last_spec != Some(spec) {
             self.commit.increment();
             self.last_spec = Some(spec);
@@ -247,7 +269,7 @@ impl GlassCache {
             shape,
             output_size,
             mask,
-            strength,
+            blur,
         )
     }
 }
@@ -479,7 +501,7 @@ impl GlassElement {
             return Ok(());
         };
         let size: Size<i32, BufferCoord> = (region.size.w, region.size.h).into();
-        let passes = clamp_strength(self.strength) as usize;
+        let passes = self.blur.passes();
 
         ensure(frame, &mut cache.source, size)?;
         cache.down.resize_with(passes, || None);
@@ -498,7 +520,7 @@ impl GlassElement {
 
         let down_program = self.shaders.blur_down;
         let up_program = self.shaders.blur_up;
-        let strength = self.strength;
+        let strength = self.blur.strength;
 
         frame.with_context(|gl| unsafe {
             let mut draw_fbo = 0;
@@ -916,12 +938,29 @@ mod tests {
     #[test]
     fn the_margin_covers_what_the_blur_reads() {
         // Strength 3: down 0.5 × (1.45 + 1.7×2 + 1.95×4), up 2 × the same.
-        assert_eq!(blur_reach(3), 32);
+        let at = |strength| Blur::new(strength, 1.0);
+        assert_eq!(blur_reach(at(3)), 32);
         for strength in 1..=5 {
-            assert!(blur_margin(strength) >= blur_reach(strength));
+            assert!(blur_margin(at(strength)) >= blur_reach(at(strength)));
         }
-        assert!(blur_margin(1) < blur_margin(3) && blur_margin(3) < blur_margin(5));
-        assert_eq!(blur_margin(10), blur_margin(5), "clamped like the strength");
+        assert!(blur_margin(at(1)) < blur_margin(at(3)) && blur_margin(at(3)) < blur_margin(at(5)));
+        assert_eq!(
+            blur_margin(at(10)),
+            blur_margin(at(5)),
+            "clamped like the strength"
+        );
+    }
+
+    #[test]
+    fn a_larger_scale_blurs_as_far_on_screen() {
+        let reach = |scale| blur_reach(Blur::new(3, scale));
+
+        assert_eq!(Blur::new(3, 1.25).passes(), 3);
+        assert_eq!(Blur::new(3, 2.0).passes(), 4);
+        assert_eq!(Blur::new(3, 3.0).passes(), 5);
+        // Twice the pixels, about twice the reach.
+        let doubled = f64::from(reach(2.0)) / f64::from(reach(1.0));
+        assert!((1.8..=2.4).contains(&doubled), "{doubled}");
     }
 
     #[test]

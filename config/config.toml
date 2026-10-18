@@ -70,6 +70,16 @@ right = "DP-1"
 # center = "full"
 # right = "two-columns"
 
+# Mise à l'échelle de chaque écran : de 1.0 (100 %) à 3.0 (300 %), par pas de
+# 0.25. Un écran 4K de portable est confortable à 2.0. Les applis X11 voient
+# toujours les vrais pixels, et prennent l'échelle la plus grande au
+# démarrage seulement. L'écran « Paramètres » réécrit ces lignes.
+# Sans cette section : 100 % partout.
+[scale]
+# left = 1.0
+# center = 1.0
+# right = 1.0
+
 # Le dock, sur l'écran gauche. Les applications de la barre, dans l'ordre :
 # le nom de leur fichier .desktop (sans l'extension) ou ce que leurs fenêtres
 # annoncent. Le menu au clic droit (« Épingler », « Retirer des favoris ») et

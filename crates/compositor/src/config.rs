@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use coquille_model::{LayoutKind, OutputRole};
+use coquille_model::{LayoutKind, OutputRole, Scale};
 use serde::Deserialize;
 use tracing::{info, warn};
 
@@ -18,6 +18,8 @@ pub struct Config {
     pub mouse: MouseConfig,
     /// How each screen arranges the windows tidied into it.
     pub layout: LayoutConfig,
+    /// How much bigger each screen draws everything.
+    pub scale: ScaleConfig,
     pub theme: Option<ThemeKind>,
     /// The accent color, as `#rrggbb`; by default, the one of the theme.
     pub accent: Option<String>,
@@ -111,6 +113,35 @@ impl LayoutConfig {
             OutputRole::Right => self.right,
         };
         named.unwrap_or(LayoutKind::default_for(role))
+    }
+}
+
+/// The scale of each screen; 100 % where none is named.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScaleConfig {
+    pub left: Option<Scale>,
+    pub center: Option<Scale>,
+    pub right: Option<Scale>,
+}
+
+impl ScaleConfig {
+    /// Every screen at `scale`.
+    pub fn everywhere(scale: Scale) -> Self {
+        Self {
+            left: Some(scale),
+            center: Some(scale),
+            right: Some(scale),
+        }
+    }
+
+    pub fn of(&self, role: OutputRole) -> Scale {
+        let named = match role {
+            OutputRole::Left => self.left,
+            OutputRole::Center => self.center,
+            OutputRole::Right => self.right,
+        };
+        named.unwrap_or_default()
     }
 }
 
@@ -439,6 +470,7 @@ mod tests {
             Change::Dock(OutputRole::Right, DockPlace::VerticalRight),
             Change::Layout(OutputRole::Left, LayoutKind::MainSide),
             Change::Layout(OutputRole::Center, LayoutKind::ThreeColumns),
+            Change::Scale(OutputRole::Center, Scale::new(1.75)),
             Change::MouseAccelSpeed(0.2),
             Change::MouseAccelProfile(coquille_config::MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
@@ -484,6 +516,18 @@ mod tests {
             LayoutKind::ThreeColumns
         );
         assert_eq!(config.layout.of(OutputRole::Right), LayoutKind::TwoColumns);
+        assert_eq!(config.scale.of(OutputRole::Center).get(), 1.75);
+        assert_eq!(config.scale.of(OutputRole::Left), Scale::ONE);
+    }
+
+    #[test]
+    fn a_scale_is_rounded_to_its_step_and_kept_within_range() {
+        let config = parse("[scale]\nleft = 2\ncenter = 1.3\nright = 7.5\n").unwrap();
+
+        assert_eq!(config.scale.of(OutputRole::Left).get(), 2.0);
+        assert_eq!(config.scale.of(OutputRole::Center).get(), 1.25);
+        assert_eq!(config.scale.of(OutputRole::Right).get(), 3.0);
+        assert!(parse("[scale]\nmiddle = 2.0\n").is_err());
     }
 
     #[test]
