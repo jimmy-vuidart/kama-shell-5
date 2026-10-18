@@ -38,7 +38,7 @@ impl State {
         }
         if let Backend::Udev(udev) = &mut self.backend {
             udev.set_game(&config.game);
-            udev.set_mouse(&config.mouse);
+            udev.set_pointers(&config.mouse, &config.touchpad);
         }
         self.set_layouts(&config.layout);
         if !self.scale_pinned {

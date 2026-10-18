@@ -45,6 +45,9 @@ pub struct Snapshot {
     /// this many times larger for them.
     #[serde(default)]
     pub x11_scale: Scale,
+    /// A touchpad is plugged in (a laptop).
+    #[serde(default)]
+    pub touchpad: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,6 +253,7 @@ mod tests {
                 slot: 0,
             }],
             x11_scale: Scale::new(1.5),
+            touchpad: true,
         }
     }
 

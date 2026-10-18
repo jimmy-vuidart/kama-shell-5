@@ -41,6 +41,20 @@ right = "DP-1"
 # natural_scroll = false
 # left_handed = false
 
+# Le pavé tactile d'un portable (la souris garde ses propres réglages) :
+# toucher pour cliquer, toucher puis glisser pour déplacer, pavé coupé
+# pendant la frappe, défilement naturel (le contenu suit les doigts),
+# vitesse de -1.0 à 1.0, et clic droit à deux doigts ("clickfinger") ou
+# dans le coin bas droit ("areas"). L'écran « Paramètres » réécrit ces
+# lignes.
+[touchpad]
+# tap = true
+# tap_drag = true
+# disable_while_typing = true
+# natural_scroll = true
+# accel_speed = 0.0
+# click_method = "clickfinger"
+
 # Mode jeu : ce qui se passe sur un écran occupé par une fenêtre en plein écran.
 [game]
 # Bords collants : durée (en millisecondes) pendant laquelle il faut pousser le

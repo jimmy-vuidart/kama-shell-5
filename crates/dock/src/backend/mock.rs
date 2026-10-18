@@ -117,6 +117,7 @@ pub fn snapshot(theme: ThemeName, favorites: &[String]) -> Snapshot {
             },
         ],
         x11_scale: Default::default(),
+        touchpad: false,
     }
 }
 

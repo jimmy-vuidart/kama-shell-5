@@ -151,6 +151,29 @@ impl MouseAccelProfile {
     }
 }
 
+/// What makes a touchpad right-click: two fingers anywhere, or a press in
+/// its bottom right corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchpadClick {
+    Fingers,
+    Areas,
+}
+
+impl TouchpadClick {
+    pub const ALL: [Self; 2] = [Self::Fingers, Self::Areas];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Fingers => "clickfinger",
+            Self::Areas => "areas",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|click| click.name() == name)
+    }
+}
+
 /// How a wallpaper image is scaled or fitted to the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WallpaperMode {
@@ -203,6 +226,12 @@ pub struct Settings {
     pub mouse_accel_profile: Option<MouseAccelProfile>,
     pub mouse_natural_scroll: Option<bool>,
     pub mouse_left_handed: Option<bool>,
+    pub touchpad_tap: Option<bool>,
+    pub touchpad_tap_drag: Option<bool>,
+    pub touchpad_disable_while_typing: Option<bool>,
+    pub touchpad_natural_scroll: Option<bool>,
+    pub touchpad_accel_speed: Option<f64>,
+    pub touchpad_click: Option<TouchpadClick>,
     pub wallpaper_path: Option<String>,
     pub wallpapers: PerScreen<Option<String>>,
     pub wallpaper_mode: Option<WallpaperMode>,
@@ -292,6 +321,14 @@ impl Settings {
                 .and_then(MouseAccelProfile::named),
             mouse_natural_scroll: switch(&["mouse", "natural_scroll"]),
             mouse_left_handed: switch(&["mouse", "left_handed"]),
+            touchpad_tap: switch(&["touchpad", "tap"]),
+            touchpad_tap_drag: switch(&["touchpad", "tap_drag"]),
+            touchpad_disable_while_typing: switch(&["touchpad", "disable_while_typing"]),
+            touchpad_natural_scroll: switch(&["touchpad", "natural_scroll"]),
+            touchpad_accel_speed: float_of(&["touchpad", "accel_speed"]),
+            touchpad_click: text_of(&["touchpad", "click_method"])
+                .as_deref()
+                .and_then(TouchpadClick::named),
             wallpaper_path: name_of(&["wallpaper", "path"]),
             wallpapers: PerScreen::from_roles(|role| name_of(&["wallpaper", role_name(role)])),
             wallpaper_mode: text_of(&["wallpaper", "mode"])
@@ -375,6 +412,33 @@ impl Settings {
         self.mouse_left_handed.unwrap_or(false)
     }
 
+    /// A tap is a click, unless the file says otherwise.
+    pub fn touchpad_tap(&self) -> bool {
+        self.touchpad_tap.unwrap_or(true)
+    }
+
+    pub fn touchpad_tap_drag(&self) -> bool {
+        self.touchpad_tap_drag.unwrap_or(true)
+    }
+
+    pub fn touchpad_disable_while_typing(&self) -> bool {
+        self.touchpad_disable_while_typing.unwrap_or(true)
+    }
+
+    /// The content follows the fingers, as on a phone, unless the file says
+    /// otherwise.
+    pub fn touchpad_natural_scroll(&self) -> bool {
+        self.touchpad_natural_scroll.unwrap_or(true)
+    }
+
+    pub fn touchpad_accel_speed(&self) -> f64 {
+        self.touchpad_accel_speed.unwrap_or(0.0)
+    }
+
+    pub fn touchpad_click(&self) -> TouchpadClick {
+        self.touchpad_click.unwrap_or(TouchpadClick::Fingers)
+    }
+
     pub fn is_audio_sink_visible(&self, name: &str) -> bool {
         !self.audio_hidden.iter().any(|h| h == name)
     }
@@ -422,6 +486,12 @@ pub enum Change {
     MouseAccelProfile(MouseAccelProfile),
     MouseNaturalScroll(bool),
     MouseLeftHanded(bool),
+    TouchpadTap(bool),
+    TouchpadTapDrag(bool),
+    TouchpadDisableWhileTyping(bool),
+    TouchpadNaturalScroll(bool),
+    TouchpadAccelSpeed(f64),
+    TouchpadClick(TouchpadClick),
     WallpaperPath(Option<String>),
     Wallpaper(OutputRole, Option<String>),
     WallpaperMode(WallpaperMode),
@@ -507,6 +577,21 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
             with_value(text, &["mouse", "natural_scroll"], (*on).into())
         }
         Change::MouseLeftHanded(on) => with_value(text, &["mouse", "left_handed"], (*on).into()),
+        Change::TouchpadTap(on) => with_value(text, &["touchpad", "tap"], (*on).into()),
+        Change::TouchpadTapDrag(on) => with_value(text, &["touchpad", "tap_drag"], (*on).into()),
+        Change::TouchpadDisableWhileTyping(on) => {
+            with_value(text, &["touchpad", "disable_while_typing"], (*on).into())
+        }
+        Change::TouchpadNaturalScroll(on) => {
+            with_value(text, &["touchpad", "natural_scroll"], (*on).into())
+        }
+        Change::TouchpadAccelSpeed(speed) => {
+            let speed = (speed * 100.0).round() / 100.0;
+            with_value(text, &["touchpad", "accel_speed"], speed.into())
+        }
+        Change::TouchpadClick(click) => {
+            with_value(text, &["touchpad", "click_method"], click.name().into())
+        }
         Change::WallpaperPath(path) => text_or_nothing(text, &["wallpaper", "path"], path),
         Change::Wallpaper(role, path) => {
             let path_key = ["wallpaper", role_name(*role)];
@@ -685,6 +770,10 @@ mod tests {
             Change::MouseAccelProfile(MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
             Change::MouseLeftHanded(true),
+            Change::TouchpadTap(false),
+            Change::TouchpadNaturalScroll(false),
+            Change::TouchpadAccelSpeed(0.25),
+            Change::TouchpadClick(TouchpadClick::Areas),
             Change::WallpaperPath(Some("/home/user/wallpaper.png".into())),
             Change::WallpaperMode(WallpaperMode::Fit),
             Change::AudioNick {
@@ -731,6 +820,12 @@ mod tests {
             mouse_accel_profile: Some(MouseAccelProfile::Flat),
             mouse_natural_scroll: Some(true),
             mouse_left_handed: Some(true),
+            touchpad_tap: Some(false),
+            touchpad_tap_drag: None,
+            touchpad_disable_while_typing: None,
+            touchpad_natural_scroll: Some(false),
+            touchpad_accel_speed: Some(0.25),
+            touchpad_click: Some(TouchpadClick::Areas),
             wallpaper_path: Some("/home/user/wallpaper.png".into()),
             wallpapers: PerScreen::default(),
             wallpaper_mode: Some(WallpaperMode::Fit),

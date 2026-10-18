@@ -37,7 +37,7 @@ impl Page {
             Self::Screens => "Écrans et dock",
             Self::Audio => "Son",
             Self::Game => "Mode jeu",
-            Self::Mouse => "Souris",
+            Self::Mouse => "Souris et pavé",
             Self::System => "Système",
         }
     }
@@ -51,7 +51,10 @@ impl Page {
                 "Les périphériques de sortie, leurs surnoms et leur présence dans le lanceur."
             }
             Self::Game => "Ce qui se passe sur l'écran d'un jeu en plein écran.",
-            Self::Mouse => "La vitesse du pointeur, le profil d'accélération et le défilement.",
+            Self::Mouse => {
+                "La vitesse du pointeur, le profil d'accélération, le défilement et le pavé \
+                 tactile."
+            }
             Self::System => "Le clavier, le terminal et les applications X11.",
         }
     }
@@ -87,6 +90,12 @@ pub fn shown_roles(snapshot: Option<&Snapshot>) -> Vec<OutputRole> {
             .collect(),
         None => PerScreen::<()>::ROLES.to_vec(),
     }
+}
+
+/// The page shows the touchpad's settings: there is one, or this does not
+/// run inside coquille (the file is set for the next start).
+pub fn shows_touchpad(snapshot: Option<&Snapshot>) -> bool {
+    snapshot.is_none_or(|snapshot| snapshot.touchpad)
 }
 
 /// The scales offered, from 100 % to 300 %.

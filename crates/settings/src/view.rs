@@ -1,7 +1,9 @@
 //! What the settings screen draws: the pages on the left, the settings of
 //! the chosen one on the right, each in a card.
 
-use coquille_config::{Change, DockPlace, MouseAccelProfile, PerScreen, WallpaperMode};
+use coquille_config::{
+    Change, DockPlace, MouseAccelProfile, PerScreen, TouchpadClick, WallpaperMode,
+};
 use coquille_ipc::ThemeName;
 use coquille_model::{LayoutKind, OutputRole};
 use coquille_ui::glyph::{Glyph, glyph};
@@ -968,7 +970,7 @@ fn mouse<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         ),
     ];
 
-    column![
+    let mut page = column![
         section("Pointeur", card(pointer, palette), palette),
         section(
             "Boutons et défilement",
@@ -976,8 +978,113 @@ fn mouse<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             palette
         ),
     ]
-    .spacing(18)
-    .into()
+    .spacing(18);
+    if model::shows_touchpad(app.snapshot.as_ref()) {
+        page = page.push(section("Pavé tactile", touchpad(app, palette), palette));
+    }
+    page.into()
+}
+
+/// The settings of a laptop's touchpad.
+fn touchpad<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
+    let file = &app.file;
+    let speed_label = match app.touchpad_speed {
+        0 => "Par défaut".to_string(),
+        val if val > 0 => format!("+{val}"),
+        val => format!("{val}"),
+    };
+    let speed = row![
+        text("Lente").size(12).color(palette.muted),
+        slider(
+            model::MOUSE_SPEED_RANGE,
+            app.touchpad_speed,
+            Message::TouchpadSpeed,
+        )
+        .step(model::MOUSE_SPEED_STEP)
+        .on_release(Message::TouchpadSpeedReleased)
+        .width(180)
+        .style(move |_, _| slider_style(palette)),
+        text("Rapide").size(12).color(palette.muted),
+        text(speed_label)
+            .size(13)
+            .font(style::MEDIUM)
+            .color(palette.text)
+            .width(78)
+            .align_x(Alignment::End),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    let clicks = [
+        (TouchpadClick::Fingers, "Deux doigts"),
+        (TouchpadClick::Areas, "Coin bas droit"),
+    ];
+    let click = segmented(
+        &clicks,
+        file.touchpad_click(),
+        |click| Message::Change(Change::TouchpadClick(click)),
+        palette,
+    );
+    let rows = vec![
+        setting(
+            "Toucher pour cliquer",
+            "Un toucher léger vaut un clic, sans appuyer sur le pavé.",
+            None,
+            switch(
+                file.touchpad_tap(),
+                |on| Message::Change(Change::TouchpadTap(on)),
+                palette,
+            ),
+            palette,
+        ),
+        setting(
+            "Toucher puis glisser",
+            "Toucher deux fois et garder le doigt posé saisit ce qui est dessous.",
+            None,
+            switch(
+                file.touchpad_tap_drag(),
+                |on| Message::Change(Change::TouchpadTapDrag(on)),
+                palette,
+            ),
+            palette,
+        ),
+        setting(
+            "Clic droit",
+            "Un clic à deux doigts, ou un appui dans le coin bas droit du pavé.",
+            None,
+            click,
+            palette,
+        ),
+        setting(
+            "Défilement naturel",
+            "Le contenu suit les deux doigts, comme sur un téléphone.",
+            None,
+            switch(
+                file.touchpad_natural_scroll(),
+                |on| Message::Change(Change::TouchpadNaturalScroll(on)),
+                palette,
+            ),
+            palette,
+        ),
+        setting(
+            "Couper pendant la frappe",
+            "Le pavé ignore la paume tant que le clavier sert.",
+            None,
+            switch(
+                file.touchpad_disable_while_typing(),
+                |on| Message::Change(Change::TouchpadDisableWhileTyping(on)),
+                palette,
+            ),
+            palette,
+        ),
+        setting(
+            "Vitesse",
+            "La vitesse du curseur sous les doigts.",
+            None,
+            speed,
+            palette,
+        ),
+    ];
+    card(rows, palette)
 }
 
 fn system<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {

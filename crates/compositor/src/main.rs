@@ -276,6 +276,7 @@ fn main() -> anyhow::Result<()> {
             &config.scale,
             &config.game,
             &config.mouse,
+            &config.touchpad,
         )?;
         (Backend::Udev(Box::new(udev)), screens)
     };

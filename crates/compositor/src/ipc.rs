@@ -265,6 +265,10 @@ impl State {
             windows: windows.collect(),
             habits: habits.collect(),
             x11_scale: self.x11_scale,
+            touchpad: match &self.backend {
+                Backend::Udev(udev) => udev.has_touchpad(),
+                Backend::Winit(_) => false,
+            },
         }
     }
 

@@ -41,7 +41,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use tracing::{debug, error, info, warn};
 
 use super::Backend;
-use crate::config::{GameConfig, MouseConfig, ScaleConfig};
+use crate::config::{GameConfig, MouseConfig, ScaleConfig, TouchpadClick, TouchpadConfig};
 use crate::game::{Boost, FrameNote};
 use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
 use crate::render::scene::{self, Layers, SceneElement};
@@ -106,6 +106,7 @@ pub struct Udev {
     /// What the configuration allows in game mode, as it was read last.
     game: GameConfig,
     mouse: MouseConfig,
+    touchpad: TouchpadConfig,
     pointer_devices: Vec<smithay::reexports::input::Device>,
     keyboard_devices: Vec<smithay::reexports::input::Device>,
 }
@@ -250,6 +251,7 @@ pub fn init(
     scales: &ScaleConfig,
     game: &GameConfig,
     mouse: &MouseConfig,
+    touchpad: &TouchpadConfig,
 ) -> anyhow::Result<(Udev, Vec<(ScreenInfo, Output)>)> {
     let (mut session, session_events) =
         LibSeatSession::new().map_err(|error| anyhow!("cannot take the seat: {error}"))?;
@@ -306,12 +308,16 @@ pub fn init(
                     if let Backend::Udev(udev) = &mut state.backend {
                         udev.device_added(device, led_state);
                     }
+                    // The settings screen shows the touchpad's settings
+                    // only when there is one.
+                    state.shell_changed();
                 } else if let smithay::backend::input::InputEvent::DeviceRemoved { ref device } =
                     event
                 {
                     if let Backend::Udev(udev) = &mut state.backend {
                         udev.device_removed(device);
                     }
+                    state.shell_changed();
                 }
                 state.process_input_event(event);
             },
@@ -338,6 +344,7 @@ pub fn init(
         syncobj: None,
         game: game.clone(),
         mouse: mouse.clone(),
+        touchpad: touchpad.clone(),
         pointer_devices: Vec::new(),
         keyboard_devices: Vec::new(),
     };
@@ -545,9 +552,14 @@ impl Udev {
         led_state: Option<smithay::input::keyboard::LedState>,
     ) {
         if device.has_capability(smithay::reexports::input::DeviceCapability::Pointer) {
-            info!(name = %device.name(), "pointer device added");
             let mut dev = device.clone();
-            apply_mouse_to_device(&mut dev, &self.mouse);
+            if is_touchpad(&dev) {
+                info!(name = %device.name(), "touchpad added");
+                apply_touchpad_to_device(&mut dev, &self.touchpad);
+            } else {
+                info!(name = %device.name(), "pointer device added");
+                apply_mouse_to_device(&mut dev, &self.mouse);
+            }
             if !self.pointer_devices.contains(&dev) {
                 self.pointer_devices.push(dev);
             }
@@ -576,15 +588,36 @@ impl Udev {
         }
     }
 
-    pub fn set_mouse(&mut self, mouse: &MouseConfig) {
-        if *mouse == self.mouse {
-            return;
+    /// The mouse and the touchpad each get their own settings, when they
+    /// changed.
+    pub fn set_pointers(&mut self, mouse: &MouseConfig, touchpad: &TouchpadConfig) {
+        if *mouse != self.mouse {
+            info!(?mouse, "mouse settings changed");
+            self.mouse = mouse.clone();
+            for device in self
+                .pointer_devices
+                .iter_mut()
+                .filter(|device| !is_touchpad(device))
+            {
+                apply_mouse_to_device(device, mouse);
+            }
         }
-        info!(?mouse, "mouse settings changed");
-        for device in &mut self.pointer_devices {
-            apply_mouse_to_device(device, mouse);
+        if *touchpad != self.touchpad {
+            info!(?touchpad, "touchpad settings changed");
+            self.touchpad = touchpad.clone();
+            for device in self
+                .pointer_devices
+                .iter_mut()
+                .filter(|device| is_touchpad(device))
+            {
+                apply_touchpad_to_device(device, touchpad);
+            }
         }
-        self.mouse = mouse.clone();
+    }
+
+    /// A touchpad is plugged in (a laptop).
+    pub fn has_touchpad(&self) -> bool {
+        self.pointer_devices.iter().any(is_touchpad)
     }
 
     pub fn switch_vt(&mut self, vt: i32) {
@@ -894,6 +927,62 @@ impl State {
                 self.queue_redraw();
             }
         }
+    }
+}
+
+/// A touchpad can be tapped; a mouse cannot.
+fn is_touchpad(device: &smithay::reexports::input::Device) -> bool {
+    device.config_tap_finger_count() > 0
+}
+
+fn apply_touchpad_to_device(
+    device: &mut smithay::reexports::input::Device,
+    touchpad: &TouchpadConfig,
+) {
+    use smithay::reexports::input::{ClickMethod, ScrollMethod};
+
+    let name = device.name().into_owned();
+    let check = |what: &str, result: Result<(), smithay::reexports::input::DeviceConfigError>| {
+        if let Err(error) = result {
+            warn!(name = %name, ?error, "cannot set the touchpad's {what}");
+        }
+    };
+    check("tap", device.config_tap_set_enabled(touchpad.tap()));
+    check(
+        "tap and drag",
+        device.config_tap_set_drag_enabled(touchpad.tap_drag()),
+    );
+    if device.config_dwt_is_available() {
+        check(
+            "disable while typing",
+            device.config_dwt_set_enabled(touchpad.disable_while_typing()),
+        );
+    }
+    if device.config_scroll_has_natural_scroll() {
+        check(
+            "natural scroll",
+            device.config_scroll_set_natural_scroll_enabled(touchpad.natural_scroll()),
+        );
+    }
+    if device
+        .config_scroll_methods()
+        .contains(&ScrollMethod::TwoFinger)
+    {
+        check(
+            "two-finger scroll",
+            device.config_scroll_set_method(ScrollMethod::TwoFinger),
+        );
+    }
+    let method = match touchpad.click_method() {
+        TouchpadClick::Fingers => ClickMethod::Clickfinger,
+        TouchpadClick::Areas => ClickMethod::ButtonAreas,
+    };
+    if device.config_click_methods().contains(&method) {
+        check("click method", device.config_click_set_method(method));
+    }
+    if device.config_accel_is_available() {
+        let speed = touchpad.accel_speed.unwrap_or(0.0).clamp(-1.0, 1.0);
+        check("speed", device.config_accel_set_speed(speed));
     }
 }
 

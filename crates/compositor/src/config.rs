@@ -16,6 +16,7 @@ pub struct Config {
     pub outputs: RoleConfig,
     pub keyboard: KeyboardConfig,
     pub mouse: MouseConfig,
+    pub touchpad: TouchpadConfig,
     /// How each screen arranges the windows tidied into it.
     pub layout: LayoutConfig,
     /// How much bigger each screen draws everything.
@@ -166,6 +167,51 @@ pub struct MouseConfig {
     pub accel_profile: Option<MouseAccelProfile>,
     pub natural_scroll: Option<bool>,
     pub left_handed: Option<bool>,
+}
+
+/// What makes a touchpad right-click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum TouchpadClick {
+    /// Two fingers anywhere.
+    #[serde(rename = "clickfinger")]
+    Fingers,
+    /// A press in the bottom right corner.
+    #[serde(rename = "areas")]
+    Areas,
+}
+
+/// The touchpad of a laptop; the mouse keeps its own settings.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TouchpadConfig {
+    pub tap: Option<bool>,
+    pub tap_drag: Option<bool>,
+    pub disable_while_typing: Option<bool>,
+    pub natural_scroll: Option<bool>,
+    pub accel_speed: Option<f64>,
+    pub click_method: Option<TouchpadClick>,
+}
+
+impl TouchpadConfig {
+    pub fn tap(&self) -> bool {
+        self.tap.unwrap_or(true)
+    }
+
+    pub fn tap_drag(&self) -> bool {
+        self.tap_drag.unwrap_or(true)
+    }
+
+    pub fn disable_while_typing(&self) -> bool {
+        self.disable_while_typing.unwrap_or(true)
+    }
+
+    pub fn natural_scroll(&self) -> bool {
+        self.natural_scroll.unwrap_or(true)
+    }
+
+    pub fn click_method(&self) -> TouchpadClick {
+        self.click_method.unwrap_or(TouchpadClick::Fingers)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
@@ -475,6 +521,12 @@ mod tests {
             Change::MouseAccelProfile(coquille_config::MouseAccelProfile::Flat),
             Change::MouseNaturalScroll(true),
             Change::MouseLeftHanded(true),
+            Change::TouchpadTap(false),
+            Change::TouchpadTapDrag(false),
+            Change::TouchpadDisableWhileTyping(false),
+            Change::TouchpadNaturalScroll(false),
+            Change::TouchpadAccelSpeed(-0.3),
+            Change::TouchpadClick(coquille_config::TouchpadClick::Areas),
             Change::WallpaperPath(Some("/path/to/wall.png".into())),
             Change::Wallpaper(OutputRole::Left, Some("/path/to/left.png".into())),
             Change::WallpaperMode(coquille_config::WallpaperMode::Fit),
@@ -518,6 +570,19 @@ mod tests {
         assert_eq!(config.layout.of(OutputRole::Right), LayoutKind::TwoColumns);
         assert_eq!(config.scale.of(OutputRole::Center).get(), 1.75);
         assert_eq!(config.scale.of(OutputRole::Left), Scale::ONE);
+        assert!(!config.touchpad.tap() && !config.touchpad.tap_drag());
+        assert!(!config.touchpad.disable_while_typing() && !config.touchpad.natural_scroll());
+        assert_eq!(config.touchpad.accel_speed, Some(-0.3));
+        assert_eq!(config.touchpad.click_method(), TouchpadClick::Areas);
+    }
+
+    #[test]
+    fn a_touchpad_taps_and_scrolls_naturally_unless_told_otherwise() {
+        let config = parse("").unwrap();
+
+        assert!(config.touchpad.tap() && config.touchpad.natural_scroll());
+        assert_eq!(config.touchpad.click_method(), TouchpadClick::Fingers);
+        assert!(parse("[touchpad]\nclick_method = \"corner\"\n").is_err());
     }
 
     #[test]

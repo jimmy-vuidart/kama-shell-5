@@ -10,7 +10,7 @@ mod settings;
 
 pub use edit::{default_path, update, with_value, without};
 pub use settings::{
-    Change, DockPlace, MouseAccelProfile, PerScreen, Settings, WallpaperMode, apply, assign,
-    docks_for,
+    Change, DockPlace, MouseAccelProfile, PerScreen, Settings, TouchpadClick, WallpaperMode, apply,
+    assign, docks_for,
 };
 pub use toml_edit::{Array, Value};

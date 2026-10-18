@@ -39,6 +39,9 @@ pub enum Message {
     /// The mouse speed slider moves, then is let go.
     MouseSpeed(i32),
     MouseSpeedReleased,
+    /// The touchpad speed slider moves, then is let go.
+    TouchpadSpeed(i32),
+    TouchpadSpeedReleased,
     /// The dock icon size slider moves, then is let go.
     DockIconSize(u32),
     DockIconSizeReleased,
@@ -72,6 +75,8 @@ pub struct App {
     pub sticky: u32,
     /// Where the mouse speed slider stands (-100..=100).
     pub mouse_speed: i32,
+    /// Where the touchpad speed slider stands (-100..=100).
+    pub touchpad_speed: i32,
     /// Where the dock icon size slider stands (16..=64).
     pub dock_icon_size: u32,
     /// The audio sinks known to the system.
@@ -96,6 +101,7 @@ impl App {
                 delay => model::sticky_on_slider(delay),
             },
             mouse_speed: model::speed_to_slider(file.mouse_accel_speed()),
+            touchpad_speed: model::speed_to_slider(file.touchpad_accel_speed()),
             dock_icon_size: model::dock_icon_size_on_slider(file.dock_icon_size()),
             audio_sinks,
             audio_nick_inputs,
@@ -140,6 +146,9 @@ impl App {
         }
         if file.mouse_accel_speed != self.file.mouse_accel_speed {
             self.mouse_speed = model::speed_to_slider(file.mouse_accel_speed());
+        }
+        if file.touchpad_accel_speed != self.file.touchpad_accel_speed {
+            self.touchpad_speed = model::speed_to_slider(file.touchpad_accel_speed());
         }
         if file.dock_icon_size != self.file.dock_icon_size {
             self.dock_icon_size = model::dock_icon_size_on_slider(file.dock_icon_size());
@@ -198,6 +207,12 @@ impl App {
             Message::MouseSpeedReleased => {
                 self.change(Change::MouseAccelSpeed(model::slider_to_speed(
                     self.mouse_speed,
+                )));
+            }
+            Message::TouchpadSpeed(speed) => self.touchpad_speed = speed,
+            Message::TouchpadSpeedReleased => {
+                self.change(Change::TouchpadAccelSpeed(model::slider_to_speed(
+                    self.touchpad_speed,
                 )));
             }
             Message::DockIconSize(size) => self.dock_icon_size = size,
