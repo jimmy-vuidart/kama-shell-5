@@ -363,6 +363,10 @@ fn export_environment(state: &State) {
     let mut variables = vec![
         format!("WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy()),
         "XDG_CURRENT_DESKTOP=coquille".to_owned(),
+        // Chromium and Electron keep their keys in the Secret Service only
+        // on a desktop they know; this variable makes them (see
+        // `coquille-session`).
+        "GNOME_DESKTOP_SESSION_ID=this-is-deprecated".to_owned(),
     ];
     // Where the dock, started by those services, finds the compositor.
     if let Some(ipc) = &state.ipc {

@@ -9,25 +9,46 @@
 #
 # The log is kept in ~/.local/state/coquille/session.log; the log of the
 # previous start is kept beside it, so that a crash is not erased by the next
-# attempt. The dock has its own, dock.log, in the same place.
+# attempt. The dock has its own, dock.log, in the same place, and so does the
+# keyring, keyring.log.
 
 # A display manager starts the session as a Wayland one; a login on a virtual
 # terminal does not. Only the former owns the user's session services, which
 # another graphical session may be using in the latter case.
+owns_services=
 if [ "$XDG_SESSION_TYPE" = wayland ]; then
+    owns_services=yes
     set -- --export-environment "$@"
 fi
 
 export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=coquille
 export XDG_SESSION_DESKTOP=coquille
+# Chromium and Electron choose where to keep their keys by the desktop: one
+# they do not know gets them in clear text. When neither XDG_CURRENT_DESKTOP
+# nor DESKTOP_SESSION names one, they read this old variable, and use the
+# Secret Service (libsecret), which the keyring of coquille provides.
+export GNOME_DESKTOP_SESSION_ID=this-is-deprecated
 
 state="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
 mkdir -p "$state"
-if [ -f "$state/session.log" ]; then
-    mv -f "$state/session.log" "$state/session.previous.log"
-fi
+for log in session keyring; do
+    if [ -f "$state/$log.log" ]; then
+        mv -f "$state/$log.log" "$state/$log.previous.log"
+    fi
+done
 
 here="$(dirname "$(readlink -f "$0")")"
+
+# The keyring serves org.freedesktop.secrets for this session. The one of
+# GNOME, started by the login screen (PAM) or by systemd, would hold the name
+# and keep it locked: it is stopped for this session only, disabled nowhere.
+# The keyring is ready before the first application, and stops with the
+# compositor, which takes the PID of this script with `exec`.
+if [ -n "$owns_services" ] && [ -x "$here/coquille-keyring" ]; then
+    systemctl --user stop gnome-keyring-daemon.socket gnome-keyring-daemon.service \
+        2>/dev/null
+    "$here/coquille-keyring" --until $$ >>"$state/keyring.log" 2>&1 &
+fi
 exec "$here/coquille" --backend hardware --log-file "$state/session.log" \
     --spawn "exec \"$here/coquille-dock-watch\"" "$@"

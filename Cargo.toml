@@ -10,6 +10,7 @@ members = [
     "crates/compositor",
     "crates/dock",
     "crates/settings",
+    "crates/keyring",
 ]
 exclude = ["vendor"]
 

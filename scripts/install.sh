@@ -8,9 +8,9 @@
 # The icons come from the AUR package reversal-icon-theme-git: the script
 # says when it is missing, and never installs it.
 #
-# Only --session needs root, for the two files of the login screen; it never
-# changes the default session. PREFIX (default ~/.local) chooses where the
-# rest goes.
+# Only --session needs root, for the two files of the login screen and the
+# portal file of the keyring; it never changes the default session. PREFIX
+# (default ~/.local) chooses where the rest goes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -19,6 +19,7 @@ bin="$prefix/bin/coquille"
 dock_bin="$prefix/bin/coquille-dock"
 dock_watch="$prefix/bin/coquille-dock-watch"
 settings_bin="$prefix/bin/coquille-settings"
+keyring_bin="$prefix/bin/coquille-keyring"
 session_bin="$prefix/bin/coquille-session"
 entry="$prefix/share/applications/coquille.desktop"
 # Named after the windows of the settings screen: their title bar and their
@@ -31,11 +32,18 @@ log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/coquille"
 # Where display managers look for Wayland sessions.
 sessions="${SESSIONS_DIR:-/usr/share/wayland-sessions}"
 session_entries=("$sessions/coquille.desktop" "$sessions/coquille-essai.desktop")
+# Where xdg-desktop-portal looks for its backends (system-wide only), and for
+# the choices of the user among them.
+portals="${PORTALS_DIR:-/usr/share/xdg-desktop-portal/portals}"
+portal_entry="$portals/coquille.portal"
+portals_config="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal/coquille-portals.conf"
 
-# Runs a command as root unless the target directory is already writable
-# (a scratch SESSIONS_DIR, for trying the script out).
+# Runs a command as root unless the directory it writes in is already
+# writable (a scratch SESSIONS_DIR or PORTALS_DIR, for trying the script out).
 as_root() {
-    if [[ -w "$sessions" || ( ! -e "$sessions" && -w "$(dirname "$sessions")" ) ]]; then
+    local target="$1"
+    shift
+    if [[ -w "$target" || ( ! -e "$target" && -w "$(dirname "$target")" ) ]]; then
         "$@"
     else
         sudo "$@"
@@ -44,22 +52,28 @@ as_root() {
 
 if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f -- "${bin:?}" "${dock_bin:?}" "${dock_watch:?}" "${settings_bin:?}" "${session_bin:?}" \
-        "${entry:?}" "${settings_entry:?}"
+        "${keyring_bin:?}" "${entry:?}" "${settings_entry:?}" "${portals_config:?}"
     rm -rf -- "${wallpapers_dir:?}"
     for session_entry in "${session_entries[@]}"; do
         if [[ -e "$session_entry" ]]; then
-            as_root rm -f -- "${session_entry:?}"
+            as_root "$sessions" rm -f -- "${session_entry:?}"
         fi
     done
+    if [[ -e "$portal_entry" ]]; then
+        as_root "$portals" rm -f -- "${portal_entry:?}"
+    fi
     echo "coquille est désinstallé."
     echo "Restent, si vous voulez les supprimer : $config et $log_dir"
+    echo "(le trousseau y est : keyring.bin, et sa clé scellée keyring.key)"
     exit 0
 fi
 
-cargo build --release --locked -p coquille -p coquille-dock -p coquille-settings
+cargo build --release --locked -p coquille -p coquille-dock -p coquille-settings \
+    -p coquille-keyring
 install -Dm755 target/release/coquille "$bin"
 install -Dm755 target/release/coquille-dock "$dock_bin"
 install -Dm755 target/release/coquille-settings "$settings_bin"
+install -Dm755 target/release/coquille-keyring "$keyring_bin"
 install -Dm755 scripts/coquille-dock-watch "$dock_watch"
 install -Dm755 scripts/coquille-session "$session_bin"
 mkdir -p "$wallpapers_dir"
@@ -72,6 +86,12 @@ if [[ ! -e "$config" ]]; then
     config_note="créée (rôles des écrans : à vérifier)"
 else
     config_note="conservée"
+fi
+
+# Sandboxed applications reach the keyring through this choice of portal;
+# one the user wrote is theirs.
+if [[ ! -e "$portals_config" ]]; then
+    install -Dm644 config/coquille-portals.conf "$portals_config"
 fi
 
 # The icons of the shell come from a package, never installed from here.
@@ -185,8 +205,14 @@ Exec=$session_bin --exit-after 60
 DesktopNames=coquille
 DESKTOP
     echo "Ajout de coquille à l'écran de connexion (droits administrateur) :"
-    as_root install -Dm644 -t "$sessions" "$staging/coquille.desktop" "$staging/coquille-essai.desktop"
+    as_root "$sessions" install -Dm644 -t "$sessions" "$staging/coquille.desktop" "$staging/coquille-essai.desktop"
     session_note="installée dans $sessions"
+    as_root "$portals" install -Dm644 -t "$portals" config/coquille.portal
+fi
+if [[ -e "$portal_entry" ]]; then
+    portal_note="portail $portal_entry"
+else
+    portal_note="portail de gnome-keyring en attendant (scripts/install.sh --session)"
 fi
 
 cat <<DONE
@@ -195,7 +221,8 @@ coquille est installé :
   programme        $bin
   dock             $dock_bin
   paramètres       $settings_bin  (bouton du dock, à côté de la déconnexion)
-  session          $session_bin  (lance aussi le dock)
+  session          $session_bin  (lance aussi le dock et le trousseau)
+  trousseau        $keyring_bin  ($portal_note)
   menu             $entry
   configuration    $config  ($config_note)
   fonds d'écran    $wallpapers_dir/

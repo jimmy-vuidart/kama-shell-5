@@ -149,14 +149,15 @@ coquille/
 │  │                # couleurs, police Figtree, symboles, lien au compositeur.
 │  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.
 │  ├─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
-│  └─ settings/     # binaire `coquille-settings` : l'écran « Paramètres ».
+│  ├─ settings/     # binaire `coquille-settings` : l'écran « Paramètres ».
+│  └─ keyring/      # binaire `coquille-keyring` : le trousseau (Secret Service, portail Secret).
 ├─ vendor/          # code tiers porté dans le dépôt (voir vendor/README.md).
 ├─ docs/            # phase en cours, tickets, conception, maquettes (voir docs/README.md)
 └─ CLAUDE.md
 ```
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
-- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Notifications et instantanés n'ont pas encore de forme.
+- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Le trousseau (`coquille-keyring`) est un service sans fenêtre, sur le bus de session. Notifications et instantanés n'ont pas encore de forme.
 - Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, disposition de chaque écran, délai des bords collants).
 - État persistant (mémoire par appli, largeurs des colonnes, instantanés) : `~/.local/state/coquille/`.
 
@@ -201,6 +202,12 @@ scripts/codegraph.sh files                                               # l'arb
 - **Canal du shell**, `ipc.rs` : socket `$XDG_RUNTIME_DIR/coquille-<affichage Wayland>.sock`, annoncé par `COQUILLE_SOCKET` aux programmes lancés. L'état entier (écrans, fenêtres, habitudes, thème) est poussé à chaque changement ; les commandes sont dans `crates/ipc`. Un message mal formé est journalisé et ignoré.
 - **winit et iced** : `iced_layershell` est écrit pour winit-core 0.31.0-beta.2, Smithay épingle la beta.3. `vendor/iced_exdevtools` (une ligne modifiée) les réconcilie par `[patch.crates-io]` ; à retirer quand `iced_layershell` suivra.
 - **Zone de notification** : le dock affiche les StatusNotifierItem (D-Bus). Les icônes X11 (XEmbed : Wine, Proton) y arrivent par `xembedsniproxy` de KDE, lancé par le compositeur quand XWayland est prêt (`xwayland.rs`) ; sa fenêtre-conteneur, transparente (`_NET_WM_WINDOW_OPACITY` 0), n'est ni dessinée ni visée (`Shell::visible_overrides`). Un clic droit sur une icône sans menu D-Bus lui envoie `ContextMenu` : l'appli dessine son menu elle-même.
+- **Trousseau**, `crates/keyring` : `coquille-keyring` sert `org.freedesktop.secrets` (Secret Service complet : collections, éléments, alias, sessions `plain` et `dh-ietf1024-sha256-aes128-cbc-pkcs7`) et le portail `org.freedesktop.impl.portal.Secret` des Flatpak. Écrit par nous plutôt que pris à GNOME (gnome-keyring), à KDE (KWallet) ou à oo7. Décisions :
+  - **toujours ouvert, jamais d'invite** (connexion automatique, machine privée) : `Unlock` n'a rien à faire, `Lock` ne fait rien, aucun objet `Prompt` ;
+  - **chiffré au repos** : `~/.local/state/coquille/keyring.bin` en AES-256-GCM ; sa clé, tirée au premier démarrage, est scellée dans `keyring.key` par `systemd-creds --user` (TPM2 et clé de la machine, sans root ni question). Une clé perdue ou fausse fait **refuser de démarrer** : un trousseau illisible n'est jamais remplacé par un vide ;
+  - **lancé par `coquille-session`** avant le compositeur, et seulement depuis l'écran de connexion. `--until <pid du compositeur>` l'arrête avec lui. gnome-keyring, démarré par PAM ou par systemd, est arrêté pour la session (`systemctl --user stop`), désactivé nulle part ;
+  - **Chromium et Electron** ne prennent le Secret Service que sur un bureau qu'ils connaissent : sinon ils gardent leurs clés en clair (`basic_text`, vérifié). La session exporte `GNOME_DESKTOP_SESSION_ID`, qu'ils lisent quand `XDG_CURRENT_DESKTOP` ne leur dit rien. `XDG_CURRENT_DESKTOP` reste `coquille` ;
+  - **portail** : `~/.config/xdg-desktop-portal/coquille-portals.conf` ne nomme que le Secret (`coquille`, puis `gnome-keyring` dont le fichier `.portal` vise le même nom de bus) ; `config/coquille.portal` va dans `/usr/share/xdg-desktop-portal/portals/` avec `--session`.
 - **Le dock passe par les outils des services** (`pactl`, `parec`, `nmcli`, `bluetoothctl`, `ddcutil`) plutôt que par leurs bibliothèques : rien à lier, un outil absent grise sa commande.
 - **Thème et accent** : `theme` et `accent` de la configuration valent pour le compositeur et le dock ; le thème change en cours de session (commande `set_theme`).
 - **Configuration relue à chaud** : la commande `reload_config` fait relire `config.toml` au compositeur (`reload.rs`), qui applique ce qui peut changer en cours de route (thème, accent, terminal, disposition du clavier, disposition de chaque écran, bords collants, affichage direct et VRR) puis prévient les autres programmes (`config_changed`) : le dock relit alors sa part et déplace ses barres. **Le rôle des écrans et XWayland ne changent qu'au démarrage.** Un fichier illisible ou invalide ne change rien.
@@ -236,13 +243,13 @@ Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les régl
 
 ### Installer
 
-`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`). Il vérifie aussi que le thème d'icônes Reversal est là et, sinon, donne la commande pour installer le paquet (`paru -S reversal-icon-theme-git`) sans l'installer lui-même. À terme, coquille s'installera comme paquet AUR qui en dépendra (ticket 25).
+`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-keyring` (le trousseau) et le choix de portail `~/.config/xdg-desktop-portal/coquille-portals.conf` s'il n'existe pas, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`). Il vérifie aussi que le thème d'icônes Reversal est là et, sinon, donne la commande pour installer le paquet (`paru -S reversal-icon-theme-git`) sans l'installer lui-même. À terme, coquille s'installera comme paquet AUR qui en dépendra (ticket 25).
 
 Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. Aucun terminal n'est ouvert au démarrage : `Mod+Entrée` en ouvre un. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options. Ses boutons Se déconnecter, Redémarrer et Éteindre sont **réels** (après confirmation) partout sauf avec `--mock` : en imbriqué aussi, Redémarrer redémarre la machine.
 
-`scripts/install.sh --session` ajoute en plus deux sessions à l'écran de connexion (`/usr/share/wayland-sessions/`, seul endroit qui demande `sudo`) : « coquille » et « coquille (essai, 60 secondes) ». La session par défaut n'est jamais modifiée. `scripts/install.sh --uninstall` retire tout.
+`scripts/install.sh --session` ajoute en plus deux sessions à l'écran de connexion (`/usr/share/wayland-sessions/`) : « coquille » et « coquille (essai, 60 secondes) », et le portail du trousseau (`/usr/share/xdg-desktop-portal/portals/coquille.portal`) ; ce sont les seuls endroits qui demandent `sudo`. La session par défaut n'est jamais modifiée. `scripts/install.sh --uninstall` retire tout.
 
-Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises. Ce que dit le serveur X va à côté, dans `xwayland.log`, et ce que dit le dock dans `dock.log` (et `dock.previous.log`).
+Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises. Ce que dit le serveur X va à côté, dans `xwayland.log`, ce que dit le dock dans `dock.log` (et `dock.previous.log`), et ce que dit le trousseau dans `keyring.log` (et `keyring.previous.log`).
 
 ### État de la phase 2
 
@@ -335,6 +342,26 @@ Limites connues :
 - les colonnes d'un écran se renumérotent quand l'une se ferme : une appli mémorisée « colonne 3 » rouvre dans la plus proche disponible ;
 - une nouvelle colonne s'ouvre toujours à droite en `Super + glisser` (la mémoire, elle, rouvre une colonne à sa place) : pour réordonner, on déplace une fenêtre ;
 - la colonne maître est toujours à gauche.
+
+### État du trousseau
+
+Fait, **vérifié sur un bus D-Bus isolé** (`dbus-run-session`, rien ne touche au trousseau de la session) et par tests unitaires :
+
+- avec `secret-tool` (libsecret, session chiffrée DH) : enregistrer, remplacer, chercher, lire, effacer, collection `session` oubliée au redémarrage, secrets retrouvés après redémarrage ;
+- clé scellée par `systemd-creds --user` puis descellée au redémarrage ;
+- mauvaise clé : refus de démarrer, fichier intact ; `--until` : arrêt avec le processus suivi ;
+- portail : 64 octets par appli, les mêmes d'une demande à l'autre, distincts d'une appli à l'autre ;
+- Electron 43 : `basic_text` sans la variable, `gnome_libsecret` avec, et sa clé « Chromium Safe Storage » rangée chez nous.
+
+Pas fait : la session réelle depuis l'écran de connexion (arrêt de gnome-keyring, applis qui gardent leur connexion d'une session à l'autre), et un vrai Flatpak.
+
+Limites connues :
+
+- **on est reparti de zéro** : rien n'est repris de gnome-keyring ni de KWallet. Sous coquille, chaque appli demande une reconnexion une fois, et Chrome n'y retrouve pas les mots de passe qu'il gardait ;
+- **Plasma garde ses trousseaux** (gnome-keyring pour Chrome, KWallet pour Electron) : ces applis chiffrent leurs données avec une clé différente selon la session, et peuvent se déconnecter à chaque passage de l'une à l'autre ;
+- qui ouvre la session ouvre les secrets (pas de verrouillage) ; root sur cette machine, avec le TPM, peut desceller la clé ;
+- si gnome-keyring prend le nom avant lui (activé par D-Bus entre son arrêt et le démarrage du trousseau), le trousseau attend son tour (`waiting for it to leave` dans `keyring.log`) ;
+- ni agent SSH, ni interfaces propres à gnome-keyring (Seahorse).
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 
