@@ -14,6 +14,7 @@ use coquille_model::{OutputRole, Scale};
 pub enum Page {
     #[default]
     Appearance,
+    Wallpaper,
     Screens,
     Audio,
     Game,
@@ -22,8 +23,9 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Appearance,
+        Self::Wallpaper,
         Self::Screens,
         Self::Audio,
         Self::Game,
@@ -34,6 +36,7 @@ impl Page {
     pub fn name(self) -> &'static str {
         match self {
             Self::Appearance => "Apparence",
+            Self::Wallpaper => "Fond d'écran",
             Self::Screens => "Écrans et dock",
             Self::Audio => "Son",
             Self::Game => "Mode jeu",
@@ -45,7 +48,8 @@ impl Page {
     /// What the page is about, under its name.
     pub fn summary(self) -> &'static str {
         match self {
-            Self::Appearance => "Le thème, la couleur d'accent et le fond d'écran.",
+            Self::Appearance => "Le thème et la couleur d'accent.",
+            Self::Wallpaper => "L'image derrière les fenêtres, et sa définition.",
             Self::Screens => "Quel écran est lequel, et où se tient le dock.",
             Self::Audio => {
                 "Les périphériques de sortie, leurs surnoms et leur présence dans le lanceur."

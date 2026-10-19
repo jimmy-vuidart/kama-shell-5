@@ -9,7 +9,7 @@ use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use tiny_skia::{Color, FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
 use tracing::warn;
 
-use crate::config::{WallpaperConfig, WallpaperMode};
+use crate::config::{WallpaperConfig, WallpaperDefinition, WallpaperMode};
 use crate::theme::{Rgba, ThemeKind};
 
 /// The rendered wallpaper of one screen.
@@ -141,7 +141,7 @@ pub fn resolve_wallpaper_path(
     }
 
     // 3. Built-in / default glass wallpaper, at night in the dark theme
-    resolve_default_wallpaper(screen_size, kind)
+    resolve_default_wallpaper(screen_size, kind, config.definition())
 }
 
 /// Expands leading `~` to the user's home directory.
@@ -156,41 +156,60 @@ fn expand_path(path_str: &str) -> PathBuf {
 
 /// Looks for default wallpapers in standard asset and data directories:
 /// `glass-dark-*` in the dark theme, falling back on the light `glass-*`.
-fn resolve_default_wallpaper(screen_size: Size, kind: ThemeKind) -> Option<PathBuf> {
+fn resolve_default_wallpaper(
+    screen_size: Size,
+    kind: ThemeKind,
+    definition: WallpaperDefinition,
+) -> Option<PathBuf> {
     let dirs = wallpaper_search_dirs();
     let prefixes: &[&str] = match kind {
         ThemeKind::Dark => &["glass-dark-", "glass-"],
         ThemeKind::Light => &["glass-"],
     };
+    let sizes = glass_sizes(screen_size, definition);
     prefixes
         .iter()
-        .find_map(|prefix| find_glass(&dirs, prefix, screen_size))
+        .find_map(|prefix| find_glass(&dirs, prefix, &sizes))
 }
 
-/// The glass wallpaper named `<prefix><width>x<height>.png` that suits
-/// `screen_size` best.
-fn find_glass(dirs: &[PathBuf], prefix: &str, screen_size: Size) -> Option<PathBuf> {
-    let exact_name = format!("{prefix}{}x{}.png", screen_size.w, screen_size.h);
-
-    for dir in dirs {
-        let exact = dir.join(&exact_name);
-        if exact.is_file() {
-            return Some(exact);
-        }
-    }
-
-    // Ratio-based fallback: wide (21:9 or wider) vs standard (16:9)
-    let wide = screen_size.w as f32 / screen_size.h as f32 >= 2.0;
-    let preferred_name = if wide {
-        format!("{prefix}3440x1440.png")
+/// The sizes of the glass wallpaper that suit a screen of `screen_size`
+/// pixels, best first. A 21:9 screen has a single one; a 16:9 screen takes
+/// the 1080p or 4K version, as chosen or as its definition asks.
+fn glass_sizes(screen_size: Size, definition: WallpaperDefinition) -> Vec<(i32, i32)> {
+    const HD: (i32, i32) = (1920, 1080);
+    const UHD: (i32, i32) = (3840, 2160);
+    const WIDE: (i32, i32) = (3440, 1440);
+    let exact = (screen_size.w, screen_size.h);
+    // Wide (21:9 or wider) vs standard (16:9)
+    let mut sizes = if screen_size.w as f32 / screen_size.h as f32 >= 2.0 {
+        vec![exact, WIDE]
     } else {
-        format!("{prefix}1920x1080.png")
+        match definition {
+            WallpaperDefinition::Hd => vec![HD, UHD],
+            WallpaperDefinition::Uhd => vec![UHD, HD],
+            WallpaperDefinition::Auto => {
+                // Never enlarged when a bigger one exists.
+                let larger = screen_size.w > HD.0 || screen_size.h > HD.1;
+                let (first, second) = if larger { (UHD, HD) } else { (HD, UHD) };
+                vec![exact, first, second]
+            }
+        }
     };
+    // The screen's own size may be one of the others, right after it.
+    sizes.dedup();
+    sizes
+}
 
-    for dir in dirs {
-        let preferred = dir.join(&preferred_name);
-        if preferred.is_file() {
-            return Some(preferred);
+/// The first glass wallpaper named `<prefix><width>x<height>.png` found among
+/// `sizes`, or any of that prefix.
+fn find_glass(dirs: &[PathBuf], prefix: &str, sizes: &[(i32, i32)]) -> Option<PathBuf> {
+    for (w, h) in sizes {
+        let name = format!("{prefix}{w}x{h}.png");
+        for dir in dirs {
+            let path = dir.join(&name);
+            if path.is_file() {
+                return Some(path);
+            }
         }
     }
 
@@ -435,7 +454,11 @@ mod tests {
     #[test]
     fn default_wallpaper_finds_glass_in_assets() {
         // Run from workspace root
-        let resolved = resolve_default_wallpaper(Size::new(1920, 1080), ThemeKind::Light);
+        let resolved = resolve_default_wallpaper(
+            Size::new(1920, 1080),
+            ThemeKind::Light,
+            WallpaperDefinition::Auto,
+        );
         assert!(resolved.is_some());
         let path = resolved.unwrap();
         assert!(path.to_str().unwrap().contains("glass-1920x1080.png"));
@@ -443,12 +466,34 @@ mod tests {
 
     #[test]
     fn dark_theme_finds_the_night_glass() {
-        let path = resolve_default_wallpaper(Size::new(3440, 1440), ThemeKind::Dark).unwrap();
-        assert!(path.to_str().unwrap().contains("glass-dark-3440x1440.png"));
-        // A size that has no image of its own takes one of the same theme.
-        let path = resolve_default_wallpaper(Size::new(2560, 1600), ThemeKind::Dark).unwrap();
-        assert!(path.to_str().unwrap().contains("glass-dark-1920x1080.png"));
-        let path = resolve_default_wallpaper(Size::new(2560, 1600), ThemeKind::Light).unwrap();
-        assert!(path.to_str().unwrap().contains("glass-1920x1080.png"));
+        let auto = WallpaperDefinition::Auto;
+        let path = resolve_default_wallpaper(Size::new(3440, 1440), ThemeKind::Dark, auto).unwrap();
+        assert!(path.to_str().unwrap().ends_with("glass-dark-3440x1440.png"));
+        let path = resolve_default_wallpaper(Size::new(1920, 1080), ThemeKind::Dark, auto).unwrap();
+        assert!(path.to_str().unwrap().ends_with("glass-dark-1920x1080.png"));
+        let path =
+            resolve_default_wallpaper(Size::new(3840, 2160), ThemeKind::Light, auto).unwrap();
+        assert!(path.to_str().unwrap().ends_with("glass-3840x2160.png"));
+    }
+
+    #[test]
+    fn a_sixteen_by_nine_screen_takes_the_chosen_definition() {
+        use WallpaperDefinition::{Auto, Hd, Uhd};
+        let hd = Size::new(1920, 1080);
+        let uhd = Size::new(3840, 2160);
+        // Automatic: the screen's own size, else never enlarged.
+        assert_eq!(glass_sizes(hd, Auto), vec![(1920, 1080), (3840, 2160)]);
+        assert_eq!(glass_sizes(Size::new(2560, 1600), Auto)[1], (3840, 2160));
+        assert_eq!(glass_sizes(Size::new(1366, 768), Auto)[1], (1920, 1080));
+        // Chosen: whatever the screen.
+        assert_eq!(glass_sizes(uhd, Hd), vec![(1920, 1080), (3840, 2160)]);
+        assert_eq!(glass_sizes(hd, Uhd), vec![(3840, 2160), (1920, 1080)]);
+        // A 21:9 screen has a single version.
+        assert_eq!(glass_sizes(Size::new(3440, 1440), Uhd), vec![(3440, 1440)]);
+
+        let path = resolve_default_wallpaper(uhd, ThemeKind::Dark, Hd).unwrap();
+        assert!(path.to_str().unwrap().ends_with("glass-dark-1920x1080.png"));
+        let path = resolve_default_wallpaper(hd, ThemeKind::Light, Uhd).unwrap();
+        assert!(path.to_str().unwrap().ends_with("glass-3840x2160.png"));
     }
 }

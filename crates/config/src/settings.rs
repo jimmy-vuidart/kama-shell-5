@@ -201,6 +201,36 @@ impl WallpaperMode {
     }
 }
 
+/// Which version of the default « glass » wallpaper a 16:9 screen shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WallpaperDefinition {
+    /// The one that suits the definition of the screen.
+    #[default]
+    Auto,
+    /// 1920 × 1080.
+    Hd,
+    /// 3840 × 2160.
+    Uhd,
+}
+
+impl WallpaperDefinition {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Hd, Self::Uhd];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Hd => "1080p",
+            Self::Uhd => "4k",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|definition| definition.name() == name)
+    }
+}
+
 /// What the file says. `None` is a setting left to its default.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
@@ -235,6 +265,7 @@ pub struct Settings {
     pub wallpaper_path: Option<String>,
     pub wallpapers: PerScreen<Option<String>>,
     pub wallpaper_mode: Option<WallpaperMode>,
+    pub wallpaper_definition: Option<WallpaperDefinition>,
     pub audio_hidden: Vec<String>,
     pub audio_nicks: BTreeMap<String, String>,
 }
@@ -334,6 +365,9 @@ impl Settings {
             wallpaper_mode: text_of(&["wallpaper", "mode"])
                 .as_deref()
                 .and_then(WallpaperMode::named),
+            wallpaper_definition: text_of(&["wallpaper", "definition"])
+                .as_deref()
+                .and_then(WallpaperDefinition::named),
             audio_hidden,
             audio_nicks,
         }
@@ -393,6 +427,10 @@ impl Settings {
 
     pub fn wallpaper_mode(&self) -> WallpaperMode {
         self.wallpaper_mode.unwrap_or_default()
+    }
+
+    pub fn wallpaper_definition(&self) -> WallpaperDefinition {
+        self.wallpaper_definition.unwrap_or_default()
     }
 
     pub fn mouse_accel_speed(&self) -> f64 {
@@ -495,6 +533,8 @@ pub enum Change {
     WallpaperPath(Option<String>),
     Wallpaper(OutputRole, Option<String>),
     WallpaperMode(WallpaperMode),
+    /// `Auto` removes the line.
+    WallpaperDefinition(WallpaperDefinition),
     AudioNick {
         device: String,
         nick: Option<String>,
@@ -598,6 +638,12 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
             text_or_nothing(text, &path_key, path)
         }
         Change::WallpaperMode(mode) => with_value(text, &["wallpaper", "mode"], mode.name().into()),
+        Change::WallpaperDefinition(WallpaperDefinition::Auto) => {
+            without(text, &["wallpaper", "definition"])
+        }
+        Change::WallpaperDefinition(definition) => {
+            with_value(text, &["wallpaper", "definition"], definition.name().into())
+        }
         Change::AudioNick { device, nick } => {
             let nick = nick.as_deref().map(str::trim).filter(|n| !n.is_empty());
             match nick {
@@ -776,6 +822,7 @@ mod tests {
             Change::TouchpadClick(TouchpadClick::Areas),
             Change::WallpaperPath(Some("/home/user/wallpaper.png".into())),
             Change::WallpaperMode(WallpaperMode::Fit),
+            Change::WallpaperDefinition(WallpaperDefinition::Uhd),
             Change::AudioNick {
                 device: "alsa_output.headphones".into(),
                 nick: Some("Mon Casque".into()),
@@ -829,6 +876,7 @@ mod tests {
             wallpaper_path: Some("/home/user/wallpaper.png".into()),
             wallpapers: PerScreen::default(),
             wallpaper_mode: Some(WallpaperMode::Fit),
+            wallpaper_definition: Some(WallpaperDefinition::Uhd),
             audio_hidden: vec!["alsa_output.hdmi".into()],
             audio_nicks: BTreeMap::from([("alsa_output.headphones".into(), "Mon Casque".into())]),
         };
@@ -950,6 +998,30 @@ mod tests {
         let text = apply(&text, &Change::Wallpaper(OutputRole::Right, None)).unwrap();
         let settings = Settings::parse(&text);
         assert_eq!(settings.wallpapers.right, None);
+    }
+
+    #[test]
+    fn the_wallpaper_definition_goes_back_to_automatic_by_removing_its_line() {
+        let text = "[wallpaper]\nmode = \"fit\"\n";
+        assert_eq!(
+            Settings::parse(text).wallpaper_definition(),
+            WallpaperDefinition::Auto
+        );
+
+        let text = apply(text, &Change::WallpaperDefinition(WallpaperDefinition::Hd)).unwrap();
+        assert!(text.contains("definition = \"1080p\""));
+        assert_eq!(
+            Settings::parse(&text).wallpaper_definition(),
+            WallpaperDefinition::Hd
+        );
+
+        let text = apply(
+            &text,
+            &Change::WallpaperDefinition(WallpaperDefinition::Auto),
+        )
+        .unwrap();
+        assert!(!text.contains("definition"));
+        assert!(text.contains("mode = \"fit\""));
     }
 
     #[test]

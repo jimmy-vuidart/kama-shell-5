@@ -32,13 +32,14 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 | Option | Effet |
 |---|---|
 | `--config FICHIER` | Fichier de configuration (défaut : `~/.config/coquille/config.toml`). |
-| `--page PAGE` | Page d'ouverture : `appearance`, `screens`, `game`, `mouse`, `system`. |
+| `--page PAGE` | Page d'ouverture : `appearance`, `wallpaper`, `screens`, `game`, `mouse`, `system`. |
 
 ## Les pages
 
 | Page | Réglages | Prend effet |
 |---|---|---|
 | Apparence | thème clair ou sombre, couleur d'accent (celle du thème, huit pastilles, ou `#rrggbb` saisi) | aussitôt |
+| Fond d'écran | définition du fond « verre » des écrans 16:9 (automatique, 1080p, 4K), mode d'affichage, image personnalisée (rétablir le fond par défaut) | aussitôt |
 | Écrans et dock | connecteur de chaque écran | **au prochain démarrage** |
 | | disposition de chaque écran : plein écran, 2 colonnes, 3 colonnes, maître / esclave | aussitôt |
 | | dock de chaque écran : à gauche, à droite, en bas, aucun (un écran seul a le sien tant que le fichier ne dit rien) | aussitôt |

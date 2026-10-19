@@ -224,6 +224,19 @@ pub enum WallpaperMode {
     Tile,
 }
 
+/// Which version of the default « glass » wallpaper a 16:9 screen shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+pub enum WallpaperDefinition {
+    /// The one that suits the definition of the screen.
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "1080p")]
+    Hd,
+    #[serde(rename = "4k")]
+    Uhd,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WallpaperConfig {
@@ -232,11 +245,16 @@ pub struct WallpaperConfig {
     pub center: Option<String>,
     pub right: Option<String>,
     pub mode: Option<WallpaperMode>,
+    pub definition: Option<WallpaperDefinition>,
 }
 
 impl WallpaperConfig {
     pub fn mode(&self) -> WallpaperMode {
         self.mode.unwrap_or_default()
+    }
+
+    pub fn definition(&self) -> WallpaperDefinition {
+        self.definition.unwrap_or_default()
     }
 }
 
@@ -530,6 +548,7 @@ mod tests {
             Change::WallpaperPath(Some("/path/to/wall.png".into())),
             Change::Wallpaper(OutputRole::Left, Some("/path/to/left.png".into())),
             Change::WallpaperMode(coquille_config::WallpaperMode::Fit),
+            Change::WallpaperDefinition(coquille_config::WallpaperDefinition::Uhd),
             Change::AudioNick {
                 device: "alsa_output.headphones".into(),
                 nick: Some("Casque".into()),
@@ -562,6 +581,7 @@ mod tests {
         assert_eq!(config.wallpaper.path.as_deref(), Some("/path/to/wall.png"));
         assert_eq!(config.wallpaper.left.as_deref(), Some("/path/to/left.png"));
         assert_eq!(config.wallpaper.mode(), WallpaperMode::Fit);
+        assert_eq!(config.wallpaper.definition(), WallpaperDefinition::Uhd);
         assert_eq!(config.layout.of(OutputRole::Left), LayoutKind::MainSide);
         assert_eq!(
             config.layout.of(OutputRole::Center),

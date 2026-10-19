@@ -137,6 +137,9 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # center = "/chemin/vers/centre.png"
 # right = "/chemin/vers/droite.png"
 # mode = "fill"
+# Version du fond « glass » sur les écrans 16:9 : "1080p" ou "4k". Sans ce
+# réglage, celle qui convient à la définition de l'écran.
+# definition = "4k"
 
 # Périphériques audio de sortie : sélecteur rapide du lanceur et surnoms.
 # [audio]

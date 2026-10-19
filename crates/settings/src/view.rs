@@ -2,7 +2,8 @@
 //! the chosen one on the right, each in a card.
 
 use coquille_config::{
-    Change, DockPlace, MouseAccelProfile, PerScreen, TouchpadClick, WallpaperMode,
+    Change, DockPlace, MouseAccelProfile, PerScreen, TouchpadClick, WallpaperDefinition,
+    WallpaperMode,
 };
 use coquille_ipc::ThemeName;
 use coquille_model::{LayoutKind, OutputRole};
@@ -75,6 +76,7 @@ fn sidebar<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
 fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, Message> {
     let icon = match page {
         Page::Appearance => Glyph::Brush,
+        Page::Wallpaper => Glyph::Picture,
         Page::Screens => Glyph::Screens,
         Page::Audio => Glyph::Volume,
         Page::Game => Glyph::Gamepad,
@@ -127,6 +129,7 @@ fn page<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     }
     let settings = match app.page {
         Page::Appearance => appearance(app, palette),
+        Page::Wallpaper => wallpaper(app, palette),
         Page::Screens => screens(app, palette),
         Page::Audio => audio(app, palette),
         Page::Game => game(app, palette),
@@ -229,6 +232,27 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     ]
     .spacing(12);
 
+    section(
+        "Thème",
+        card(vec![theme.into(), accent.into()], palette),
+        palette,
+    )
+}
+
+/// The page of the wallpaper: its version, how it fits, the image.
+fn wallpaper<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
+    let definitions = [
+        (WallpaperDefinition::Auto, "Automatique"),
+        (WallpaperDefinition::Hd, "1080p"),
+        (WallpaperDefinition::Uhd, "4K"),
+    ];
+    let definition_choice = segmented(
+        &definitions,
+        app.file.wallpaper_definition(),
+        |definition| Message::Change(Change::WallpaperDefinition(definition)),
+        palette,
+    );
+
     let wallpaper_modes = [
         (WallpaperMode::Fill, "Remplir"),
         (WallpaperMode::Fit, "Ajuster"),
@@ -286,6 +310,14 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
 
     let wallpaper = vec![
         setting(
+            "Définition",
+            "La version du fond « verre » sur les écrans 16:9. Automatique : celle qui \
+             convient à l'écran. Sans effet sur une image personnalisée ni sur l'écran 21:9.",
+            None,
+            definition_choice,
+            palette,
+        ),
+        setting(
             "Mode d'affichage",
             "Comment l'image s'ajuste à la taille de l'écran.",
             None,
@@ -301,16 +333,7 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         ),
     ];
 
-    column![
-        section(
-            "Thème",
-            card(vec![theme.into(), accent.into()], palette),
-            palette
-        ),
-        section("Fond d'écran", card(wallpaper, palette), palette),
-    ]
-    .spacing(18)
-    .into()
+    section("Image", card(wallpaper, palette), palette)
 }
 
 /// A theme to choose, shown as a small screen in its colors.

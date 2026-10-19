@@ -31,6 +31,7 @@ pub enum Glyph {
     Clock,
     /// The pages of the settings screen.
     Brush,
+    Picture,
     Screens,
     Gamepad,
     Mouse,
@@ -92,6 +93,9 @@ impl Glyph {
             Self::Clock => r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>"#,
             Self::Brush => {
                 r#"<path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.6-1.2-1.8-1.2-3.2 0-1 .8-1.8 2-1.8H17a4 4 0 0 0 4-4c0-3.9-4-7-9-7z"/><circle cx="7.5" cy="12" r="1" fill="black"/><circle cx="10" cy="7.8" r="1" fill="black"/><circle cx="15" cy="7.8" r="1" fill="black"/>"#
+            }
+            Self::Picture => {
+                r#"<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="m3.5 17 5-5.5 4 4 2.5-2.5 5.5 5.5"/><circle cx="15.5" cy="9" r="1.6"/>"#
             }
             Self::Screens => {
                 r#"<rect x="7.5" y="6" width="9" height="9" rx="1.5"/><path d="M5 8H3.5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1H5M19 8h1.5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H19M9.5 19h5M12 15v4"/>"#
