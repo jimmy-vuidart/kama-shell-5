@@ -10,7 +10,7 @@ use tiny_skia::{Color, FilterQuality, IntSize, Pixmap, PixmapPaint, Transform};
 use tracing::warn;
 
 use crate::config::{WallpaperConfig, WallpaperMode};
-use crate::theme::Rgba;
+use crate::theme::{Rgba, ThemeKind};
 
 /// The rendered wallpaper of one screen.
 pub struct ScreenWallpaper {
@@ -44,6 +44,7 @@ impl WallpaperManager {
         &mut self,
         screens: &[(OutputId, OutputRole, Rect, Scale)],
         config: &WallpaperConfig,
+        kind: ThemeKind,
         backdrop: Rgba,
     ) -> Vec<ScreenWallpaper> {
         let active_ids: Vec<OutputId> = screens.iter().map(|(id, ..)| *id).collect();
@@ -54,7 +55,7 @@ impl WallpaperManager {
             // As many pixels as the screen has: the image is never enlarged.
             let pixels = scale.physical(rect.size());
             let size = (pixels.w, pixels.h);
-            let path = resolve_wallpaper_path(config, role, pixels);
+            let path = resolve_wallpaper_path(config, role, pixels, kind);
             let mode = config.mode();
             let key = CacheKey {
                 source: path.clone(),
@@ -113,6 +114,7 @@ pub fn resolve_wallpaper_path(
     config: &WallpaperConfig,
     role: OutputRole,
     screen_size: Size,
+    kind: ThemeKind,
 ) -> Option<PathBuf> {
     // 1. Role-specific override
     let configured_screen = match role {
@@ -138,8 +140,8 @@ pub fn resolve_wallpaper_path(
         warn!(path = %path.display(), "global wallpaper not found");
     }
 
-    // 3. Built-in / default glass wallpaper
-    resolve_default_wallpaper(screen_size)
+    // 3. Built-in / default glass wallpaper, at night in the dark theme
+    resolve_default_wallpaper(screen_size, kind)
 }
 
 /// Expands leading `~` to the user's home directory.
@@ -152,12 +154,25 @@ fn expand_path(path_str: &str) -> PathBuf {
     PathBuf::from(path_str)
 }
 
-/// Looks for default wallpapers in standard asset and data directories.
-fn resolve_default_wallpaper(screen_size: Size) -> Option<PathBuf> {
+/// Looks for default wallpapers in standard asset and data directories:
+/// `glass-dark-*` in the dark theme, falling back on the light `glass-*`.
+fn resolve_default_wallpaper(screen_size: Size, kind: ThemeKind) -> Option<PathBuf> {
     let dirs = wallpaper_search_dirs();
-    let exact_name = format!("glass-{}x{}.png", screen_size.w, screen_size.h);
+    let prefixes: &[&str] = match kind {
+        ThemeKind::Dark => &["glass-dark-", "glass-"],
+        ThemeKind::Light => &["glass-"],
+    };
+    prefixes
+        .iter()
+        .find_map(|prefix| find_glass(&dirs, prefix, screen_size))
+}
 
-    for dir in &dirs {
+/// The glass wallpaper named `<prefix><width>x<height>.png` that suits
+/// `screen_size` best.
+fn find_glass(dirs: &[PathBuf], prefix: &str, screen_size: Size) -> Option<PathBuf> {
+    let exact_name = format!("{prefix}{}x{}.png", screen_size.w, screen_size.h);
+
+    for dir in dirs {
         let exact = dir.join(&exact_name);
         if exact.is_file() {
             return Some(exact);
@@ -167,27 +182,32 @@ fn resolve_default_wallpaper(screen_size: Size) -> Option<PathBuf> {
     // Ratio-based fallback: wide (21:9 or wider) vs standard (16:9)
     let wide = screen_size.w as f32 / screen_size.h as f32 >= 2.0;
     let preferred_name = if wide {
-        "glass-3440x1440.png"
+        format!("{prefix}3440x1440.png")
     } else {
-        "glass-1920x1080.png"
+        format!("{prefix}1920x1080.png")
     };
 
-    for dir in &dirs {
-        let preferred = dir.join(preferred_name);
+    for dir in dirs {
+        let preferred = dir.join(&preferred_name);
         if preferred.is_file() {
             return Some(preferred);
         }
     }
 
-    // Any available glass wallpaper
-    for dir in &dirs {
+    // Any available glass wallpaper of this kind: a size follows the prefix
+    let is_glass = |name: &str| {
+        name.strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+            && name.ends_with(".png")
+    };
+    for dir in dirs {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .is_some_and(|name| name.starts_with("glass-") && name.ends_with(".png"))
+                    .is_some_and(is_glass)
                 {
                     return Some(path);
                 }
@@ -415,9 +435,20 @@ mod tests {
     #[test]
     fn default_wallpaper_finds_glass_in_assets() {
         // Run from workspace root
-        let resolved = resolve_default_wallpaper(Size::new(1920, 1080));
+        let resolved = resolve_default_wallpaper(Size::new(1920, 1080), ThemeKind::Light);
         assert!(resolved.is_some());
         let path = resolved.unwrap();
+        assert!(path.to_str().unwrap().contains("glass-1920x1080.png"));
+    }
+
+    #[test]
+    fn dark_theme_finds_the_night_glass() {
+        let path = resolve_default_wallpaper(Size::new(3440, 1440), ThemeKind::Dark).unwrap();
+        assert!(path.to_str().unwrap().contains("glass-dark-3440x1440.png"));
+        // A size that has no image of its own takes one of the same theme.
+        let path = resolve_default_wallpaper(Size::new(2560, 1600), ThemeKind::Dark).unwrap();
+        assert!(path.to_str().unwrap().contains("glass-dark-1920x1080.png"));
+        let path = resolve_default_wallpaper(Size::new(2560, 1600), ThemeKind::Light).unwrap();
         assert!(path.to_str().unwrap().contains("glass-1920x1080.png"));
     }
 }

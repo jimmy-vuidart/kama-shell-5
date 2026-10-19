@@ -400,9 +400,12 @@ impl State {
                 Some((screen.id, info.role, info.rect, info.scale))
             })
             .collect();
-        self.wallpapers =
-            self.wallpaper_manager
-                .update(&screens, &self.wallpaper_config, self.theme.backdrop);
+        self.wallpapers = self.wallpaper_manager.update(
+            &screens,
+            &self.wallpaper_config,
+            self.theme.kind,
+            self.theme.backdrop,
+        );
     }
 
     /// Active screen wallpapers (omitted on screens anchored by a game).

@@ -380,6 +380,8 @@ impl State {
             Some(accent) => theme.with_accent(accent),
             None => theme,
         };
+        // The default wallpaper has a night version.
+        self.refresh_wallpapers();
         self.full_redraw = true;
         self.shell_changed();
         self.queue_redraw();

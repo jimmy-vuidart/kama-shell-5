@@ -130,7 +130,7 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
 # Fond d'écran : image affichée en arrière-plan de chaque écran.
 # Sans cette section, le fond « glass » adapté à la définition de chaque écran
-# est utilisé.
+# est utilisé, dans sa version de nuit en thème sombre.
 # [wallpaper]
 # path = "/chemin/vers/image.png"
 # left = "/chemin/vers/gauche.png"
