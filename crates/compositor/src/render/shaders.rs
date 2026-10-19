@@ -176,6 +176,7 @@ impl Shaders {
                 UniformName::new("mask_mode", UniformType::_1i),
                 UniformName::new("mask_tex", UniformType::_1i),
                 UniformName::new("saturation", UniformType::_1f),
+                UniformName::new("liquid", UniformType::_4f),
                 UniformName::new("blur_origin", UniformType::_2f),
                 UniformName::new("blur_texel", UniformType::_2f),
                 UniformName::new("blur_max", UniformType::_2f),

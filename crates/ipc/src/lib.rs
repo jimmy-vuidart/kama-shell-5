@@ -153,6 +153,26 @@ pub enum Command {
     },
     /// Ends the session.
     Quit,
+    /// The pieces of liquid glass of a panel of the shell: the panel named
+    /// `namespace` on `screen`. The compositor bends and lights what is
+    /// behind each of them; with none, it blurs behind the panel's opaque
+    /// enough pixels.
+    SetGlass {
+        namespace: String,
+        screen: OutputRole,
+        shapes: Vec<GlassShape>,
+    },
+}
+
+/// A rounded rectangle of liquid glass, in logical pixels, from the top-left
+/// corner of its panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlassShape {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub radius: i32,
 }
 
 /// What should be captured in a screenshot.
@@ -278,6 +298,17 @@ mod tests {
             },
             Command::ReloadConfig,
             Command::Quit,
+            Command::SetGlass {
+                namespace: "coquille-dock".into(),
+                screen: OutputRole::Left,
+                shapes: vec![GlassShape {
+                    x: 110,
+                    y: 58,
+                    width: 477,
+                    height: 46,
+                    radius: 15,
+                }],
+            },
         ];
 
         for command in commands {

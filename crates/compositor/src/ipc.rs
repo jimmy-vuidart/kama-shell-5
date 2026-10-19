@@ -325,6 +325,18 @@ impl State {
                 info!("quitting: asked by the shell");
                 self.loop_signal.stop();
             }
+            Command::SetGlass {
+                namespace,
+                screen,
+                shapes,
+            } => {
+                let key = (namespace, screen);
+                if shapes.is_empty() {
+                    self.liquid.remove(&key);
+                } else {
+                    self.liquid.insert(key, shapes);
+                }
+            }
         }
     }
 

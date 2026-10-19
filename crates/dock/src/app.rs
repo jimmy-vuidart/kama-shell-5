@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
-use coquille_ipc::{Command, Event, ScreenshotTarget, Snapshot, ThemeName};
+use coquille_ipc::{Command, Event, GlassShape, ScreenshotTarget, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use iced::widget::operation;
 use iced::{Color, Element, Point, Size, Subscription, Task, keyboard, mouse, window};
@@ -77,6 +77,10 @@ pub struct Drag {
 
 /// A bar of the dock, on its screen. Each screen may have one, upright on
 /// its left or its right edge, or lying on its bottom edge.
+/// The layer-shell names of the bars and of the notifications.
+const BAR_NAMESPACE: &str = "coquille-dock";
+const TOASTS_NAMESPACE: &str = "coquille-toasts";
+
 pub struct BarState {
     pub id: window::Id,
     pub screen: OutputRole,
@@ -269,6 +273,8 @@ pub struct Dock {
     icon_style: IconStyle,
     pub snapshot: Snapshot,
     link: Option<UnboundedSender<Command>>,
+    /// The liquid glass last told to the compositor, by panel and screen.
+    glass_told: HashMap<(&'static str, OutputRole), Vec<GlassShape>>,
     links: HashMap<Backend, UnboundedSender<Request>>,
     /// The bars shown, one per screen that has a dock.
     pub bars: Vec<BarState>,
@@ -365,6 +371,7 @@ impl Dock {
             icon_style,
             snapshot,
             link: None,
+            glass_told: HashMap::new(),
             links: HashMap::new(),
             bars: Vec::new(),
             now: Local::now(),
@@ -603,7 +610,7 @@ impl Dock {
                 keyboard_interactivity: KeyboardInteractivity::None,
                 output_option: output,
                 events_transparent: false,
-                namespace: Some("coquille-dock".to_owned()),
+                namespace: Some(BAR_NAMESPACE.to_owned()),
             });
             self.bars.push(BarState {
                 id,
@@ -721,6 +728,7 @@ impl Dock {
             | Command::ToggleLauncher
             | Command::ReloadConfig
             | Command::Screenshot { .. }
+            | Command::SetGlass { .. }
             | Command::Quit => {}
         }
         self.rebuild_entries();
@@ -1097,7 +1105,7 @@ impl Dock {
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: self.output_for_bar(screen),
             events_transparent: false,
-            namespace: Some("coquille-toasts".to_owned()),
+            namespace: Some(TOASTS_NAMESPACE.to_owned()),
         });
         self.toasts = Some(ToastSurface {
             id,
@@ -1288,6 +1296,83 @@ impl Dock {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        self.tell_glass();
+        task
+    }
+
+    /// Where the liquid glass of each panel is now: the bars, and the
+    /// capsules of the notifications.
+    fn glass(&self) -> HashMap<(&'static str, OutputRole), Vec<GlassShape>> {
+        let metrics = self.metrics();
+        let mut glass = HashMap::new();
+        for bar in &self.bars {
+            let pinned = bar.pinned();
+            let shape = metrics.glass_shape(
+                bar.orientation,
+                bar.size,
+                (pinned, bar.entries.len() - pinned),
+                self.tray.len(),
+                bar.unfold,
+            );
+            glass.insert((BAR_NAMESPACE, bar.screen), vec![shape]);
+        }
+        if let Some(toasts) = &self.toasts {
+            let (thickness, radius) = metrics.thickness(toasts.orientation);
+            let (x, y, width, _) = toasts.geometry.pile;
+            let step = thickness.round() as u32 + crate::model::notify::TOAST_GAP;
+            let capsules = (0..toasts.shown as u32)
+                .map(|index| GlassShape {
+                    x: x as i32,
+                    y: (y + index * step) as i32,
+                    width: width as i32,
+                    height: thickness.round() as i32,
+                    radius: radius.round() as i32,
+                })
+                .collect();
+            glass.insert((TOASTS_NAMESPACE, toasts.screen), capsules);
+        }
+        glass
+    }
+
+    /// Tells the compositor what changed in the liquid glass, and that the
+    /// panels gone have none.
+    fn tell_glass(&mut self) {
+        if self.link.is_none() {
+            return;
+        }
+        let glass = self.glass();
+        if glass == self.glass_told {
+            return;
+        }
+        let gone: Vec<_> = self
+            .glass_told
+            .keys()
+            .filter(|key| !glass.contains_key(*key))
+            .copied()
+            .collect();
+        for (namespace, screen) in gone {
+            self.send(Command::SetGlass {
+                namespace: namespace.to_owned(),
+                screen,
+                shapes: Vec::new(),
+            });
+        }
+        for (&(namespace, screen), shapes) in &glass {
+            if self.glass_told.get(&(namespace, screen)) != Some(shapes) {
+                if let Some(link) = &self.link {
+                    let _ = link.send(Command::SetGlass {
+                        namespace: namespace.to_owned(),
+                        screen,
+                        shapes: shapes.clone(),
+                    });
+                }
+            }
+        }
+        self.glass_told = glass;
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
                 self.now = Local::now();
@@ -1930,6 +2015,8 @@ impl Dock {
         match update {
             compositor::Update::Connected(link) => {
                 self.link = Some(link);
+                // A new compositor knows none of it.
+                self.glass_told.clear();
                 Task::none()
             }
             compositor::Update::Disconnected => {

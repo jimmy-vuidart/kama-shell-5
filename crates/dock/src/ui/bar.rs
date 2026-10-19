@@ -7,6 +7,8 @@ use iced::widget::{
 };
 use iced::{Alignment, Color, ContentFit, Element, Length, Padding};
 
+use coquille_ipc::GlassShape;
+
 use super::icons::{self, Glyph};
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
@@ -259,6 +261,46 @@ impl Metrics {
         match orientation {
             Orientation::Vertical(_) => self.exclusive_zone,
             Orientation::Horizontal => (self.lying_thickness() + 2.0 * MARGIN).round() as i32,
+        }
+    }
+
+    /// Where the glass of a bar is in its surface of `size`: the compositor
+    /// bends and lights what is behind it. An upright bar is as wide as it
+    /// has unfolded (`unfold`, from 0 to 1).
+    pub fn glass_shape(
+        &self,
+        orientation: Orientation,
+        size: (u32, u32),
+        entries: (usize, usize),
+        tray_items: usize,
+        unfold: f32,
+    ) -> GlassShape {
+        let (pinned, others) = entries;
+        match orientation {
+            Orientation::Vertical(side) => {
+                let width = self.width + (self.unfolded - self.width) * ease(unfold);
+                let x = match side {
+                    Side::Left => MARGIN,
+                    Side::Right => size.0 as f32 - MARGIN - width,
+                };
+                GlassShape {
+                    x: x.round() as i32,
+                    y: SHADOW as i32,
+                    width: width.round() as i32,
+                    height: self.bar_height(pinned, others, tray_items).round() as i32,
+                    radius: self.radius.round() as i32,
+                }
+            }
+            Orientation::Horizontal => {
+                let width = self.lying_width(pinned, others, tray_items);
+                GlassShape {
+                    x: ((size.0 as f32 - width) / 2.0).round() as i32,
+                    y: LABEL_ROOM as i32,
+                    width: width.round() as i32,
+                    height: self.lying_thickness().round() as i32,
+                    radius: self.lying_radius().round() as i32,
+                }
+            }
         }
     }
 
@@ -1517,6 +1559,29 @@ mod tests {
         let with_divider = (LYING_SLOT + LYING_GAP + LYING_DIVIDER + LYING_GAP) as u32;
         assert_eq!(width(1, 0) - width(0, 0), with_divider);
         assert_eq!(width(1, 1) - width(1, 0), with_divider);
+    }
+
+    #[test]
+    fn the_glass_of_a_bar_is_where_the_bar_shows() {
+        let metrics = Metrics::default();
+        let size = surface_size(Orientation::Horizontal, 3, 2);
+        let lying = metrics.glass_shape(Orientation::Horizontal, size, (3, 2), 0, 0.0);
+        // Centered in its surface, under the room for labels.
+        assert_eq!(lying.x, SIDE as i32);
+        assert_eq!(lying.y, LABEL_ROOM as i32);
+        assert_eq!(lying.width as u32 + 2 * SIDE as u32, size.0);
+        assert_eq!((lying.height, lying.radius), (36, 12));
+
+        let left = Orientation::Vertical(Side::Left);
+        let right = Orientation::Vertical(Side::Right);
+        let size = surface_size(left, 3, 2);
+        let folded = metrics.glass_shape(left, size, (3, 2), 0, 0.0);
+        assert_eq!((folded.x, folded.y, folded.width), (8, 24, 44));
+        // Unfolded, it grows away from its edge.
+        let unfolded = metrics.glass_shape(left, size, (3, 2), 0, 1.0);
+        assert_eq!((unfolded.x, unfolded.width), (8, 200));
+        let mirrored = metrics.glass_shape(right, size, (3, 2), 0, 1.0);
+        assert_eq!(mirrored.x + mirrored.width, size.0 as i32 - 8);
     }
 
     #[test]

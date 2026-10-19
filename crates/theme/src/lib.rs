@@ -120,11 +120,9 @@ pub struct Tokens {
     pub glass: Color,
     /// Menus, tooltips, mixer, active capsule.
     pub glass_strong: Color,
-    /// The clear glass of the dock and its notifications: a light veil over
-    /// the blurred background, which shows its colors through.
+    /// The veil over the liquid glass of the dock and its notifications:
+    /// the compositor bends and lights what is behind, this only tints it.
     pub glass_clear: Color,
-    /// The sheen at the top of the clear glass.
-    pub glass_sheen: Color,
     /// 1px edge rim.
     pub rim: Color,
     /// The bright edge that draws the clear glass.
@@ -139,11 +137,8 @@ pub struct Tokens {
     pub text: Color,
     /// Muted secondary text.
     pub muted: Color,
-    /// Soft shadows the compositor draws (floating windows).
+    /// Soft shadows.
     pub shadow: Color,
-    /// Soft shadows the programs of the shell draw: light enough that the
-    /// compositor does not blur behind them.
-    pub panel_shadow: Color,
     /// Scrim veil behind drawer.
     pub scrim: Color,
     /// Default periwinkle accent.
@@ -173,8 +168,7 @@ impl Tokens {
                     backdrop: Color::rgb(0xe9_e6_f4),
                     glass,
                     glass_strong: Color::rgba(255, 255, 255, 204),
-                    glass_clear: Color::rgba(255, 255, 255, 77),
-                    glass_sheen: Color::rgba(255, 255, 255, 120),
+                    glass_clear: Color::rgba(255, 255, 255, 26),
                     rim: Color::rgba(255, 255, 255, 215),
                     rim_bright: Color::rgba(255, 255, 255, 217),
                     card: Color::rgba(255, 255, 255, 153),
@@ -183,8 +177,7 @@ impl Tokens {
                     text: Color::rgb(0x1d_20_33),
                     muted: Color::rgb(0x6b_6f_85),
                     shadow: Color::rgba(65, 50, 135, 38),
-                    panel_shadow: Color::rgba(65, 50, 135, 22),
-                    scrim: Color::rgba(40, 30, 80, 20),
+                    scrim: Color::rgba(40, 30, 80, 26),
                     accent: Color::rgb(0x5b_63_e6),
                     surface: Color::rgb(0xf6_f5_fb),
                     titlebar: glass,
@@ -201,8 +194,7 @@ impl Tokens {
                     backdrop: Color::rgb(0x14_12_1e),
                     glass,
                     glass_strong: Color::rgba(36, 32, 58, 210),
-                    glass_clear: Color::rgba(26, 22, 44, 115),
-                    glass_sheen: Color::rgba(70, 64, 110, 120),
+                    glass_clear: Color::rgba(26, 22, 44, 77),
                     rim: Color::rgba(215, 210, 255, 45),
                     rim_bright: Color::rgba(215, 210, 255, 72),
                     card: Color::rgba(255, 255, 255, 18),
@@ -211,8 +203,7 @@ impl Tokens {
                     text: Color::rgb(0xf1_f2_f4),
                     muted: Color::rgb(0x94_98_a4),
                     shadow: Color::rgba(15, 10, 35, 45),
-                    panel_shadow: Color::rgba(15, 10, 35, 22),
-                    scrim: Color::rgba(15, 10, 35, 22),
+                    scrim: Color::rgba(15, 10, 35, 45),
                     accent: Color::rgb(0x8f_97_ff),
                     surface: Color::rgb(0x1c_1a_26),
                     titlebar: glass,
@@ -237,28 +228,30 @@ mod tests {
 
     #[test]
     fn alpha_rule_for_translucent_surfaces() {
-        // Behind the programs of the shell, the compositor blurs where they
-        // are more than 0.16 opaque, and not where they are less than 0.10.
-        let alpha = |color: Color| f32::from(color.a) / 255.0;
         for kind in [ThemeKind::Light, ThemeKind::Dark] {
             let tokens = Tokens::new(kind);
-            for (name, color) in [
-                ("scrim", tokens.scrim),
-                ("panel shadow", tokens.panel_shadow),
-            ] {
-                assert!(alpha(color) <= 0.09, "{kind:?} {name}: {}", color.a);
-            }
-            for (name, color) in [
-                ("glass", tokens.glass),
-                ("glass_strong", tokens.glass_strong),
-                ("glass_clear", tokens.glass_clear),
-                ("glass_sheen", tokens.glass_sheen),
-            ] {
-                assert!(alpha(color) >= 0.18, "{kind:?} {name}: {}", color.a);
-            }
-            // The compositor draws its own shadows: they need no rule, but
-            // stay soft.
-            assert!(alpha(tokens.shadow) <= 0.18, "{kind:?} shadow");
+            // Scrim and shadows must stay under 0.18 alpha
+            assert!(
+                f32::from(tokens.scrim.a) / 255.0 <= 0.18,
+                "{kind:?} scrim alpha > 0.18: {}",
+                tokens.scrim.a
+            );
+            assert!(
+                f32::from(tokens.shadow.a) / 255.0 <= 0.18,
+                "{kind:?} shadow alpha > 0.18: {}",
+                tokens.shadow.a
+            );
+            // Glass surfaces must be at or above 0.45 alpha
+            assert!(
+                f32::from(tokens.glass.a) / 255.0 >= 0.45,
+                "{kind:?} glass alpha < 0.45: {}",
+                tokens.glass.a
+            );
+            assert!(
+                f32::from(tokens.glass_strong.a) / 255.0 >= 0.45,
+                "{kind:?} glass_strong alpha < 0.45: {}",
+                tokens.glass_strong.a
+            );
             // What shows where a window has not drawn yet is opaque.
             assert_eq!(tokens.surface.a, 0xff, "{kind:?} window background");
         }

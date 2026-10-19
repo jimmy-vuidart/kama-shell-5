@@ -46,6 +46,13 @@ pub enum Mask {
         commit: CommitCounter,
         radii: [f32; 4],
     },
+    /// A rounded rectangle of liquid glass: what is behind is bent by its
+    /// curved rim and lit along its edge.
+    Liquid {
+        radii: [f32; 4],
+        /// How bright its edge is: more on a light theme.
+        specular: f32,
+    },
 }
 
 impl Mask {
@@ -56,6 +63,7 @@ impl Mask {
         match self {
             Mask::Rounded { radii } => MaskKey::Rounded(*radii),
             Mask::Alpha { radii, .. } => MaskKey::Alpha(*radii),
+            Mask::Liquid { radii, specular } => MaskKey::Liquid(*radii, *specular),
         }
     }
 }
@@ -64,6 +72,22 @@ impl Mask {
 enum MaskKey {
     Rounded([f32; 4]),
     Alpha([f32; 4]),
+    Liquid([f32; 4], f32),
+}
+
+/// Behind liquid glass, colors are richer than behind frosted glass.
+const LIQUID_SATURATION: f32 = 1.45;
+/// How much liquid glass lifts what is seen through it towards white.
+const LIQUID_LIFT: f32 = 0.06;
+
+/// The `liquid` uniform of the shader for a pane of `size` whose corners
+/// have `radius`: the width of its curved rim (as wide as its corners, at
+/// most half its thickness), how far the rim may shift what is behind, its
+/// specular strength and its lift.
+pub fn liquid_uniform(size: Size<i32, Physical>, radius: f32, specular: f32) -> [f32; 4] {
+    let thickness = size.w.min(size.h) as f32;
+    let bezel = (radius * 1.25).min(thickness * 0.5).max(1.0);
+    [bezel, bezel * 1.2, specular, LIQUID_LIFT]
 }
 
 /// Clamp blur strength to 1..=5.
@@ -781,7 +805,18 @@ impl GlassElement {
             [self.shape.loc.x as f32, self.shape.loc.y as f32],
         );
         let radii = match &self.mask {
-            Mask::Rounded { radii } | Mask::Alpha { radii, .. } => *radii,
+            Mask::Rounded { radii } | Mask::Alpha { radii, .. } | Mask::Liquid { radii, .. } => {
+                *radii
+            }
+        };
+        let (mask_mode, saturation, liquid) = match &self.mask {
+            Mask::Rounded { .. } => (0, 1.15f32, [0.0; 4]),
+            Mask::Alpha { .. } => (1, 1.15, [0.0; 4]),
+            Mask::Liquid { radii, specular } => (
+                2,
+                LIQUID_SATURATION,
+                liquid_uniform(self.shape.size, radii[0], *specular),
+            ),
         };
         let texel = |level: &Level| {
             let allocated = level.allocated();
@@ -803,9 +838,10 @@ impl GlassElement {
                 [self.shape.size.w as f32, self.shape.size.h as f32],
             ),
             Uniform::new("radii", radii),
-            Uniform::new("mask_mode", i32::from(alpha_mask)),
+            Uniform::new("mask_mode", mask_mode),
             Uniform::new("mask_tex", 1i32),
-            Uniform::new("saturation", 1.15f32),
+            Uniform::new("saturation", saturation),
+            Uniform::new("liquid", liquid),
             Uniform::new("blur_origin", origin(cache.origin)),
             Uniform::new("blur_texel", texel(source)),
             Uniform::new("blur_max", limit(source)),
@@ -926,6 +962,19 @@ mod tests {
 
     fn target() -> Size<i32, Physical> {
         (W as i32, H as i32).into()
+    }
+
+    #[test]
+    fn the_rim_of_liquid_glass_is_as_wide_as_its_corners_but_never_past_its_middle() {
+        let bar = liquid_uniform(Size::from((954, 92)), 30.0, 0.75);
+        assert_eq!(bar[0], 37.5);
+        // It shifts what is behind by at most about a third of the rim.
+        assert_eq!(bar[1], 45.0);
+        assert_eq!((bar[2], bar[3]), (0.75, LIQUID_LIFT));
+
+        // Round corners on a thin pane: the rim stops at its middle.
+        let thin = liquid_uniform(Size::from((400, 40)), 30.0, 0.4);
+        assert_eq!(thin[0], 20.0);
     }
 
     #[test]

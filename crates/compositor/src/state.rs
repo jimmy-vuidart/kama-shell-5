@@ -205,6 +205,9 @@ pub struct State {
     pub full_redraw: bool,
     pub glass: GlassConfig,
     pub panel_glass: crate::render::scene::PanelGlass,
+    /// The liquid glass the panels of the shell asked for, by namespace and
+    /// screen.
+    pub liquid: HashMap<(String, OutputRole), Vec<coquille_ipc::GlassShape>>,
     pub bar_glass: crate::render::per_view::PerView<GlassCache>,
     pub drop_glass: HashMap<coquille_model::Rect, GlassCache>,
     pub bar_shadow: crate::render::per_view::PerView<crate::render::ShadowCache>,
@@ -378,6 +381,7 @@ impl State {
             full_redraw: true,
             glass: options.glass,
             panel_glass: HashMap::new(),
+            liquid: HashMap::new(),
             bar_glass: Default::default(),
             drop_glass: HashMap::new(),
             bar_shadow: Default::default(),

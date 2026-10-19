@@ -3,7 +3,8 @@
 //! title bar, no slot, no habit. It may keep an edge of its screen for
 //! itself, and take the keyboard while it needs it.
 
-use coquille_model::{Insets, OutputId, Rect, Size};
+use coquille_ipc::GlassShape;
+use coquille_model::{Insets, OutputId, OutputRole, Rect, Size};
 use smithay::desktop::{LayerSurface, WindowSurfaceType, layer_map_for_output};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
@@ -21,6 +22,8 @@ pub struct Panel {
     pub output: OutputId,
     /// Its top-left corner in the global space.
     pub origin: Point<i32, Logical>,
+    /// The liquid glass its program asked for (see `Command::SetGlass`).
+    pub liquid: Vec<GlassShape>,
 }
 
 /// How a panel asks for the keyboard.
@@ -90,12 +93,21 @@ impl State {
                             layer,
                             output: screen.id,
                             origin: corner + geometry.loc,
+                            liquid: self.liquid_of(surface, info.role),
                         });
                     }
                 }
             }
         }
         panels
+    }
+
+    /// The liquid glass of a panel of the shell on the screen `role`.
+    fn liquid_of(&self, surface: &LayerSurface, role: OutputRole) -> Vec<GlassShape> {
+        self.liquid
+            .get(&(surface.namespace().to_owned(), role))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// A fullscreen window holds this screen (game mode).
@@ -120,6 +132,7 @@ impl State {
                 layer: surface.layer(),
                 output: screen.id,
                 origin: Point::from((info.rect.x, info.rect.y)) + geometry.loc,
+                liquid: self.liquid_of(surface, info.role),
             })
         })
     }

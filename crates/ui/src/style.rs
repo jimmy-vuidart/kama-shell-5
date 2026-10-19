@@ -2,9 +2,8 @@
 
 use coquille_ipc::ThemeName;
 use iced::font::{Family, Weight};
-use iced::gradient::Linear;
 use iced::widget::{button, container};
-use iced::{Background, Border, Color, Degrees, Font, Shadow, Vector};
+use iced::{Background, Border, Color, Font, Shadow, Vector};
 
 pub const FIGTREE: &[&[u8]] = &[
     include_bytes!("../assets/fonts/Figtree-Regular.ttf"),
@@ -53,10 +52,9 @@ pub struct Palette {
     pub scrim: Color,
     pub glass: Color,
     pub glass_strong: Color,
-    /// The clear glass of the dock and its notifications, its sheen and
-    /// its bright edge.
+    /// The veil over the liquid glass of the dock and its notifications,
+    /// and the bright edge of what sits on it.
     pub glass_clear: Color,
-    pub glass_sheen: Color,
     pub rim: Color,
     pub rim_bright: Color,
     pub shadow: Color,
@@ -75,7 +73,6 @@ impl Palette {
         let glass_strong = to_iced(tokens.glass_strong);
         let rim = to_iced(tokens.rim);
         let glass_clear = to_iced(tokens.glass_clear);
-        let glass_sheen = to_iced(tokens.glass_sheen);
         let rim_bright = to_iced(tokens.rim_bright);
         let card = to_iced(tokens.card);
         let hover = to_iced(tokens.hover);
@@ -83,7 +80,7 @@ impl Palette {
         let text = to_iced(tokens.text);
         let muted = to_iced(tokens.muted);
         let scrim = to_iced(tokens.scrim);
-        let shadow = to_iced(tokens.panel_shadow);
+        let shadow = to_iced(tokens.shadow);
         Self {
             dark: kind == coquille_theme::ThemeKind::Dark,
             accent: accent.unwrap_or_else(|| to_iced(tokens.accent)),
@@ -100,7 +97,6 @@ impl Palette {
             glass,
             glass_strong,
             glass_clear,
-            glass_sheen,
             rim,
             rim_bright,
             shadow,
@@ -132,7 +128,7 @@ impl Palette {
             color: if self.dark {
                 Color::from_rgba8(0, 0, 0, 0.22)
             } else {
-                Color::from_rgba8(50, 40, 95, 0.09)
+                Color::from_rgba8(50, 40, 95, 0.12)
             },
             offset: Vector::new(0.0, 1.5),
             blur_radius: 6.0,
@@ -187,23 +183,12 @@ pub fn outlined(color: Color, line: Color, radius: f32) -> container::Style {
     }
 }
 
-/// Liquid glass: a light veil over the blurred background, a sheen at its
-/// top and a bright edge. The compositor blurs behind all of it (see the
-/// alpha rule of `coquille-theme`).
+/// The veil over liquid glass: the compositor bends and lights what is
+/// behind (`Command::SetGlass`), the panel only tints it a little.
 pub fn liquid_glass(palette: Palette, radius: f32) -> container::Style {
-    let sheen = Linear::new(Degrees(180.0))
-        .add_stop(0.0, palette.glass_sheen)
-        .add_stop(0.4, palette.glass_clear)
-        .add_stop(1.0, palette.glass_clear);
     container::Style {
-        background: Some(Background::Gradient(sheen.into())),
-        border: Border {
-            color: palette.rim_bright,
-            width: 1.5,
-            radius: radius.into(),
-        },
         shadow: palette.dock_shadow(),
-        ..container::Style::default()
+        ..fill(palette.glass_clear, radius)
     }
 }
 

@@ -47,9 +47,10 @@ les mesures.
   d'un séparateur (un trait haut d'une demi-tuile). À 24 px : barre de
   **36**, à 8 px du bord, zone exclusive de **52**. Coins concentriques à
   ceux des tuiles (rayon de tuile + un rythme).
-- **Verre clair** : voile léger (`glass_clear`), reflet en haut
-  (`glass_sheen`), liseré lumineux de 1,5 px (`rim_bright`), ombre ample.
-  Le compositeur floute ce qui est derrière (règle des alphas : ≥ 0,18).
+- **Verre liquide** : le dock donne au compositeur la forme de la barre
+  (`set_glass`) ; celui-ci y réfracte le fond (bord bombé, réfraction,
+  dispersion légère) et l'éclaire d'un liseré spéculaire. Le dock n'y pose
+  qu'un voile très léger (`glass_clear`) et son ombre.
 - **Tuiles uniformes** : les icônes Reversal couvrent leur tuile ; les
   autres (hicolor, pixmaps) sont posées, plus petites, sur une plaque
   claire au même arrondi ; une jaquette la remplit. Ombre discrète, levée

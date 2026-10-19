@@ -227,8 +227,13 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 }
 
 /// The glass caches of the shell's panels: one per element of each surface
-/// tree, menus included.
+/// tree, menus included, and one per piece of liquid glass (from
+/// [`LIQUID_CACHES`] on).
 pub type PanelGlass = HashMap<(WlSurface, usize), GlassCache>;
+
+/// Where the caches of the liquid glass of a panel start, past those of the
+/// elements of its tree.
+const LIQUID_CACHES: usize = 1 << 16;
 
 /// The elements of the shell hints: by outline in the global space and ring
 /// width (0 for a fill).
@@ -315,6 +320,7 @@ fn panel_elements(
     layers: &[Layer],
     view: Rect,
     scale: f64,
+    specular: f32,
 ) -> Vec<SceneElement> {
     let to_view = Point::<i32, Logical>::from((-view.x, -view.y));
     let mut elements = Vec::new();
@@ -361,6 +367,35 @@ fn panel_elements(
                 1.0,
                 Kind::Unspecified,
             );
+        // The program said where its liquid glass is: under the surface,
+        // exactly there, rather than wherever it is opaque enough.
+        if is_coquille && glass.blur && !panel.liquid.is_empty() {
+            elements.extend(rendered.into_iter().map(SceneElement::Surface));
+            for (index, piece) in panel.liquid.iter().enumerate() {
+                let place = Rect::new(
+                    origin.x + piece.x,
+                    origin.y + piece.y,
+                    piece.width,
+                    piece.height,
+                );
+                let shape = physical_rect(place, scale);
+                let radius = (f64::from(piece.radius) * scale) as f32;
+                let cache = panel_glass
+                    .entry((surface.clone(), LIQUID_CACHES + index))
+                    .or_default();
+                elements.push(SceneElement::Glass(cache.element(
+                    shaders,
+                    shape,
+                    output_size,
+                    Mask::Liquid {
+                        radii: [radius; 4],
+                        specular,
+                    },
+                    Blur::new(glass.strength, scale),
+                )));
+            }
+            continue;
+        }
         push_with_glass(
             &mut elements,
             rendered,
@@ -402,6 +437,11 @@ pub fn build(
         overlay_shapes,
     } = layers;
     let output_size = physical_rect(Rect::from_size(view.size()), scale).size;
+    // The edge of liquid glass shows more on a light theme.
+    let specular = match theme.kind {
+        crate::theme::ThemeKind::Light => 0.75,
+        crate::theme::ThemeKind::Dark => 0.4,
+    };
 
     if !freeze.is_empty() {
         let shift = ModelPoint::new(-view.x, -view.y);
@@ -687,6 +727,7 @@ pub fn build(
         &[Layer::Overlay],
         view,
         scale,
+        specular,
     ));
     if let Some((buffer, place)) = panel.filter(|(_, place)| overlaps(*place, view)) {
         let place_rect = place.translated(shift);
@@ -792,6 +833,7 @@ pub fn build(
         &[Layer::Top],
         view,
         scale,
+        specular,
     ));
     elements.extend(windows);
     // The capsules never cover a tidied window: under all of them is under
@@ -836,6 +878,7 @@ pub fn build(
         &under,
         view,
         scale,
+        specular,
     ));
     for (buffer, rect) in wallpapers {
         if overlaps(*rect, view) {
