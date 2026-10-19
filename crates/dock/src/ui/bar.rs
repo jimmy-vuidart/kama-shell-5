@@ -40,8 +40,16 @@ const MARK: f32 = 4.0;
 /// pointer, and on each side for a label that is wider than its icon.
 const LABEL_ROOM: f32 = 58.0;
 const SIDE: f32 = 110.0;
-/// Lying down: a hairline between two groups, and the clock at the end.
-const DIVIDER: f32 = 9.0;
+/// Lying down: the share of a tile that every distance of the bar is, as
+/// in the mockup: above and under the tiles, between two of them, at the
+/// ends, and on each side of a hairline.
+const BEAT: f32 = 0.23;
+const MIN_BEAT: f32 = 6.0;
+/// The share of its box that an icon of the Reversal theme fills: its rounded
+/// square is 55 px out of 64.
+const ICON_FILL: f32 = 0.86;
+/// The radius of that rounded square, for its size.
+const ICON_ROUNDNESS: f32 = 0.236;
 const CLOCK_WIDTH: f32 = 62.0;
 
 /// Layout metrics of the dock bar, derived from the configured icon size.
@@ -57,6 +65,9 @@ pub struct Metrics {
     pub radius: f32,
     pub tile_radius: f32,
     pub launcher_glyph: f32,
+    /// Lying down: the box an icon is drawn in, so that its rounded square
+    /// is `icon_size` wide, as the tiles of the mockup.
+    pub lying_slot: f32,
     /// A laptop: the battery shows with the clock.
     pub battery: bool,
 }
@@ -73,6 +84,7 @@ impl Metrics {
         let radius = ((width - 16.0) / 2.0).clamp(10.0, 24.0);
         let tile_radius = (slot * 0.28).round();
         let launcher_glyph = (icon * (22.0 / 24.0)).round();
+        let lying_slot = (icon / ICON_FILL).round();
 
         Self {
             icon_size: icon,
@@ -85,6 +97,7 @@ impl Metrics {
             radius,
             tile_radius,
             launcher_glyph,
+            lying_slot,
             battery: false,
         }
     }
@@ -139,21 +152,22 @@ impl Metrics {
     /// The width of a lying bar for a number of favorites and of other
     /// entries.
     pub fn lying_width(&self, pinned: usize, others: usize, tray_items: usize) -> f32 {
-        let mut items = vec![self.slot];
+        let divider = self.lying_divider();
+        let mut items = vec![self.lying_slot];
         for group in [pinned, others] {
             if group > 0 {
-                items.push(DIVIDER);
-                items.extend(std::iter::repeat_n(self.slot, group));
+                items.push(divider);
+                items.extend(std::iter::repeat_n(self.lying_slot, group));
             }
         }
         if tray_items > 0 {
             let (tray_width, _) = crate::model::tray::horizontal_size(tray_items);
-            items.push(DIVIDER);
+            items.push(divider);
             items.push(tray_width);
         }
-        items.extend([DIVIDER, self.clock_width()]);
-        let gaps = GAP * (items.len() - 1) as f32;
-        items.iter().sum::<f32>() + gaps + 2.0 * PADDING
+        items.extend([divider, self.clock_width()]);
+        let gaps = self.lying_gap() * (items.len() - 1) as f32;
+        items.iter().sum::<f32>() + gaps + 2.0 * self.lying_padding()
     }
 
     /// How far from the left end of a lying bar the entry `index` starts.
@@ -163,20 +177,89 @@ impl Metrics {
         } else {
             1.0
         };
-        PADDING + self.slot + GAP + dividers * (DIVIDER + GAP) + index as f32 * (self.slot + GAP)
+        let gap = self.lying_gap();
+        self.lying_padding()
+            + self.lying_slot
+            + gap
+            + dividers * (self.lying_divider() + gap)
+            + index as f32 * (self.lying_slot + gap)
     }
 
     /// How far from the left end of a lying bar the system tray starts.
     pub fn lying_tray_left(&self, pinned: usize, others: usize) -> f32 {
-        let mut left = PADDING + self.slot + GAP;
+        let (gap, divider) = (self.lying_gap(), self.lying_divider());
+        let mut left = self.lying_padding() + self.lying_slot + gap;
         if pinned > 0 {
-            left += DIVIDER + GAP + pinned as f32 * (self.slot + GAP);
+            left += divider + gap + pinned as f32 * (self.lying_slot + gap);
         }
         if others > 0 {
-            left += DIVIDER + GAP + others as f32 * (self.slot + GAP);
+            left += divider + gap + others as f32 * (self.lying_slot + gap);
         }
-        left += DIVIDER + GAP;
+        left += divider + gap;
         left
+    }
+
+    /// Lying down: the side of the rounded square of an icon, and its radius.
+    fn lying_tile(&self) -> (f32, f32) {
+        let side = (self.lying_slot * ICON_FILL).round();
+        (side, (side * ICON_ROUNDNESS).round())
+    }
+
+    /// Lying down: the distance that comes back everywhere, between what
+    /// shows of two tiles, and between a tile and the edge of the bar.
+    fn lying_beat(&self) -> f32 {
+        let (tile, _) = self.lying_tile();
+        (tile * BEAT).round().max(MIN_BEAT)
+    }
+
+    /// The transparent margin around the rounded square of an icon, on
+    /// both sides together.
+    fn lying_halo(&self) -> f32 {
+        self.lying_slot - self.lying_tile().0
+    }
+
+    /// Lying down: between the boxes of two icons, so that a beat shows
+    /// between their rounded squares.
+    fn lying_gap(&self) -> f32 {
+        (self.lying_beat() - self.lying_halo()).max(0.0)
+    }
+
+    /// Lying down: the room of a hairline, so that a beat shows on each side
+    /// of it.
+    fn lying_divider(&self) -> f32 {
+        2.0 * self.lying_beat() + 1.0 - self.lying_halo() - 2.0 * self.lying_gap()
+    }
+
+    /// Lying down: between the ends of the bar and the boxes of the first
+    /// and last icons.
+    fn lying_padding(&self) -> f32 {
+        self.lying_beat() - self.lying_halo() / 2.0
+    }
+
+    /// The height of a lying bar: its tiles, and a beat above and under.
+    pub fn lying_thickness(&self) -> f32 {
+        self.lying_tile().0 + 2.0 * self.lying_beat()
+    }
+
+    /// The corners of a lying bar, concentric with those of its tiles.
+    pub fn lying_radius(&self) -> f32 {
+        self.lying_tile().1 + self.lying_beat()
+    }
+
+    /// How thick a bar is across its edge, and how round its corners.
+    pub fn thickness(&self, orientation: Orientation) -> (f32, f32) {
+        match orientation {
+            Orientation::Vertical(_) => (self.width, self.radius),
+            Orientation::Horizontal => (self.lying_thickness(), self.lying_radius()),
+        }
+    }
+
+    /// The room a bar keeps along its edge of the screen.
+    pub fn exclusive_zone_for(&self, orientation: Orientation) -> i32 {
+        match orientation {
+            Orientation::Vertical(_) => self.exclusive_zone,
+            Orientation::Horizontal => (self.lying_thickness() + 2.0 * MARGIN).round() as i32,
+        }
     }
 
     /// The size of the surface of a bar, for a number of favorites and of
@@ -197,7 +280,7 @@ impl Metrics {
                 let width = self.lying_width(pinned, others, tray_items) + 2.0 * SIDE;
                 (
                     width.ceil() as u32,
-                    (LABEL_ROOM + self.width + MARGIN) as u32,
+                    (LABEL_ROOM + self.lying_thickness() + MARGIN) as u32,
                 )
             }
         }
@@ -231,7 +314,7 @@ impl Metrics {
                     side,
                     LABEL_ROOM as i32,
                     width - 2 * side,
-                    (self.width + MARGIN) as i32,
+                    (self.lying_thickness() + MARGIN) as i32,
                 )
             }
         }
@@ -252,8 +335,8 @@ impl Metrics {
             Orientation::Horizontal => (
                 (SIDE + self.lying_left(index, pinned)) as i32,
                 (LABEL_ROOM - 6.0) as i32,
-                self.slot as i32,
-                (self.width + 6.0) as i32,
+                self.lying_slot as i32,
+                (self.lying_thickness() + 6.0) as i32,
             ),
         }
     }
@@ -278,7 +361,7 @@ impl Metrics {
                 let left = self.lying_tray_left(pinned, others)
                     + col as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP);
                 let top = LABEL_ROOM
-                    + (self.width
+                    + (self.lying_thickness()
                         - (2.0 * crate::model::tray::ICON_SIZE + crate::model::tray::GAP))
                         / 2.0
                     + row as f32 * (crate::model::tray::ICON_SIZE + crate::model::tray::GAP);
@@ -603,14 +686,20 @@ fn lying<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let pinned = state.pinned();
-    let divider = || {
-        let line = container(space().width(1).height(16))
-            .style(move |_| style::fill(palette.separator, 0.5));
-        container(line).center_x(DIVIDER).center_y(metrics.width)
+    let thickness = metrics.lying_thickness();
+    // As high as half a tile, a shade darker than the glass.
+    let (tile, _) = metrics.lying_tile();
+    let hairline = style::alpha(palette.muted, 0.35);
+    let divider = move || {
+        let line = container(space().width(1).height((tile * 0.5).round()))
+            .style(move |_| style::fill(hairline, 0.5));
+        container(line)
+            .center_x(metrics.lying_divider())
+            .center_y(thickness)
     };
 
     let mut items: Row<'_, Message> =
-        row![lying_launcher(dock, state, live, metrics, palette)].spacing(GAP);
+        row![lying_launcher(dock, state, live, metrics, palette)].spacing(metrics.lying_gap());
     for (index, entry) in state.entries.iter().enumerate() {
         if index == 0 || index == pinned {
             items = items.push(divider());
@@ -631,14 +720,12 @@ fn lying<'a>(
         palette,
     ));
 
-    let pill_radius = metrics.width / 2.0;
+    // Clear glass, its corners concentric with those of its tiles, as the
+    // notifications beside it.
     let body = container(items)
-        .height(metrics.width)
-        .padding(Padding::from([0.0, PADDING]))
-        .style(move |_| container::Style {
-            shadow: palette.shadow(),
-            ..style::outlined(palette.glass, palette.rim, pill_radius)
-        });
+        .height(thickness)
+        .padding(Padding::from([0.0, metrics.lying_padding()]))
+        .style(move |_| style::liquid_glass(palette, metrics.lying_radius()));
     if !live {
         return body.into();
     }
@@ -656,39 +743,43 @@ fn lying_launcher<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let open = dock.drawer.is_some();
-    let (color, style_fn) = if open {
+    // A tile of its own, as wide as the rounded square of an app icon:
+    // frosted at rest, filled with the accent while the launcher is open.
+    let (side, radius) = metrics.lying_tile();
+    let (color, look) = if open {
         (
             palette.on_accent(),
             container::Style {
-                background: Some(iced::Background::Color(palette.accent)),
-                border: iced::Border {
-                    radius: metrics.tile_radius.into(),
-                    ..iced::Border::default()
-                },
                 shadow: iced::Shadow {
-                    color: iced::Color::from_rgba(
-                        palette.accent.r,
-                        palette.accent.g,
-                        palette.accent.b,
-                        0.35,
-                    ),
+                    color: Color {
+                        a: 0.35,
+                        ..palette.accent
+                    },
                     offset: iced::Vector::new(0.0, 2.0),
                     blur_radius: 6.0,
                 },
-                ..container::Style::default()
+                ..style::fill(palette.accent, radius)
             },
         )
     } else {
         (
             palette.accent,
-            style::tile_card(palette, false, metrics.tile_radius),
+            container::Style {
+                shadow: palette.tile_shadow(),
+                ..style::outlined(palette.glass_strong, palette.rim_bright, radius)
+            },
         )
     };
-    let icon = container(icons::glyph(Glyph::Launcher, metrics.launcher_glyph, color))
-        .center_x(metrics.slot)
-        .center_y(metrics.slot)
-        .style(move |_| style_fn);
-    let area = mouse_area(container(icon).center_y(metrics.width));
+    let glyph = icons::glyph(Glyph::Launcher, (side * 0.6).round(), color);
+    let tile = container(glyph)
+        .center_x(side)
+        .center_y(side)
+        .style(move |_| look);
+    let area = mouse_area(
+        container(tile)
+            .center_x(metrics.lying_slot)
+            .center_y(metrics.lying_thickness()),
+    );
     if live || open {
         area.on_press(Message::Launcher(Some(state.screen))).into()
     } else {
@@ -717,27 +808,41 @@ fn lying_entry<'a>(
         Indicator::Elsewhere => container(space().width(3).height(3))
             .style(move |_| style::fill(palette.muted, 1.5))
             .into(),
-        Indicator::None => space().height(4).into(),
+        Indicator::None => space().into(),
     };
-    let icon = container(icons::app(&dock.icons, &entry.identity, metrics.icon_size))
-        .center_x(metrics.slot)
-        .center_y(metrics.slot)
-        .style(move |_| style::tile_card(palette, hovered || dragged, metrics.tile_radius));
+    let icon = icons::tile(
+        &dock.icons,
+        &entry.identity,
+        metrics.lying_slot,
+        metrics.lying_tile(),
+        palette,
+        hovered || dragged,
+    );
     let icon: Element<'_, Message> = if unread > 0 {
         let count = container(badge(unread, 14.0))
-            .width(metrics.slot)
-            .height(metrics.slot)
+            .width(metrics.lying_slot)
+            .height(metrics.lying_slot)
             .align_x(Alignment::End)
             .align_y(Alignment::Start);
         stack![icon, count].into()
     } else {
-        icon.into()
+        icon
     };
-    let mark_height = (metrics.width - metrics.slot - 2.0).max(0.0);
-    let slot = column![
-        space().height(2),
-        icon,
-        container(mark).center_x(metrics.slot).height(mark_height)
+    // The tile in the middle of the bar, its mark in the margin under it.
+    let thickness = metrics.lying_thickness();
+    let under = (thickness - metrics.lying_tile().0) / 2.0;
+    let slot = stack![
+        container(icon)
+            .center_x(metrics.lying_slot)
+            .center_y(thickness),
+        container(mark)
+            .center_x(metrics.lying_slot)
+            .height(thickness)
+            .align_y(Alignment::End)
+            .padding(Padding {
+                bottom: ((under - 4.0) / 2.0).max(1.0).round(),
+                ..Padding::ZERO
+            }),
     ];
     if !live {
         return slot.into();
@@ -763,7 +868,8 @@ fn lying_time<'a>(
         .size(13)
         .font(style::SEMIBOLD)
         .color(palette.text);
-    let date = text(short).size(10).color(palette.muted);
+    // Over clear glass, muted text is lost on a bright background.
+    let date = text(short).size(10).color(style::alpha(palette.text, 0.72));
     let mut line = row![].spacing(8).align_y(Alignment::Center);
     if let Some(battery) = battery {
         line = line.push(battery_line(battery, palette));
@@ -773,7 +879,7 @@ fn lying_time<'a>(
         .width(metrics.clock_width())
         .padding(Padding::from([0.0, 6.0]))
         .align_x(Alignment::End)
-        .center_y(metrics.width)
+        .center_y(metrics.lying_thickness())
         .into()
 }
 
@@ -908,7 +1014,9 @@ fn lying_tray<'a>(
         columns = columns.push(col_slots);
     }
 
-    container(columns).center_y(metrics.width).into()
+    container(columns)
+        .center_y(metrics.lying_thickness())
+        .into()
 }
 
 fn upright_tray<'a>(
@@ -1310,7 +1418,6 @@ mod tests {
 
     use super::*;
 
-    const WIDTH: f32 = 44.0;
     const SLOT: f32 = 36.0;
     const SURFACE_WIDTH: u32 = 236;
     const UNFOLDED_REACH: u32 = 212;
@@ -1394,22 +1501,68 @@ mod tests {
         assert_eq!(surface_size(right, 3, 2), surface_size(left, 3, 2));
     }
 
+    /// Lying down, at the default size: the box of an icon, the gap between
+    /// two boxes and the room of a hairline.
+    const LYING_SLOT: f32 = 28.0;
+    const LYING_GAP: f32 = 2.0;
+    const LYING_DIVIDER: f32 = 5.0;
+    const LYING_THICKNESS: f32 = 36.0;
+
     #[test]
     fn a_lying_bar_widens_with_its_entries() {
         let width = |pinned, others| surface_size(Orientation::Horizontal, pinned, others).0;
 
-        assert_eq!(width(2, 0) - width(1, 0), (SLOT + GAP) as u32);
+        assert_eq!(width(2, 0) - width(1, 0), (LYING_SLOT + LYING_GAP) as u32);
         // The first entry of a group brings its hairline along.
-        let with_divider = (SLOT + GAP + DIVIDER + GAP) as u32;
+        let with_divider = (LYING_SLOT + LYING_GAP + LYING_DIVIDER + LYING_GAP) as u32;
         assert_eq!(width(1, 0) - width(0, 0), with_divider);
         assert_eq!(width(1, 1) - width(1, 0), with_divider);
+    }
+
+    #[test]
+    fn a_lying_bar_keeps_one_beat_everywhere() {
+        for size in [16, 24, 32, 64] {
+            let metrics = Metrics::new(size);
+            let (tile, _) = metrics.lying_tile();
+            let beat = metrics.lying_beat();
+            let halo = metrics.lying_halo();
+
+            assert!(
+                (beat - tile * BEAT).abs() <= 1.0 || beat == MIN_BEAT,
+                "{size}"
+            );
+            // Above and under the tiles.
+            assert_eq!((metrics.lying_thickness() - tile) / 2.0, beat, "{size}");
+            // Between what shows of two tiles.
+            assert_eq!(metrics.lying_gap() + halo, beat, "{size}");
+            // Between the ends of the bar and the first and last tiles.
+            assert_eq!(metrics.lying_padding() + halo / 2.0, beat, "{size}");
+            // On each side of a hairline.
+            let across = halo + 2.0 * metrics.lying_gap() + metrics.lying_divider();
+            assert_eq!(across, 2.0 * beat + 1.0, "{size}");
+        }
+    }
+
+    #[test]
+    fn a_lying_bar_keeps_less_room_than_an_upright_one() {
+        let metrics = Metrics::default();
+
+        assert_eq!(
+            metrics.exclusive_zone_for(Orientation::Vertical(Side::Left)),
+            60
+        );
+        assert_eq!(metrics.exclusive_zone_for(Orientation::Horizontal), 52);
+        assert_eq!(
+            metrics.thickness(Orientation::Horizontal),
+            (LYING_THICKNESS, 12.0)
+        );
     }
 
     #[test]
     fn a_lying_bar_is_as_high_as_the_bar_and_the_label_above_it() {
         let (_, height) = surface_size(Orientation::Horizontal, 3, 2);
 
-        assert_eq!(height, (LABEL_ROOM + WIDTH + MARGIN) as u32);
+        assert_eq!(height, (LABEL_ROOM + LYING_THICKNESS + MARGIN) as u32);
         assert_eq!(
             surface_size(Orientation::Vertical(Side::Left), 3, 2).0,
             SURFACE_WIDTH
@@ -1424,11 +1577,14 @@ mod tests {
         let (other, ..) = lying(3, 3);
 
         // Past the room for labels, the launcher and a hairline.
-        assert_eq!(first, (SIDE + PADDING + SLOT + GAP + DIVIDER + GAP) as i32);
-        assert_eq!(second - first, 40);
-        assert_eq!(other - first, 3 * 40 + 13);
+        let padding = 4.0;
+        let launcher = padding + LYING_SLOT + LYING_GAP;
+        assert_eq!(first, (SIDE + launcher + LYING_DIVIDER + LYING_GAP) as i32);
+        let step = (LYING_SLOT + LYING_GAP) as i32;
+        assert_eq!(second - first, step);
+        assert_eq!(other - first, 3 * step + (LYING_DIVIDER + LYING_GAP) as i32);
         assert_eq!(lying(0, 0).0, first);
-        assert_eq!(width, 36);
+        assert_eq!(width, LYING_SLOT as i32);
         // The menu opens just above the bar.
         assert!(y < LABEL_ROOM as i32);
     }
@@ -1462,7 +1618,7 @@ mod tests {
         let (x, y, width, height) = input_region(Orientation::Horizontal, lying, false);
         assert_eq!((x, y), (SIDE as i32, LABEL_ROOM as i32));
         assert_eq!(width, lying.0 as i32 - 2 * SIDE as i32);
-        assert_eq!(height, (WIDTH + MARGIN) as i32);
+        assert_eq!(height, (LYING_THICKNESS + MARGIN) as i32);
     }
 
     #[test]
@@ -1515,8 +1671,12 @@ mod tests {
         let lying_without = metrics.lying_width(1, 0, 0);
         let lying_two = metrics.lying_width(1, 0, 2);
         let lying_three = metrics.lying_width(1, 0, 3);
-        // 2 items in horizontal dock = 1 column (width 16) + DIVIDER (9) + 2 * bar GAP (8)
-        assert_eq!(lying_two - lying_without, 33.0);
+        // 2 items in horizontal dock = 1 column (width 16), a hairline and
+        // its two gaps.
+        assert_eq!(
+            lying_two - lying_without,
+            16.0 + LYING_DIVIDER + 2.0 * LYING_GAP
+        );
         // 3 items = 2 columns (additional 16 + tray GAP 3 = 19)
         assert_eq!(lying_three - lying_two, 19.0);
     }

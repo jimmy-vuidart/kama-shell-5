@@ -598,7 +598,7 @@ impl Dock {
                 size: Some(size),
                 layer: Layer::Top,
                 anchor,
-                exclusive_zone: Some(metrics.exclusive_zone),
+                exclusive_zone: Some(metrics.exclusive_zone_for(orientation)),
                 margin: None,
                 keyboard_interactivity: KeyboardInteractivity::None,
                 output_option: output,
@@ -628,7 +628,7 @@ impl Dock {
         let metrics = self.metrics();
         for index in 0..self.bars.len() {
             let bar = &self.bars[index];
-            let (id, pinned) = (bar.id, bar.pinned());
+            let (id, pinned, orientation) = (bar.id, bar.pinned(), bar.orientation);
             let size = metrics.surface_size(
                 bar.orientation,
                 pinned,
@@ -643,7 +643,7 @@ impl Dock {
             };
             let exclusive = Task::done(Message::ExclusiveZoneChange {
                 id,
-                zone_size: metrics.exclusive_zone,
+                zone_size: metrics.exclusive_zone_for(orientation),
             });
             tasks.push(resize.chain(exclusive).chain(self.input_region(id)));
         }
@@ -1058,7 +1058,7 @@ impl Dock {
         }
         let (screen, orientation) = self.toast_target()?;
         let metrics = self.metrics();
-        let thickness = metrics.width.round() as u32;
+        let thickness = metrics.thickness(orientation).0.round() as u32;
         let bar_height = self.bar_on(screen).map_or(0.0, |bar| {
             let pinned = bar.pinned();
             let others = bar.entries.len() - pinned;
@@ -1381,7 +1381,8 @@ impl Dock {
                         let screen = self
                             .drawer_screen()
                             .map_or(pointer.y, |screen| screen.height);
-                        let foot = screen - self.metrics().exclusive_zone as f32;
+                        let foot = screen
+                            - self.metrics().exclusive_zone_for(Orientation::Horizontal) as f32;
                         let height = self.drawer_height(Some(foot - pointer.y)) as f32;
                         if let Some(drawer) = &mut self.drawer {
                             drawer.height = height;

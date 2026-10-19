@@ -40,6 +40,23 @@ les mesures.
   fenêtre, Retirer des favoris (ou Épingler), Oublier sa place, Fermer la
   fenêtre (en rouge, si elle est ouverte).
 
+## Barre horizontale (verre liquide)
+
+- **Un seul rythme** : un quart de tuile (au moins 6 px) au-dessus et
+  au-dessous des tuiles, entre deux tuiles, aux bouts, et de chaque côté
+  d'un séparateur (un trait haut d'une demi-tuile). À 24 px : barre de
+  **36**, à 8 px du bord, zone exclusive de **52**. Coins concentriques à
+  ceux des tuiles (rayon de tuile + un rythme).
+- **Verre clair** : voile léger (`glass_clear`), reflet en haut
+  (`glass_sheen`), liseré lumineux de 1,5 px (`rim_bright`), ombre ample.
+  Le compositeur floute ce qui est derrière (règle des alphas : ≥ 0,18).
+- **Tuiles uniformes** : les icônes Reversal couvrent leur tuile ; les
+  autres (hicolor, pixmaps) sont posées, plus petites, sur une plaque
+  claire au même arrondi ; une jaquette la remplit. Ombre discrète, levée
+  au survol avec un voile clair.
+- Les notifications ont la même épaisseur, le même verre et le même
+  arrondi.
+
 ## Tiroir
 
 - Glisse depuis le bord de la barre, **sur toute la hauteur** de l'écran,

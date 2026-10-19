@@ -9,6 +9,7 @@ use iced::{Alignment, ContentFit, Element, Length, Padding};
 use super::icons::{self, Glyph, Icon as ThemeIcon};
 use super::style::{self, Palette};
 use crate::app::{Dock, Message, ToastSurface};
+use crate::model::Orientation;
 use crate::model::notify::{self, Icon, Notice};
 
 /// Buttons a capsule shows besides its cross; the others wait for the app.
@@ -22,7 +23,7 @@ pub fn view<'a>(dock: &'a Dock, surface: &ToastSurface) -> Element<'a, Message> 
     let capsules = notices
         .into_iter()
         .rev()
-        .map(|notice| capsule(dock, notice, palette));
+        .map(|notice| capsule(dock, notice, surface.orientation, palette));
     let pile = Column::with_children(capsules).spacing(notify::TOAST_GAP as f32);
     let (top, right, bottom, left) = surface.geometry.padding;
     container(pile)
@@ -40,8 +41,14 @@ pub fn view<'a>(dock: &'a Dock, surface: &ToastSurface) -> Element<'a, Message> 
 
 /// One notice, as the dock bar looks: its icon where a dock icon would be,
 /// the summary over a line of body, its buttons and a cross.
-fn capsule<'a>(dock: &'a Dock, notice: &'a Notice, palette: Palette) -> Element<'a, Message> {
+fn capsule<'a>(
+    dock: &'a Dock,
+    notice: &'a Notice,
+    orientation: Orientation,
+    palette: Palette,
+) -> Element<'a, Message> {
     let metrics = dock.metrics();
+    let (thickness, radius) = metrics.thickness(orientation);
     let id = notice.id;
     let picture = notice_icon(dock, notice, metrics.icon_size);
 
@@ -104,25 +111,22 @@ fn capsule<'a>(dock: &'a Dock, notice: &'a Notice, palette: Palette) -> Element<
         .style(style::flat(palette.hover, metrics.tile_radius));
 
     // The icon sits where the dock's icons do, as far from the edges.
-    let inset = (metrics.width - metrics.icon_size) / 2.0;
+    let inset = (thickness - metrics.icon_size) / 2.0;
     let inner = row![picture, words, actions, close]
         .spacing(10)
         .align_y(Alignment::Center);
     container(inner)
         .width(notify::TOAST_WIDTH as f32)
-        .height(metrics.width)
+        .height(thickness)
         .padding(Padding {
             top: 0.0,
             right: inset / 2.0,
             bottom: 0.0,
             left: inset,
         })
-        .center_y(metrics.width)
+        .center_y(thickness)
         .clip(true)
-        .style(move |_| iced::widget::container::Style {
-            shadow: palette.shadow(),
-            ..style::outlined(palette.glass, palette.rim, metrics.radius)
-        })
+        .style(move |_| style::liquid_glass(palette, radius))
         .into()
 }
 

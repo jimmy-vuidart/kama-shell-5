@@ -89,7 +89,10 @@ void main() {
     } else {
         vec2 mask_uv = (gl_FragCoord.xy - mask_origin) * mask_texel;
         if (all(greaterThanEqual(mask_uv, vec2(0.0))) && all(lessThanEqual(mask_uv, mask_max))) {
-            coverage = smoothstep(0.2, 0.4, texture2D(mask_tex, mask_uv).a);
+            // Glass of the shell is at least 0.18 opaque, what it draws
+            // around (shadows, the veil behind the drawer) at most 0.09: the
+            // clear glass of the dock is blurred, its shadow is not.
+            coverage = smoothstep(0.10, 0.16, texture2D(mask_tex, mask_uv).a);
             if (radii != vec4(0.0)) {
                 coverage *= rounded(p, half_size);
             }

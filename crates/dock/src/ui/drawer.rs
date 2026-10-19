@@ -1117,7 +1117,7 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
 
     let screen = drawer.surface.map_or(1920.0, |surface| surface.width);
     let width = drawer::panel_width(screen) as f32;
-    let bar_room = dock.metrics().exclusive_zone as f32;
+    let bar_room = dock.metrics().exclusive_zone_for(Orientation::Horizontal) as f32;
 
     let body: Element<'_, Message> = if drawer.query.trim().is_empty() {
         let mut apps: Column<'_, Message> = column![].spacing(10);
