@@ -21,6 +21,9 @@ et l'allure de navigateur.
   de l'écran, dans la moitié centrale de la bande. Un groupe d'emplacement
   qui le toucherait s'écarte de 8 px du côté de son milieu (à gauche s'ils
   partagent le même).
+- La **seule colonne d'un écran** (quelle que soit sa disposition, onglets
+  compris) compte comme maximisée, tant qu'aucune fenêtre n'y est maximisée :
+  son groupe est à la place de celui des maximisées, avec « restaurer ».
 - Les zones de dépôt d'un glisser restent les emplacements entiers.
 - **Pas de capsule** pour une fenêtre flottante, ni sur un écran ancré par
   un jeu.
@@ -52,7 +55,7 @@ et l'allure de navigateur.
 | Clic sur une capsule d'emplacement, quand une fenêtre est maximisée | Ramène l'écran partagé (la maximisée reste dans son groupe, atténuée) |
 | Glisser une capsule | Déplace sa fenêtre : emplacements des trois écrans affichés, relâcher range |
 | Réduire | Réduit la fenêtre |
-| Agrandir / restaurer | Maximise la fenêtre, ou la remet à sa place |
+| Agrandir / restaurer | Maximise la fenêtre, ou la remet à sa place ; restaurer la seule colonne d'un écran fait flotter sa fenêtre |
 | Fermer | Ferme la fenêtre, affichée ou non |
 
 Les capsules sont du chrome du shell : la règle d'or de la souris n'est pas

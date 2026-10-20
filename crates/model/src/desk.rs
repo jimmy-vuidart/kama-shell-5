@@ -106,6 +106,9 @@ pub struct CapsuleGroup {
     /// when the stack is hidden: slots under maximized windows, or
     /// maximized windows put aside.
     pub shown: Option<WindowId>,
+    /// Shown as maximized windows: at the top of the middle of the screen,
+    /// with "restore". Those of the only column of a screen are too.
+    pub maximized: bool,
 }
 
 /// Geometry and state of one window, as the compositor must apply it.
@@ -706,9 +709,14 @@ impl Desk {
         Ok(())
     }
 
-    /// `id` is maximized over the slots of its screen.
+    /// `id` is maximized over the slots of its screen, or in the only column
+    /// of its screen, which counts as maximized.
     pub fn is_maximized(&self, id: WindowId) -> bool {
-        matches!(self.locate(id), Some((_, Spot::Maximized)))
+        match self.locate(id) {
+            Some((_, Spot::Maximized)) => true,
+            Some((index, Spot::Slot(_))) => self.screens[index].whole_column(),
+            _ => false,
+        }
     }
 
     /// A window asks for its whole screen, or the user does it for it: it
@@ -716,8 +724,8 @@ impl Desk {
     /// screen, its capsule at the top of the middle. Its application will
     /// reopen there, maximized.
     ///
-    /// A window in the only column of its screen already fills it: it stays
-    /// as it is. Refused on an anchored screen.
+    /// A window in the only column of its screen already fills it and counts
+    /// as maximized: it stays as it is. Refused on an anchored screen.
     pub fn maximize(&mut self, id: WindowId) -> Result<(), ModelError> {
         let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
         self.ensure_not_anchored(index)?;
@@ -753,10 +761,24 @@ impl Desk {
     /// if it closed and there is room, else as a tab; or floating where it
     /// floated. Its application reopens there; floating, it has no habit
     /// any more.
+    ///
+    /// A window of the only column of its screen, maximized as it is, leaves
+    /// it and floats, and its application has no habit any more.
     pub fn unmaximize(&mut self, id: WindowId) -> Result<(), ModelError> {
         let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
-        if !matches!(spot, Spot::Maximized) {
-            return Ok(());
+        match spot {
+            Spot::Maximized => {}
+            Spot::Slot(_) if self.screens[index].whole_column() => {
+                self.ensure_not_anchored(index)?;
+                self.screens[index].remove(id);
+                let rect = self.opening_rect(index, None);
+                self.screens[index].push_floating(id, rect);
+                self.settle();
+                self.remember(id, None);
+                self.mark_focused(id);
+                return Ok(());
+            }
+            Spot::Slot(_) | Spot::Floating(_) => return Ok(()),
         }
         self.ensure_not_anchored(index)?;
         let origin = self.restore.remove(&id);
@@ -991,9 +1013,17 @@ impl Desk {
                     band: screen.maximized_parts(&self.metrics).0,
                     windows: maximized.windows().to_vec(),
                     shown: shown(maximized, covered),
+                    maximized: true,
                 });
             }
-            let bands = screen.slot_bands(&self.metrics);
+            // The only column has the whole screen: its group sits where
+            // that of maximized windows would.
+            let whole = screen.whole_column();
+            let bands = if whole {
+                vec![screen.maximized_parts(&self.metrics).0]
+            } else {
+                screen.slot_bands(&self.metrics)
+            };
             for (index, (stack, band)) in screen.slots().iter().zip(bands).enumerate() {
                 if stack.is_empty() {
                     continue;
@@ -1003,6 +1033,7 @@ impl Desk {
                     band,
                     windows: stack.windows().to_vec(),
                     shown: shown(stack, !covered),
+                    maximized: whole,
                 });
             }
         }
@@ -1085,7 +1116,8 @@ impl Desk {
                     && (screen.anchored().is_none() || self.over_game.contains(&id))),
             focused: self.focused() == Some(id),
             floating: layer == Layer::Floating,
-            maximized: layer == Layer::Maximized && !anchored,
+            maximized: !anchored
+                && (layer == Layer::Maximized || (layer == Layer::Slot && screen.whole_column())),
             anchored,
             minimized,
         }

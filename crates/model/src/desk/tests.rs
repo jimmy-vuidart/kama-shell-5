@@ -2058,12 +2058,14 @@ fn every_occupied_slot_has_its_group_of_capsules() {
                 band: Rect::new(8, 8, 948, 32),
                 windows: vec![WindowId(1), WindowId(2)],
                 shown: Some(WindowId(2)),
+                maximized: false,
             },
             CapsuleGroup {
                 stack: StackId::Slot(slot(LEFT, 1)),
                 band: Rect::new(964, 8, 948, 32),
                 windows: vec![WindowId(3)],
                 shown: Some(WindowId(3)),
+                maximized: false,
             },
         ]
     );
@@ -2184,6 +2186,7 @@ fn the_capsules_of_maximized_windows_sit_at_the_top_of_the_middle() {
             band: Rect::new(484, 8, 952, 32),
             windows: vec![WindowId(1)],
             shown: Some(WindowId(1)),
+            maximized: true,
         }
     );
     // The slots keep their capsules, nothing shown in them.
@@ -2323,12 +2326,13 @@ fn a_maximized_tab_goes_back_to_its_column_as_a_tab() {
     desk.set_layout(LEFT, LayoutKind::ThreeColumns).unwrap();
     open_in(&mut desk, 1, "guide", LEFT, 0);
     open_in(&mut desk, 2, "wiki", LEFT, 0);
+    open_in(&mut desk, 3, "notes", LEFT, 1);
     desk.maximize(WindowId(2)).unwrap();
 
     desk.unmaximize(WindowId(2)).unwrap();
 
     assert_eq!(tabs(&desk, LEFT, 0), [1, 2]);
-    assert_eq!(desk.screen(LEFT).unwrap().slots().len(), 1);
+    assert_eq!(desk.screen(LEFT).unwrap().slots().len(), 2);
 }
 
 #[test]
@@ -2367,6 +2371,79 @@ fn a_window_alone_in_the_slot_of_a_full_screen_already_has_it_all() {
 
     assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
     assert!(!covered(&desk, CENTER));
+    assert!(desk.is_maximized(WindowId(1)));
+    assert!(geo(&desk, 1).maximized);
+}
+
+#[test]
+fn a_window_alone_on_a_screen_of_columns_counts_as_maximized() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", LEFT, 0);
+
+    let alone = geo(&desk, 1);
+    assert!(alone.maximized && !alone.floating);
+    assert!(desk.is_maximized(WindowId(1)));
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 0)));
+    // Its capsules are where those of maximized windows go.
+    let group = group(&desk, LEFT, 0).unwrap();
+    assert!(group.maximized);
+    assert_eq!(group.stack, StackId::Slot(slot(LEFT, 0)));
+    let screen = desk.screen(LEFT).unwrap();
+    assert_eq!(group.band, screen.maximized_parts(desk.metrics()).0);
+}
+
+#[test]
+fn every_tab_of_the_only_column_counts_as_maximized() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", CENTER, 0);
+    open_in(&mut desk, 2, "wiki", CENTER, 0);
+
+    assert!(geo(&desk, 1).maximized && geo(&desk, 2).maximized);
+    assert!(group(&desk, CENTER, 0).unwrap().maximized);
+}
+
+#[test]
+fn sharing_the_screen_is_not_being_maximized() {
+    let mut desk = split_left();
+
+    for id in [1, 2] {
+        assert!(!geo(&desk, id).maximized);
+        assert!(!desk.is_maximized(WindowId(id)));
+    }
+    assert!(!group(&desk, LEFT, 0).unwrap().maximized);
+    assert_eq!(
+        group(&desk, LEFT, 0).unwrap().band,
+        Rect::new(8, 8, 948, 32)
+    );
+
+    // The other column closes: the one left has the whole screen.
+    desk.close_window(WindowId(2)).unwrap();
+    assert!(geo(&desk, 1).maximized);
+}
+
+#[test]
+fn the_column_left_under_a_maximized_window_is_not_maximized() {
+    let mut desk = split_left();
+    desk.maximize(WindowId(1)).unwrap();
+
+    assert!(!geo(&desk, 2).maximized);
+    assert!(!desk.is_maximized(WindowId(2)));
+    assert!(!group(&desk, LEFT, 0).unwrap().maximized);
+}
+
+#[test]
+fn restoring_the_window_of_the_only_column_floats_it() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", LEFT, 0);
+
+    desk.toggle_maximized(WindowId(1)).unwrap();
+
+    assert_eq!(floating_output(place(&desk, 1)), LEFT);
+    assert!(desk.screen(LEFT).unwrap().slots().is_empty());
+    assert!(!desk.is_maximized(WindowId(1)));
+    let floating = geo(&desk, 1);
+    assert!(floating.floating && floating.focused && !floating.maximized);
+    assert!(desk.memory().is_empty());
 }
 
 #[test]

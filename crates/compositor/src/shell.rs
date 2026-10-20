@@ -390,7 +390,7 @@ impl Shell {
         for view in capsules {
             let band = view.group.band;
             let output = view.group.stack.output();
-            let is_maximized = matches!(view.group.stack, StackId::Maximized(_));
+            let is_maximized = view.group.maximized;
             let avoid = maximized
                 .iter()
                 .find(|(screen, rect)| {
@@ -677,6 +677,11 @@ impl State {
     /// it: it covers the slots of its screen, or goes back where it was.
     pub fn set_maximized(&mut self, id: WindowId, maximized: bool) {
         let desk = &mut self.shell.desk;
+        // The only column of a screen counts as maximized; restored, its
+        // window floats.
+        let whole_column = !maximized
+            && desk.is_maximized(id)
+            && matches!(desk.placement(id), Some(Placement::Slot(_)));
         let result = if maximized {
             desk.maximize(id)
         } else {
@@ -685,6 +690,15 @@ impl State {
         match result {
             Ok(()) => debug!(?id, maximized, "maximized state asked"),
             Err(error) => warn!(%error, "cannot change whether the window is maximized"),
+        }
+        // Left to choose, a client keeps the size of the whole screen it had:
+        // it gets the size of a window that opens instead.
+        let floats = matches!(desk.placement(id), Some(Placement::Floating { .. }));
+        if whole_column && floats {
+            if let Some(managed) = self.shell.windows.iter_mut().find(|m| m.id == id) {
+                managed.user_sized = true;
+                managed.oversized = false;
+            }
         }
         self.apply_arrangement();
         self.refresh_pointer_focus();

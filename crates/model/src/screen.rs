@@ -109,6 +109,13 @@ impl Screen {
         self.covered
     }
 
+    /// Its only column takes the whole screen, as a maximized window would:
+    /// its windows count as maximized. Not while real maximized windows are
+    /// there, whose group holds the middle.
+    pub fn whole_column(&self) -> bool {
+        self.slots.len() == 1 && self.maximized.is_empty()
+    }
+
     /// The fullscreen window that anchors this screen, if any.
     pub fn anchored(&self) -> Option<WindowId> {
         self.anchored
