@@ -4,7 +4,7 @@
 use coquille_ipc::Habit;
 use coquille_model::OutputRole;
 
-use super::{Identity, Orientation};
+use super::Identity;
 
 /// The grid of applications: six columns of three rows per page.
 pub const COLUMNS: usize = 6;
@@ -38,15 +38,11 @@ pub fn width(wanted: Option<f32>, screen: Option<f32>) -> u32 {
 
 /// The height of the horizontal launcher unless the user gave it another.
 pub const DEFAULT_HEIGHT: u32 = 500;
-/// Lower, its three columns no longer fit.
+/// Lower, its control center no longer fits.
 pub const MIN_HEIGHT: u32 = 480;
 /// What stays free of the horizontal launcher on its screen: the dock under
-/// it, and a margin above.
-const FREE_HEIGHT: u32 = 100;
-/// The widest the horizontal launcher gets, and the narrowest it stays
-/// readable at.
-const WIDEST_PANEL: i64 = 1100;
-const NARROWEST_PANEL: i64 = 760;
+/// it, and above it the mixer, which opens over the control center.
+const FREE_HEIGHT: u32 = 450;
 
 /// The height the horizontal launcher takes when `wanted` is asked for, on
 /// a screen of a given height.
@@ -63,26 +59,64 @@ pub fn height(wanted: Option<f32>, screen: Option<f32>) -> u32 {
     u32::try_from(height).unwrap_or(DEFAULT_HEIGHT)
 }
 
-/// The width of the horizontal launcher on a screen of a given width: wide
-/// but never the whole screen, with room for the mixer beside it when the
-/// screen allows.
-pub fn panel_width(screen: f32) -> u32 {
-    let screen = screen.round() as i64;
-    let beside_mixer = screen - 2 * i64::from(MIXER_ROOM);
-    let width = beside_mixer
-        .clamp(NARROWEST_PANEL, WIDEST_PANEL)
-        .min(screen - 16)
-        .max(0);
-    u32::try_from(width).unwrap_or(0)
+/// The margin of the horizontal launcher, and the gap between its columns.
+pub const LYING_PADDING: f32 = 14.0;
+pub const LYING_GAP: f32 = 14.0;
+/// The columns of the horizontal launcher beside the applications.
+const GAMES_COLUMN: f32 = 260.0;
+const SIDE_COLUMN: f32 = 340.0;
+/// The narrowest the notifications and the control center get.
+const NARROWEST_SIDE: f32 = 280.0;
+/// Narrower, the six columns of applications are no longer readable: the
+/// games give their place first.
+const NARROWEST_APPS: f32 = 540.0;
+/// The columns of a very wide screen keep together, centered, rather than
+/// stretch the grid of applications over it.
+const WIDEST_ROW: f32 = 1900.0;
+
+/// How the horizontal launcher, as wide as its screen, shares it out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LyingLayout {
+    /// The width of the row of columns, centered on the screen.
+    pub row: f32,
+    pub apps: f32,
+    /// None when the screen is too narrow to show the games beside.
+    pub games: Option<f32>,
+    pub notices: f32,
+    pub control: f32,
 }
 
-/// How many columns the grid of applications has: the arrow keys walk it
-/// accordingly. Lying down, the launcher lists applications in a narrow
-/// column, and search results across two of its columns.
-pub fn columns(orientation: Orientation, searching: bool) -> usize {
-    match (orientation, searching) {
-        (Orientation::Horizontal, false) => 3,
-        _ => COLUMNS,
+impl LyingLayout {
+    /// What is left on each side of the row, from the edge of the screen.
+    pub fn margin(&self, screen: f32) -> f32 {
+        ((screen - self.row) / 2.0).max(0.0)
+    }
+}
+
+/// The columns of the horizontal launcher on a screen of a given width:
+/// applications, games, notifications, control center. Only the
+/// applications grow with the screen.
+pub fn lying_layout(screen: f32) -> LyingLayout {
+    let row = (screen - 2.0 * LYING_PADDING).clamp(0.0, WIDEST_ROW);
+    let with_games = row - GAMES_COLUMN - 2.0 * SIDE_COLUMN - 3.0 * LYING_GAP;
+    if with_games >= NARROWEST_APPS {
+        return LyingLayout {
+            row,
+            apps: with_games,
+            games: Some(GAMES_COLUMN),
+            notices: SIDE_COLUMN,
+            control: SIDE_COLUMN,
+        };
+    }
+    let apps = row - 2.0 * SIDE_COLUMN - 2.0 * LYING_GAP;
+    let shrink = ((NARROWEST_APPS - apps) / 2.0).clamp(0.0, SIDE_COLUMN - NARROWEST_SIDE);
+    let side = SIDE_COLUMN - shrink;
+    LyingLayout {
+        row,
+        apps: (apps + 2.0 * shrink).max(0.0),
+        games: None,
+        notices: side,
+        control: side,
     }
 }
 
@@ -124,6 +158,21 @@ pub fn sort_by_name<T>(items: &mut [T], name: impl Fn(&T) -> &str) {
 /// How many pages `count` applications take; an empty drawer still has one.
 pub fn page_count(count: usize) -> usize {
     count.div_ceil(PAGE).max(1)
+}
+
+/// How many page buttons the pager shows at most.
+pub const PAGE_BUTTONS: usize = 5;
+
+/// The pages that have a button: all of them when they are few, else the
+/// ones around `page`, as many on each side when the ends allow.
+pub fn page_buttons(page: usize, pages: usize) -> std::ops::Range<usize> {
+    if pages <= PAGE_BUTTONS {
+        return 0..pages;
+    }
+    let first = page
+        .saturating_sub(PAGE_BUTTONS / 2)
+        .min(pages - PAGE_BUTTONS);
+    first..first + PAGE_BUTTONS
 }
 
 /// The applications of a page, numbered from 0. A page past the last one
@@ -258,7 +307,6 @@ pub fn step(selected: Option<usize>, count: usize, columns: usize, step: Step) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Side;
 
     fn names(count: usize) -> Vec<String> {
         (0..count).map(|index| format!("app {index:02}")).collect()
@@ -314,31 +362,50 @@ mod tests {
     #[test]
     fn the_horizontal_launcher_keeps_between_its_content_and_the_screen() {
         assert_eq!(height(Some(100.0), Some(1080.0)), MIN_HEIGHT);
-        // The dock under it and a margin above stay free.
-        assert_eq!(height(Some(5000.0), Some(1080.0)), 1080 - 100);
+        // The dock under it and the mixer above stay free.
+        assert_eq!(height(Some(5000.0), Some(1080.0)), 1080 - 450);
         assert_eq!(height(Some(900.0), Some(480.0)), MIN_HEIGHT);
         assert_eq!(height(Some(f32::NAN), None), DEFAULT_HEIGHT);
     }
 
     #[test]
-    fn the_horizontal_launcher_is_centered_never_as_wide_as_the_screen() {
-        assert_eq!(panel_width(1920.0), 1100);
-        assert_eq!(panel_width(3440.0), 1100);
-        // On a smaller screen it leaves room for the mixer on its sides.
-        assert_eq!(panel_width(1600.0), 960);
-        // On a very small one it keeps a readable width, inside the screen.
-        assert_eq!(panel_width(1000.0), 760);
-        assert_eq!(panel_width(500.0), 484);
+    fn the_horizontal_launcher_gives_the_applications_what_the_screen_adds() {
+        let layout = lying_layout(1920.0);
+        assert_eq!(layout.row, 1892.0);
+        assert_eq!(layout.games, Some(260.0));
+        assert_eq!((layout.notices, layout.control), (340.0, 340.0));
+        assert_eq!(layout.apps, 1892.0 - 260.0 - 680.0 - 42.0);
+        assert_eq!(layout.margin(1920.0), 14.0);
     }
 
     #[test]
-    fn the_grid_has_six_columns_upright_and_three_lying_down() {
-        assert_eq!(columns(Orientation::Vertical(Side::Left), false), 6);
-        assert_eq!(columns(Orientation::Vertical(Side::Right), false), 6);
-        assert_eq!(columns(Orientation::Horizontal, false), 3);
-        // Search results take the width of two columns of the launcher.
-        assert_eq!(columns(Orientation::Horizontal, true), 6);
-        assert_eq!(columns(Orientation::Vertical(Side::Left), true), 6);
+    fn on_a_very_wide_screen_the_columns_keep_together_centered() {
+        let layout = lying_layout(3440.0);
+        assert_eq!(layout.row, WIDEST_ROW);
+        assert_eq!(layout.margin(3440.0), (3440.0 - WIDEST_ROW) / 2.0);
+    }
+
+    #[test]
+    fn on_a_narrow_screen_the_games_give_their_place_first() {
+        let layout = lying_layout(1280.0);
+        assert_eq!(layout.games, None);
+        assert_eq!(layout.notices, 340.0);
+        assert!(layout.apps >= NARROWEST_APPS);
+        // Narrower still, the notifications and the control center shrink.
+        let layout = lying_layout(1024.0);
+        assert_eq!(layout.notices, NARROWEST_SIDE);
+        assert_eq!(layout.control, NARROWEST_SIDE);
+        let used = layout.apps + layout.notices + layout.control + 2.0 * LYING_GAP;
+        assert_eq!(used, layout.row);
+    }
+
+    #[test]
+    fn the_pager_shows_the_pages_around_the_current_one() {
+        assert_eq!(page_buttons(0, 3), 0..3);
+        assert_eq!(page_buttons(0, 18), 0..5);
+        assert_eq!(page_buttons(1, 18), 0..5);
+        assert_eq!(page_buttons(7, 18), 5..10);
+        assert_eq!(page_buttons(17, 18), 13..18);
     }
 
     #[test]

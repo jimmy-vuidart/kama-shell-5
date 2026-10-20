@@ -145,13 +145,6 @@ pub struct ToastSurface {
     pub shown: usize,
 }
 
-impl Drawer {
-    /// How many columns the grid the arrow keys walk has.
-    pub fn columns(&self) -> usize {
-        drawer::columns(self.orientation, !self.query.trim().is_empty())
-    }
-}
-
 /// Something of the drawer that can be opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -2143,7 +2136,7 @@ impl Dock {
             self.hits(&open.query).len()
         };
         if let Some(open) = &mut self.drawer {
-            open.selected = drawer::step(open.selected, count, open.columns(), step);
+            open.selected = drawer::step(open.selected, count, drawer::COLUMNS, step);
         }
         Task::none()
     }

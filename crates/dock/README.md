@@ -1,8 +1,8 @@
 # coquille-dock
 
 Le dock de coquille : une barre fine sur le bord d'un écran, le lanceur
-d'applications qu'elle ouvre, son centre de contrôle et son mixeur par
-application. Un seul programme, plusieurs surfaces layer-shell, un seul état.
+d'applications qu'elle ouvre, ses notifications, son centre de contrôle et
+son mixeur par application. Un seul programme, plusieurs surfaces layer-shell, un seul état.
 
 Chaque écran peut avoir sa barre, dans un sens ou dans l'autre :
 
@@ -11,8 +11,16 @@ Chaque écran peut avoir sa barre, dans un sens ou dans l'autre :
   côté. À droite tout est en miroir : les icônes restent contre le bord, les
   noms se déploient vers la gauche, le menu et le mixeur s'ouvrent à gauche ;
 - **horizontale** : rangée centrée sur le bord bas, qui nomme l'icône
-  survolée dans une étiquette ; le lanceur est un panneau large et centré
-  au-dessus d'elle, en trois colonnes.
+  survolée dans une étiquette ; le lanceur est un tiroir sur toute la
+  largeur, qui monte du bord bas, en quatre colonnes (applications, jeux,
+  notifications, centre de contrôle) ; seules les applications s'élargissent
+  avec l'écran, et sur un écran très large les colonnes restent au milieu.
+
+Dans les deux lanceurs, les notifications et le centre de contrôle ont le
+même aspect : dans le tiroir vertical, ils se partagent son pied
+(notifications à gauche, centre de contrôle à droite, quel que soit le côté
+de la barre) ; dans le lanceur horizontal, ce sont ses deux dernières
+colonnes.
 
 Il tourne **dans coquille** : il lui faut le protocole layer-shell et, pour
 montrer les vraies fenêtres, le socket du compositeur (`COQUILLE_SOCKET`,
@@ -142,7 +150,9 @@ n'est jamais réécrit.
   de page. Tirer sa poignée le redimensionne : le bord du tiroir vertical
   opposé au dock (`[drawer] width`, jamais moins de 520 px ni au point de ne plus
   laisser de place au mixeur), le bord haut du lanceur horizontal
-  (`[drawer] height`, jamais moins de 480 px).
+  (`[drawer] height`, jamais moins de 480 px, et la place du mixeur reste
+  libre au-dessus). La pagination montre cinq numéros au plus, autour de la
+  page affichée.
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
   curseur pour le régler ; les touches de luminosité d'un portable la font
   aussi varier de 5 %, même en jeu) ; sur un portable, la batterie sous le
@@ -203,10 +213,13 @@ Le dock sert `org.freedesktop.Notifications` sur le bus de session
   mais **la notification reste ouverte**, dans l'historique (le serveur
   annonce `persistence`) ; seule une notification `transient` est fermée
   avec elle.
-- **Historique** : les notifications encore ouvertes, en tête du centre de
-  contrôle, au-dessus des bascules (deux lignes visibles, le reste en
-  défilement). Un clic sur une
-  ligne ou sur une bulle déclenche son action `default` s'il y en a une et
+- **Historique** : les notifications encore ouvertes ont leur section dans
+  le lanceur, à gauche du centre de contrôle et de sa hauteur : une carte
+  par notification, la plus récente en haut (icône, résumé, appli et
+  ancienneté, deux lignes du corps, deux actions au plus, croix), le reste
+  en défilement ; une cloche et « Aucune notification » quand il n'y en a
+  pas. Un clic sur une
+  carte ou sur une bulle déclenche son action `default` s'il y en a une et
   amène la fenêtre de l'appli (trouvée par `desktop-entry`, sinon par le nom
   de l'appli), puis la ferme. La croix la ferme, « Tout effacer » les ferme
   toutes. Une appli qui ferme sa notification la retire aussi. Rien n'est
@@ -225,9 +238,9 @@ Le dock sert `org.freedesktop.Notifications` sur le bus de session
 
 ## Limites
 
-- **Dock horizontal** : le lanceur fait au plus 1100 px de large, moins sur
-  un écran étroit ; sa grille a trois colonnes de six lignes. Les bascules
-  du centre de contrôle y vont deux par deux.
+- **Dock horizontal** : sur un écran de moins de 1550 px, la colonne des
+  jeux disparaît (ils restent dans la recherche), puis
+  notifications et centre de contrôle rétrécissent jusqu'à 280 px.
 - **Avec `--mock`**, une seule barre s'affiche (celle du premier écran
   configuré) : les écrans simulés n'existent pas pour de vrai.
 

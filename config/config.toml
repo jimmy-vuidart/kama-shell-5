@@ -107,7 +107,7 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 
 # Quel écran a un dock, et dans quel sens : "vertical" (colonne sur le bord
 # gauche, lanceur en tiroir), "vertical-right" (la même sur le bord droit),
-# "horizontal" (rangée sur le bord bas, lanceur en panneau au-dessus) ou
+# "horizontal" (rangée sur le bord bas, lanceur en tiroir de toute la largeur) ou
 # "off". Sans cette section : un dock vertical sur l'écran gauche, aucun
 # ailleurs ; un écran seul (un portable) a toujours le sien, sauf "off".
 [dock.screens]
@@ -124,8 +124,9 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # change et réécrit cette ligne.
 # width = 640
 
-# Hauteur du lanceur d'un dock horizontal, en pixels. Tirer son bord haut la
-# change et réécrit cette ligne.
+# Hauteur du lanceur d'un dock horizontal, en pixels (la barre en plus). Tirer
+# son bord haut la change et réécrit cette ligne ; la place du mixeur reste
+# libre au-dessus.
 # height = 500
 
 # Fond d'écran : image affichée en arrière-plan de chaque écran.

@@ -10,6 +10,7 @@ pub enum Glyph {
     Search,
     ChevronLeft,
     ChevronRight,
+    ChevronUp,
     Play,
     Volume,
     Muted,
@@ -42,6 +43,8 @@ pub enum Glyph {
     /// A laptop's battery, on battery and charging.
     Battery,
     BatteryCharging,
+    /// The notifications.
+    Bell,
 }
 
 impl Glyph {
@@ -54,6 +57,7 @@ impl Glyph {
             Self::Search => r#"<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16 16"/>"#,
             Self::ChevronLeft => r#"<path d="m15 6-6 6 6 6"/>"#,
             Self::ChevronRight => r#"<path d="m9 6 6 6-6 6"/>"#,
+            Self::ChevronUp => r#"<path d="m6 15 6-6 6 6"/>"#,
             Self::Play => r#"<path d="M9 6.5v11l9-5.5z" fill="black"/>"#,
             Self::Volume => {
                 r#"<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/>"#
@@ -122,6 +126,9 @@ impl Glyph {
             Self::BatteryCharging => {
                 r#"<rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><path d="M12 9.2 9.5 12.4h3l-2.5 3.2"/>"#
             }
+            Self::Bell => {
+                r#"<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>"#
+            }
         }
     }
 
@@ -154,6 +161,7 @@ mod tests {
             Glyph::Search,
             Glyph::ChevronLeft,
             Glyph::ChevronRight,
+            Glyph::ChevronUp,
             Glyph::Play,
             Glyph::Volume,
             Glyph::Muted,
@@ -183,6 +191,7 @@ mod tests {
             Glyph::Crop,
             Glyph::Battery,
             Glyph::BatteryCharging,
+            Glyph::Bell,
         ];
         for glyph in glyphs {
             let shapes = glyph.shapes();

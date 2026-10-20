@@ -68,14 +68,27 @@ les mesures.
   d'ouverture sous chaque icône) ; **Applications** (grille 6 × 3, de A à
   Z, paginée) ; **Jeux** (une rangée de jaquettes Steam, lien « Toute la
   ludothèque »). **Pas de section « récents ».**
-- Pied : **centre de contrôle**, dans une carte (`card`) : cinq bascules
-  (Réseau, Bluetooth, Ne pas déranger, Éclairage nocturne, Thème sombre ;
-  activée = fond d'accent), curseurs Volume (une flèche ouvre le mixeur) et
-  Luminosité (« 3 écrans »), puis l'utilisateur à gauche et Paramètres, Se
-  déconnecter, Redémarrer, Éteindre (en rouge) à droite.
+- Pied, en deux moitiés (notifications à gauche, centre de contrôle à
+  droite, quel que soit le côté de la barre), de la même hauteur :
+  - **Notifications** (21 octobre 2026 : sorties du centre de contrôle) :
+    une carte par notification encore ouverte, la plus récente en haut
+    (icône, résumé, appli et ancienneté, deux lignes du corps, actions,
+    croix), « Tout effacer », défilement ; une cloche quand il n'y en a pas ;
+  - **centre de contrôle**, dans une carte (`card`), le même dans les deux
+    lanceurs : cinq bascules deux par deux (Réseau, Bluetooth, Ne pas
+    déranger, Éclairage nocturne, Thème sombre ; activée = fond d'accent),
+    curseurs Volume (une flèche ouvre le mixeur) et Luminosité (« 3
+    écrans ») l'un sous l'autre, puis l'utilisateur (avatar, nom, batterie)
+    sur sa ligne, et dessous Capture, Paramètres, Se déconnecter, Veille,
+    Redémarrer, Éteindre (en rouge) sur toute la largeur.
 
-Le lanceur d'une barre horizontale est un panneau centré au-dessus d'elle,
-jamais sur toute la largeur de l'écran.
+Le lanceur d'une barre horizontale est lui aussi un tiroir, **sur toute la
+largeur** de l'écran (comme le vertical est sur toute sa hauteur), qui monte
+du bord bas avec la barre dans son pied : recherche, puis quatre colonnes,
+Épinglées et Applications (seules à s'élargir avec l'écran), Jeux (cédés en
+premier sur un écran étroit), Notifications et centre de contrôle (340 px).
+Sur un écran très large, les colonnes restent groupées au milieu (1900 px au
+plus). Le mixeur s'ouvre au-dessus du centre de contrôle.
 
 ## Mixeur
 
