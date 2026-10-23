@@ -187,6 +187,12 @@ pub enum MenuAction {
     /// One of the "open on" tiles, one per screen when there are several.
     OpenOn(OutputRole),
     NewWindow,
+    /// One of the actions of its desktop entry (« Nouvelle fenêtre de
+    /// navigation privée »): its name, and the command that does it.
+    Run {
+        name: String,
+        command: String,
+    },
     Pin,
     Unpin,
     /// Forget where the application was tidied: it reopens floating.
@@ -227,6 +233,7 @@ pub fn menu(entry: &Entry, screens: &[OutputRole]) -> Menu {
     if entry.identity.command.is_some() {
         actions.push(MenuAction::NewWindow);
     }
+    actions.extend(desktop_actions(entry));
     actions.push(if entry.pinned {
         MenuAction::Unpin
     } else {
@@ -247,6 +254,30 @@ pub fn menu(entry: &Entry, screens: &[OutputRole]) -> Menu {
         actions,
     }
 }
+
+/// The actions of the desktop entry of an application, as lines of its
+/// menu: at most [`DESKTOP_ACTIONS`], and not one that only opens a new
+/// window, which the menu already offers.
+fn desktop_actions(entry: &Entry) -> impl Iterator<Item = MenuAction> + '_ {
+    let new_window = |name: &str| {
+        let name = crate::model::drawer::fold(name);
+        name == "nouvelle fenetre" || name == "new window"
+    };
+    let offered = entry.identity.command.is_some();
+    entry
+        .identity
+        .actions
+        .iter()
+        .filter(move |action| !(offered && new_window(&action.name)))
+        .take(DESKTOP_ACTIONS)
+        .map(|action| MenuAction::Run {
+            name: action.name.clone(),
+            command: action.command.clone(),
+        })
+}
+
+/// The most actions of a desktop entry a menu shows (Steam lists a dozen).
+pub const DESKTOP_ACTIONS: usize = 5;
 
 /// Moves a favorite to another position, the others closing ranks.
 pub fn reorder(favorites: &mut Vec<String>, from: usize, to: usize) {
@@ -293,6 +324,7 @@ mod tests {
             command: Some(key.clone()),
             names: vec![key.clone()],
             game: key.starts_with("steam_app_"),
+            actions: Vec::new(),
             key,
         }
     }
@@ -587,6 +619,51 @@ mod tests {
 
         assert!(menu.actions.contains(&MenuAction::Pin));
         assert!(!menu.actions.contains(&MenuAction::Unpin));
+    }
+
+    #[test]
+    fn the_actions_of_the_desktop_entry_follow_the_new_window() {
+        use coquille_apps::AppAction;
+        let action = |name: &str, command: &str| AppAction {
+            name: name.into(),
+            command: command.into(),
+        };
+        let mut entries = bar(&["firefox"], &[]);
+        entries[0].identity.actions = vec![
+            action("Nouvelle fenêtre", "firefox --new-window"),
+            action("Nouvelle fenêtre privée", "firefox --private-window"),
+        ];
+
+        let actions = menu(&entries[0], &[OutputRole::Center]).actions;
+
+        // The new window is already there; the private one comes after it.
+        assert_eq!(
+            actions[..2],
+            [
+                MenuAction::NewWindow,
+                MenuAction::Run {
+                    name: "Nouvelle fenêtre privée".into(),
+                    command: "firefox --private-window".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_menu_shows_a_few_actions_of_the_desktop_entry_at_most() {
+        use coquille_apps::AppAction;
+        let mut entries = bar(&["steam"], &[]);
+        entries[0].identity.actions = (0..12)
+            .map(|index| AppAction {
+                name: format!("Page {index}"),
+                command: format!("steam steam://open/{index}"),
+            })
+            .collect();
+
+        let actions = menu(&entries[0], &[OutputRole::Center]).actions;
+        let run = |action: &&MenuAction| matches!(action, MenuAction::Run { .. });
+
+        assert_eq!(actions.iter().filter(run).count(), DESKTOP_ACTIONS);
     }
 
     #[test]

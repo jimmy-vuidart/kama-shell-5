@@ -151,6 +151,7 @@ mod tests {
             command: None,
             names: vec![key.clone()],
             game: false,
+            actions: Vec::new(),
             key,
         }
     }

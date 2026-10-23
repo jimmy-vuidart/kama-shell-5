@@ -1,6 +1,7 @@
 //! The menu opened by a right click on an application of the bar.
 
 use coquille_model::OutputRole;
+use iced::widget::text::Wrapping;
 use iced::widget::{Column, button, column, container, row, space, text};
 use iced::{Alignment, Color, Element, Length, Padding};
 
@@ -17,6 +18,18 @@ const TILES: f32 = 58.0;
 const ITEM: f32 = 36.0;
 const RULE: f32 = 9.0;
 const GAP: f32 = 4.0;
+
+/// How many characters of the name of a desktop action fit on its line.
+const ACTION_NAME: usize = 25;
+
+/// `name`, cut with an ellipsis past `room` characters.
+fn shortened(name: &str, room: usize) -> String {
+    if name.chars().count() <= room {
+        return name.to_owned();
+    }
+    let kept: String = name.chars().take(room.saturating_sub(1)).collect();
+    format!("{}…", kept.trim_end())
+}
 
 /// Whether a line of the menu comes after a hairline: forgetting and
 /// closing each stand apart.
@@ -177,8 +190,13 @@ fn screen_tile<'a>(
 }
 
 fn item<'a>(action: MenuAction, palette: Palette) -> Element<'a, Message> {
+    let name;
     let (glyph, label, hint, color) = match &action {
         MenuAction::NewWindow => (Glyph::Plus, "Nouvelle fenêtre", "", palette.text),
+        MenuAction::Run { name: full, .. } => {
+            name = shortened(full, ACTION_NAME);
+            (Glyph::Play, name.as_str(), "", palette.text)
+        }
         MenuAction::Pin => (Glyph::Bookmark, "Épingler aux favoris", "", palette.text),
         MenuAction::Unpin => (Glyph::Bookmark, "Retirer des favoris", "", palette.text),
         MenuAction::Forget => (
@@ -190,9 +208,14 @@ fn item<'a>(action: MenuAction, palette: Palette) -> Element<'a, Message> {
         MenuAction::Close(_) => (Glyph::Close, "Fermer la fenêtre", "", style::DANGER),
         MenuAction::OpenOn(_) => (Glyph::Plus, "", "", palette.text),
     };
+    let label = text(label.to_owned())
+        .size(13)
+        .font(style::MEDIUM)
+        .color(color)
+        .wrapping(Wrapping::None);
     let content = row![
         icons::glyph(glyph, 16.0, color),
-        text(label).size(13).font(style::MEDIUM).color(color),
+        container(label).clip(true),
         space().width(Length::Fill),
         text(hint).size(11).color(palette.muted)
     ]
@@ -218,6 +241,16 @@ mod tests {
             current: None,
             actions,
         }
+    }
+
+    #[test]
+    fn a_long_action_name_is_cut_with_an_ellipsis() {
+        assert_eq!(shortened("Nouvelle fenêtre", 25), "Nouvelle fenêtre");
+        assert_eq!(
+            shortened("Nouvelle fenêtre de navigation privée", 25),
+            "Nouvelle fenêtre de navi…"
+        );
+        assert_eq!(shortened("Ouvrir la bibliothèque", 10), "Ouvrir la…");
     }
 
     #[test]

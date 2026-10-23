@@ -1724,6 +1724,7 @@ impl Dock {
                             spawn(command);
                         }
                     }
+                    MenuAction::Run { command, .. } => spawn(&command),
                     MenuAction::NewWindow => {
                         if let Some(command) = &entry.identity.command {
                             spawn(command);

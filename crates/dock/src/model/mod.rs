@@ -26,7 +26,7 @@ pub enum Orientation {
     /// A row on the bottom edge; its launcher is a panel above it.
     Horizontal,
 }
-use coquille_apps::Catalog;
+use coquille_apps::{AppAction, Catalog};
 
 /// An application as the dock knows it, whatever led to it: a name of the
 /// configuration, or what a window calls itself.
@@ -44,6 +44,8 @@ pub struct Identity {
     /// Every name its windows may bear (`app_id`, `WM_CLASS`).
     pub names: Vec<String>,
     pub game: bool,
+    /// What its desktop entry offers to do besides opening it.
+    pub actions: Vec<AppAction>,
 }
 
 /// Finds the application a name stands for.
@@ -57,6 +59,7 @@ pub fn identify(catalog: &Catalog, games: &[Game], name: &str) -> Identity {
             command: Some(game.command()),
             names: vec![game.window_class()],
             game: true,
+            actions: Vec::new(),
         };
     }
     let Some(app) = catalog.find(name) else {
@@ -68,6 +71,7 @@ pub fn identify(catalog: &Catalog, games: &[Game], name: &str) -> Identity {
             command: None,
             names: vec![name.to_owned()],
             game: name.starts_with("steam_app_"),
+            actions: Vec::new(),
         };
     };
     // The shortcut Steam wrote for a game: its windows will bear the number
@@ -82,6 +86,7 @@ pub fn identify(catalog: &Catalog, games: &[Game], name: &str) -> Identity {
             command: Some(app.command.clone()),
             names: vec![class],
             game: true,
+            actions: Vec::new(),
         };
     }
     let program = app.command.split_whitespace().next().unwrap_or_default();
@@ -108,6 +113,7 @@ pub fn identify(catalog: &Catalog, games: &[Game], name: &str) -> Identity {
         command: Some(app.command.clone()),
         names,
         game: false,
+        actions: app.actions.clone(),
     }
 }
 

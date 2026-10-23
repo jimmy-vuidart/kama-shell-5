@@ -337,6 +337,7 @@ mod tests {
             command: None,
             names: vec![name.into(), format!("{name}-bin")],
             game,
+            actions: Vec::new(),
         }
     }
 
