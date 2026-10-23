@@ -156,6 +156,14 @@ pub enum Gesture {
     },
 }
 
+/// A key that acts on the window switcher while it is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SwitcherKey {
+    Step(bool),
+    Cancel,
+    Finish,
+}
+
 /// What the pointer is doing during an interactive screenshot selection.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScreenshotMode {
@@ -268,6 +276,7 @@ impl State {
         let mod_key = self.mod_key;
         let mut tapped = false;
         let mut cancelled = false;
+        let mut switch = None;
 
         let action = keyboard.input::<Option<Action>, _>(
             self,
@@ -290,6 +299,13 @@ impl State {
                 let keycode = handle.raw_code().raw();
                 let is_mod = mod_key.is_key(&handle.raw_syms());
                 if key_state == KeyState::Released {
+                    // Alt let go ends the switch; the client saw Alt go
+                    // down, it sees it go up.
+                    let alt = [Keysym::Alt_L, Keysym::Alt_R];
+                    if state.switcher.is_some() && handle.raw_syms().iter().any(|s| alt.contains(s))
+                    {
+                        switch = Some(SwitcherKey::Finish);
+                    }
                     tapped = state.mod_tap.key_released(is_mod);
                     // The client never saw the press: hide the release too.
                     let before = state.suppressed_keys.len();
@@ -310,6 +326,26 @@ impl State {
                     if handle.raw_syms().contains(&Keysym::Escape) && state.can_cancel_gesture() {
                         state.suppressed_keys.push(keycode);
                         cancelled = true;
+                        return FilterResult::Intercept(None);
+                    }
+                }
+                if state.switcher.is_some() {
+                    // While choosing, keys go to the switcher, not to the
+                    // window that has the focus; modifiers and Tab go on.
+                    let syms = handle.raw_syms();
+                    let has = |sym: Keysym| syms.contains(&sym);
+                    switch = if has(Keysym::Escape) {
+                        Some(SwitcherKey::Cancel)
+                    } else if has(Keysym::Right) || has(Keysym::Down) {
+                        Some(SwitcherKey::Step(true))
+                    } else if has(Keysym::Left) || has(Keysym::Up) {
+                        Some(SwitcherKey::Step(false))
+                    } else {
+                        None
+                    };
+                    let passes = has(Keysym::Tab) || syms.iter().all(|sym| sym.is_modifier_key());
+                    if switch.is_some() || !passes {
+                        state.suppressed_keys.push(keycode);
                         return FilterResult::Intercept(None);
                     }
                 }
@@ -335,6 +371,12 @@ impl State {
         }
         if cancelled {
             self.cancel_gesture();
+        }
+        match switch {
+            Some(SwitcherKey::Step(forward)) => self.switch_window(forward),
+            Some(SwitcherKey::Cancel) => self.cancel_switch(),
+            Some(SwitcherKey::Finish) => self.finish_switch(),
+            None => {}
         }
         // The shell modifier alone, pressed and released: the drawer of the
         // dock, and with it the way out of a game that holds the pointer.
@@ -389,6 +431,10 @@ impl State {
             }
             Action::ScreenshotRegion => {
                 self.start_region_screenshot();
+                return;
+            }
+            Action::SwitchWindow { forward } => {
+                self.switch_window(forward);
                 return;
             }
             Action::CycleTab { forward } => {

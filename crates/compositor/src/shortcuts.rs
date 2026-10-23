@@ -62,6 +62,11 @@ pub enum Action {
     },
     /// Starts interactive region screenshot selection.
     ScreenshotRegion,
+    /// Alt+Tab: the window switcher, to the next window used, or with
+    /// Shift to the previous one.
+    SwitchWindow {
+        forward: bool,
+    },
 }
 
 /// A key going down.
@@ -103,6 +108,12 @@ pub fn action_for(press: KeyPress<'_>) -> Option<Action> {
     }
     if has(Keysym::Print) || has(Keysym::Sys_Req) {
         return Some(Action::ScreenshotRegion);
+    }
+    // Alt itself, whatever the shell modifier: the habit of every desktop.
+    if press.alt && !press.ctrl && has(Keysym::Tab) {
+        return Some(Action::SwitchWindow {
+            forward: !press.shift,
+        });
     }
 
     if !press.main {
@@ -322,6 +333,36 @@ mod tests {
     #[test]
     fn an_unbound_key_does_nothing() {
         assert_eq!(press(true, false, &[Keysym::a]), None);
+    }
+
+    #[test]
+    fn alt_tab_switches_windows_and_shift_goes_back() {
+        let alt = |shift| KeyPress {
+            alt: true,
+            shift,
+            syms: &[Keysym::Tab],
+            ..PLAIN
+        };
+
+        assert_eq!(
+            action_for(alt(false)),
+            Some(Action::SwitchWindow { forward: true })
+        );
+        assert_eq!(
+            action_for(alt(true)),
+            Some(Action::SwitchWindow { forward: false })
+        );
+        // Nested, Alt is also the shell modifier.
+        let nested = KeyPress {
+            main: true,
+            ..alt(false)
+        };
+        assert_eq!(
+            action_for(nested),
+            Some(Action::SwitchWindow { forward: true })
+        );
+        assert_eq!(press(false, false, &[Keysym::Tab]), None);
+        assert_eq!(press(true, false, &[Keysym::Tab]), None);
     }
 
     #[test]

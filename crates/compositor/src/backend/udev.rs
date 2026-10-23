@@ -48,6 +48,7 @@ use crate::render::scene::{self, Layers, SceneElement};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
 use crate::state::State;
+use crate::switcher::Switcher;
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
@@ -680,6 +681,7 @@ impl State {
         }
         .map_or(Scale::ONE, |id| self.shell.scale_of(id));
         let cursor = self.cursor(true, scale);
+        self.refresh_switcher();
         let overlay = self.overlay();
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
@@ -706,7 +708,7 @@ impl State {
                 view,
                 scale,
                 overlay: &overlay,
-                panel: None,
+                panel: self.switcher.as_ref().and_then(Switcher::panel),
                 panels: &panels,
                 cursor,
                 wallpapers: &wallpapers,

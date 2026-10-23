@@ -14,6 +14,7 @@ use tiny_skia::{
 use super::capsules::{CapsuleButton, CapsuleCell, GroupLayout};
 use super::icons::IconCache;
 use super::layout::{TitlebarButton, TitlebarLayout};
+use super::switcher::{self, SwitcherLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
 
 const UI_FONT: &str = "Figtree";
@@ -98,6 +99,41 @@ impl CapsuleSpec {
 pub struct PaintedGroup {
     pub pixmap: Pixmap,
     pub layout: GroupLayout,
+}
+
+/// Everything the look of the window switcher depends on: repaint only when
+/// it changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitcherSpec {
+    /// The windows, in the order they were used, the latest first.
+    pub tiles: Vec<SwitcherTile>,
+    /// The one that shows when the switch ends.
+    pub selected: usize,
+    /// How wide the screen it shows on is: its rows are no wider.
+    pub screen_width: i32,
+    pub theme: ThemeKind,
+    pub accent: Rgba,
+    /// The scale of its screen: painted that many times larger.
+    pub scale: Scale,
+}
+
+/// One window of the switcher.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitcherTile {
+    /// The name of its application.
+    pub label: String,
+    /// The title of the window.
+    pub title: String,
+    pub icon: Option<String>,
+    pub badge: [u8; 3],
+    /// Hidden by the user: shown dimmed, the switch brings it back.
+    pub minimized: bool,
+}
+
+/// The switcher painted to pixels, with its logical size.
+pub struct PaintedSwitcher {
+    pub pixmap: Pixmap,
+    pub size: Size,
 }
 
 pub struct Painter {
@@ -353,6 +389,106 @@ impl Painter {
                 stroke(pixmap, &icon, color, s);
             }
         }
+    }
+
+    /// Paints the window switcher: a panel of glass with one tile per
+    /// window, the chosen one ringed with the accent. `None` without window.
+    pub fn switcher(&mut self, spec: &SwitcherSpec) -> Option<PaintedSwitcher> {
+        const RADIUS: f32 = 14.0;
+        const TILE_RADIUS: f32 = 10.0;
+        if spec.tiles.is_empty() {
+            return None;
+        }
+        let theme = Theme::new(spec.theme).with_accent(spec.accent);
+        self.icons.follow(spec.theme, spec.accent);
+        let layout = SwitcherLayout::new(spec.tiles.len(), spec.screen_width);
+        let s = spec.scale.get() as f32;
+        let mut pixmap = canvas(layout.size, spec.scale)?;
+
+        let (w, h) = (layout.size.w as f32, layout.size.h as f32);
+        if let Some(bg) = rounded_rect(0.0, 0.0, w, h, [RADIUS; 4]) {
+            fill(&mut pixmap, &bg, theme.glass_strong, s);
+        }
+        if let Some(rim) = rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, [RADIUS - 0.5; 4]) {
+            outline(&mut pixmap, &rim, theme.rim, 1.0, s);
+        }
+        for (index, (tile, cell)) in spec.tiles.iter().zip(&layout.tiles).enumerate() {
+            let (x, y) = (cell.x as f32, cell.y as f32);
+            let (cw, ch) = (cell.w as f32, cell.h as f32);
+            if index == spec.selected {
+                if let Some(path) = rounded_rect(x, y, cw, ch, [TILE_RADIUS; 4]) {
+                    fill(&mut pixmap, &path, theme.accent.with_alpha(40), s);
+                }
+                let inset = RING_WIDTH / 2.0;
+                let ring = rounded_rect(
+                    x + inset,
+                    y + inset,
+                    cw - RING_WIDTH,
+                    ch - RING_WIDTH,
+                    [TILE_RADIUS - inset; 4],
+                );
+                if let Some(ring) = ring {
+                    outline(&mut pixmap, &ring, theme.accent, RING_WIDTH, s);
+                }
+            }
+            let icon = Rect::new(
+                cell.x + (cell.w - switcher::ICON_SIZE) / 2,
+                cell.y + switcher::ICON_TOP,
+                switcher::ICON_SIZE,
+                switcher::ICON_SIZE,
+            );
+            let opacity = if tile.minimized { 0.45 } else { 1.0 };
+            let (icon_name, badge) = (tile.icon.as_deref(), tile.badge);
+            self.app_mark(&mut pixmap, icon_name, badge, icon, 12.0, opacity, s);
+
+            let (name_color, title_color) = if tile.minimized {
+                (theme.disabled, theme.disabled)
+            } else {
+                (theme.text, theme.text_muted)
+            };
+            let lines = [
+                (
+                    &tile.label,
+                    switcher::NAME_TOP,
+                    Weight::SEMIBOLD,
+                    name_color,
+                ),
+                (
+                    &tile.title,
+                    switcher::TITLE_TOP,
+                    Weight::NORMAL,
+                    title_color,
+                ),
+            ];
+            for (line, top, weight, color) in lines {
+                let room = (cell.w - 2 * switcher::TEXT_INSET) as f32;
+                let line = self.fitted(line, weight, room);
+                let width = self.shaped(&line, weight, 1.0).1.min(room);
+                let left = cell.x as f32 + (cell.w as f32 - width) / 2.0;
+                let area = Rect::new(cell.x, cell.y + top, cell.w, LINE_HEIGHT as i32);
+                self.text(&mut pixmap, &line, left, room, area, weight, color, s);
+            }
+        }
+        Some(PaintedSwitcher {
+            pixmap,
+            size: layout.size,
+        })
+    }
+
+    /// `text`, cut with an ellipsis so that it holds in `room` pixels.
+    fn fitted(&mut self, text: &str, weight: Weight, room: f32) -> String {
+        if self.shaped(text, weight, 1.0).1 <= room {
+            return text.to_owned();
+        }
+        let mut kept: Vec<char> = text.chars().collect();
+        while !kept.is_empty() {
+            kept.pop();
+            let candidate = format!("{}…", kept.iter().collect::<String>().trim_end());
+            if self.shaped(&candidate, weight, 1.0).1 <= room {
+                return candidate;
+            }
+        }
+        String::new()
     }
 
     fn texts(
@@ -824,6 +960,78 @@ mod tests {
         let middle = single.layout.rect.x + single.layout.rect.w / 2;
         assert_ne!(pixel(&double.pixmap, middle as u32 * 2, 2)[3], 0);
         assert_eq!(pixel(&double.pixmap, 4, 32), [0, 0, 0, 0]);
+    }
+
+    fn switcher_spec(count: usize, selected: usize, scale: Scale) -> SwitcherSpec {
+        let tile = |index: usize| SwitcherTile {
+            label: format!("Appli {index}"),
+            title: "Une fenêtre au titre bien trop long pour sa tuile".into(),
+            icon: None,
+            badge: [90, 120, 200],
+            minimized: index == 2,
+        };
+        SwitcherSpec {
+            tiles: (0..count).map(tile).collect(),
+            selected,
+            screen_width: 3440,
+            theme: ThemeKind::Light,
+            accent: Theme::new(ThemeKind::Light).accent,
+            scale,
+        }
+    }
+
+    #[test]
+    fn the_switcher_is_as_large_as_its_layout_at_any_scale() {
+        let mut painter = Painter::new();
+
+        let single = painter.switcher(&switcher_spec(3, 1, Scale::ONE)).unwrap();
+        let double = painter
+            .switcher(&switcher_spec(3, 1, Scale::new(2.0)))
+            .unwrap();
+
+        assert_eq!(single.size, SwitcherLayout::new(3, 3440).size);
+        assert_eq!(double.size, single.size);
+        assert_eq!(double.pixmap.width(), 2 * single.pixmap.width());
+    }
+
+    #[test]
+    fn the_chosen_window_is_ringed_with_the_accent() {
+        let spec = switcher_spec(3, 1, Scale::ONE);
+        let painted = Painter::new().switcher(&spec).unwrap();
+        let layout = SwitcherLayout::new(3, 3440);
+        let accent = spec.accent;
+        // On the left edge of a tile, half way down.
+        let ring_of = |tile: Rect| {
+            let at = pixel(
+                &painted.pixmap,
+                tile.x as u32 + 1,
+                (tile.y + tile.h / 2) as u32,
+            );
+            at[2].abs_diff(accent.b) < 40 && at[0].abs_diff(accent.r) < 40
+        };
+
+        assert!(ring_of(layout.tiles[1]));
+        assert!(!ring_of(layout.tiles[0]));
+    }
+
+    #[test]
+    fn a_long_title_is_cut_with_an_ellipsis() {
+        let mut painter = Painter::new();
+
+        let fitted = painter.fitted("Une fenêtre au titre bien trop long", Weight::NORMAL, 80.0);
+
+        assert!(fitted.ends_with('…'), "{fitted}");
+        assert!(painter.shaped(&fitted, Weight::NORMAL, 1.0).1 <= 80.0);
+        assert_eq!(painter.fitted("Kitty", Weight::NORMAL, 80.0), "Kitty");
+    }
+
+    #[test]
+    fn a_switcher_without_window_is_not_painted() {
+        assert!(
+            Painter::new()
+                .switcher(&switcher_spec(0, 0, Scale::ONE))
+                .is_none()
+        );
     }
 
     #[test]

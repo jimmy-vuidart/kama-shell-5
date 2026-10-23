@@ -56,6 +56,7 @@ use crate::render::glass::GlassCache;
 use crate::render::scene::Cursor;
 use crate::shell::{CapsuleHit, ScreenInfo, Shell};
 use crate::shortcuts::ModKey;
+use crate::switcher::Switcher;
 use crate::theme::{Rgba, Theme, ThemeKind};
 use crate::wallpaper::{ScreenWallpaper, WallpaperManager};
 
@@ -174,6 +175,8 @@ pub struct State {
     pub hover: Option<(WindowId, TitlebarButton)>,
     /// The capsule under the pointer.
     pub capsule_hover: Option<CapsuleHit>,
+    /// The window switcher, while Alt is held after Tab.
+    pub switcher: Option<Switcher>,
     /// The panel the user clicked to type in: it has the keyboard until a
     /// click elsewhere.
     pub panel_focus: Option<LayerSurface>,
@@ -371,6 +374,7 @@ impl State {
             app_theme: None,
             hover: None,
             capsule_hover: None,
+            switcher: None,
             panel_focus: None,
             gesture: None,
             last_bar_press: None,

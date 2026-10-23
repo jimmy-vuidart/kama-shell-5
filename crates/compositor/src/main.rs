@@ -23,6 +23,7 @@ mod screenshot;
 mod shell;
 mod shortcuts;
 mod state;
+mod switcher;
 mod theme;
 mod wallpaper;
 mod xwayland;

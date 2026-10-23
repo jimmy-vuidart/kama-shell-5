@@ -30,6 +30,7 @@ use crate::render::scene::{self, Layers};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
 use crate::state::State;
+use crate::switcher::Switcher;
 
 const TITLE: &str = "coquille";
 const INITIAL_SIZE: (f64, f64) = (1600.0, 900.0);
@@ -222,6 +223,7 @@ impl State {
         );
         let scale = self.winit().map_or(Scale::ONE, |winit| winit.scale);
         let cursor = self.cursor(false, scale);
+        self.refresh_switcher();
         let overlay = self.overlay();
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
@@ -271,7 +273,7 @@ impl State {
                         view,
                         scale: scale.get(),
                         overlay: &overlay,
-                        panel: None,
+                        panel: self.switcher.as_ref().and_then(Switcher::panel),
                         panels: &panels,
                         cursor,
                         wallpapers: &wallpapers,
