@@ -100,27 +100,6 @@ pub struct PaintedGroup {
     pub layout: GroupLayout,
 }
 
-/// What the placement bar's look depends on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BarSpec {
-    /// One per button; the first one is the default choice and stands out.
-    pub labels: Vec<String>,
-    pub hovered: Option<usize>,
-    pub theme: ThemeKind,
-    pub accent: Rgba,
-    /// The scale of its screen: painted that many times larger.
-    pub scale: Scale,
-}
-
-/// A bar painted to pixels, with where its buttons ended up.
-pub struct PaintedBar {
-    pub pixmap: Pixmap,
-    /// Its logical size; the pixmap is that times the scale.
-    pub size: Size,
-    /// Relative to the bar's top-left corner, in the order of the labels.
-    pub buttons: Vec<Rect>,
-}
-
 pub struct Painter {
     fonts: FontSystem,
     glyphs: SwashCache,
@@ -374,71 +353,6 @@ impl Painter {
                 stroke(pixmap, &icon, color, s);
             }
         }
-    }
-
-    /// Paints the placement bar. Returns `None` when it has no button.
-    pub fn placement_bar(&mut self, spec: &BarSpec) -> Option<PaintedBar> {
-        const HEIGHT: i32 = 40;
-        const PADDING: i32 = 6;
-        const BUTTON_PADDING: i32 = 12;
-        const GAP: i32 = 4;
-        if spec.labels.is_empty() {
-            return None;
-        }
-        let theme = Theme::new(spec.theme).with_accent(spec.accent);
-
-        let widths: Vec<i32> = spec
-            .labels
-            .iter()
-            .map(|label| {
-                self.shaped(label, Weight::MEDIUM, 1.0).1.ceil() as i32 + 2 * BUTTON_PADDING
-            })
-            .collect();
-        let gaps = GAP * (widths.len() as i32 - 1);
-        let width = 2 * PADDING + widths.iter().sum::<i32>() + gaps;
-        let size = Size::new(width, HEIGHT);
-        let s = spec.scale.get() as f32;
-        let mut pixmap = canvas(size, spec.scale)?;
-
-        let (w, h) = (width as f32, HEIGHT as f32);
-        if let Some(bg) = rounded_rect(0.0, 0.0, w, h, [14.0; 4]) {
-            fill(&mut pixmap, &bg, theme.glass_strong, s);
-        }
-        if let Some(rim) = rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, [13.5; 4]) {
-            outline(&mut pixmap, &rim, theme.rim, 1.0, s);
-        }
-
-        let mut buttons = Vec::new();
-        let mut x = PADDING;
-        for (index, (label, width)) in spec.labels.iter().zip(widths).enumerate() {
-            let cell = Rect::new(x, PADDING, width, HEIGHT - 2 * PADDING);
-            // The first choice is the default one: it stands out.
-            let (background, ink) = match (index, spec.hovered == Some(index)) {
-                (0, _) => (Some(theme.accent), Rgba::WHITE),
-                (_, true) => (Some(theme.hover), theme.text),
-                (_, false) => (None, theme.text),
-            };
-            let pill = rounded_rect(
-                x as f32,
-                PADDING as f32,
-                width as f32,
-                cell.h as f32,
-                [8.0; 4],
-            );
-            if let (Some(background), Some(pill)) = (background, pill) {
-                fill(&mut pixmap, &pill, background, s);
-            }
-            let left = (x + BUTTON_PADDING) as f32;
-            let room = (width - BUTTON_PADDING) as f32;
-            self.text(&mut pixmap, label, left, room, cell, Weight::MEDIUM, ink, s);
-            buttons.push(cell);
-            x += width + GAP;
-        }
-        Some(PaintedBar {
-            pixmap,
-            size,
-            buttons,
-        })
     }
 
     fn texts(
@@ -827,52 +741,6 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_has_one_button_per_label_side_by_side_inside_it() {
-        let spec = BarSpec {
-            labels: vec![
-                "Laisser flottante".into(),
-                "Ranger ici".into(),
-                "Au centre".into(),
-            ],
-            hovered: Some(1),
-            theme: ThemeKind::Light,
-            accent: Theme::new(ThemeKind::Light).accent,
-            scale: Scale::ONE,
-        };
-
-        let bar = Painter::new().placement_bar(&spec).unwrap();
-
-        let (width, height) = (bar.pixmap.width() as i32, bar.pixmap.height() as i32);
-        assert_eq!(bar.buttons.len(), 3);
-        let mut previous_right = 0;
-        for button in &bar.buttons {
-            assert!(
-                button.x >= previous_right,
-                "buttons overlap: {:?}",
-                bar.buttons
-            );
-            assert!(button.w > 0 && button.right() <= width);
-            assert!(button.y >= 0 && button.bottom() <= height);
-            previous_right = button.right();
-        }
-        // A longer label makes a wider button.
-        assert!(bar.buttons[0].w > bar.buttons[2].w);
-    }
-
-    #[test]
-    fn a_bar_without_label_is_not_painted() {
-        let spec = BarSpec {
-            labels: Vec::new(),
-            hovered: None,
-            theme: ThemeKind::Dark,
-            accent: Theme::new(ThemeKind::Dark).accent,
-            scale: Scale::ONE,
-        };
-
-        assert!(Painter::new().placement_bar(&spec).is_none());
-    }
-
-    #[test]
     fn every_button_has_an_icon_inside_its_cell() {
         let cell = Rect::new(100, 0, 38, 38);
         for button in [
@@ -956,28 +824,6 @@ mod tests {
         let middle = single.layout.rect.x + single.layout.rect.w / 2;
         assert_ne!(pixel(&double.pixmap, middle as u32 * 2, 2)[3], 0);
         assert_eq!(pixel(&double.pixmap, 4, 32), [0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn the_bar_keeps_its_logical_size_at_any_scale() {
-        let spec = |scale| BarSpec {
-            labels: vec!["Laisser flottante".into(), "Ranger ici".into()],
-            hovered: None,
-            theme: ThemeKind::Light,
-            accent: Theme::new(ThemeKind::Light).accent,
-            scale,
-        };
-        let mut painter = Painter::new();
-
-        let single = painter.placement_bar(&spec(Scale::ONE)).unwrap();
-        let larger = painter.placement_bar(&spec(Scale::new(1.5))).unwrap();
-
-        assert_eq!(larger.size, single.size);
-        assert_eq!(larger.buttons, single.buttons);
-        assert_eq!(
-            larger.pixmap.width() as i32,
-            (single.size.w as f64 * 1.5).round() as i32
-        );
     }
 
     #[test]

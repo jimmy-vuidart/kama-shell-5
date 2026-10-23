@@ -547,116 +547,6 @@ fn a_habit_on_a_screen_that_is_not_plugged_opens_floating() {
     assert_eq!(desk.memory().len(), 1);
 }
 
-// "To the center": tidying a side window into the center screen.
-
-#[test]
-fn sending_to_the_center_tidies_the_window_there() {
-    let mut desk = desk();
-    open(&mut desk, 1, "editor", RIGHT);
-
-    desk.send_to_center(WindowId(1)).unwrap();
-
-    assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
-    assert_eq!(desk.focused(), Some(WindowId(1)));
-    assert!(geo(&desk, 1).visible);
-}
-
-#[test]
-fn sending_to_an_occupied_center_stacks_and_leaves_its_window_there() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open_in(&mut desk, 2, "editor", RIGHT, 0);
-
-    desk.send_to_center(WindowId(2)).unwrap();
-
-    assert_eq!(tabs(&desk, CENTER, 0), [1, 2]);
-    assert_eq!(active_tab(&desk, CENTER, 0), Some(2));
-    assert!(desk.screen(RIGHT).unwrap().slots().is_empty());
-}
-
-#[test]
-fn sending_to_a_full_split_center_goes_to_the_column_used_last() {
-    let mut desk = desk();
-    desk.set_layout(CENTER, LayoutKind::MainSide).unwrap();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open_in(&mut desk, 2, "admin", CENTER, 1);
-    open_in(&mut desk, 3, "editor", RIGHT, 0);
-
-    desk.send_to_center(WindowId(3)).unwrap();
-
-    assert_eq!(place(&desk, 3), Placement::Slot(slot(CENTER, 1)));
-    assert_eq!(tabs(&desk, CENTER, 1), [2, 3]);
-}
-
-#[test]
-fn sending_to_a_split_center_with_room_opens_a_column() {
-    let mut desk = desk();
-    desk.set_layout(CENTER, LayoutKind::ThreeColumns).unwrap();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-    open_in(&mut desk, 2, "editor", RIGHT, 0);
-
-    desk.send_to_center(WindowId(2)).unwrap();
-
-    assert_eq!(place(&desk, 2), Placement::Slot(slot(CENTER, 1)));
-    assert_eq!(desk.screen(CENTER).unwrap().slots().len(), 2);
-}
-
-#[test]
-fn sending_to_an_empty_center_opens_its_first_column() {
-    let mut desk = desk();
-    desk.set_layout(CENTER, LayoutKind::MainSide).unwrap();
-    open_in(&mut desk, 1, "editor", RIGHT, 0);
-
-    desk.send_to_center(WindowId(1)).unwrap();
-
-    assert_eq!(place(&desk, 1), Placement::Slot(slot(CENTER, 0)));
-}
-
-#[test]
-fn sending_to_the_center_is_refused_while_a_game_is_anchored() {
-    let mut desk = desk();
-    anchor_game(&mut desk, 1);
-    open_in(&mut desk, 2, "discord", LEFT, 0);
-
-    let result = desk.send_to_center(WindowId(2));
-
-    assert_eq!(result, Err(ModelError::Anchored(CENTER)));
-    assert_eq!(place(&desk, 2), Placement::Slot(slot(LEFT, 0)));
-}
-
-#[test]
-fn sending_a_window_already_at_the_center_is_refused() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "product", CENTER, 0);
-
-    let result = desk.send_to_center(WindowId(1));
-
-    assert_eq!(result, Err(ModelError::NotOnSideScreen(WindowId(1))));
-}
-
-#[test]
-fn sending_to_the_center_without_a_center_screen_is_refused() {
-    let only_left = vec![OutputInfo::new(LEFT, OutputRole::Left, SIDE_SIZE)];
-    let mut desk = Desk::new(only_left, Metrics::default());
-    open_in(&mut desk, 1, "editor", LEFT, 0);
-
-    assert_eq!(desk.send_to_center(WindowId(1)), Err(ModelError::NoCenter));
-}
-
-#[test]
-fn sending_to_the_center_becomes_the_habit_of_the_application() {
-    let mut desk = desk();
-    open(&mut desk, 1, "editor", RIGHT);
-
-    desk.send_to_center(WindowId(1)).unwrap();
-    desk.close_window(WindowId(1)).unwrap();
-
-    assert_eq!(
-        open(&mut desk, 2, "editor", LEFT),
-        Placement::Slot(slot(CENTER, 0))
-    );
-}
-
 // Rule 7: never in front of an anchored game.
 
 #[test]
@@ -986,32 +876,6 @@ fn a_window_hidden_under_a_game_gets_the_focus_back_when_the_game_leaves() {
     desk.close_window(WindowId(2)).unwrap();
 
     assert_eq!(desk.focused(), Some(WindowId(1)));
-}
-
-#[test]
-fn the_center_is_offered_to_side_windows_only_without_a_game() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "discord", LEFT, 0);
-    open_in(&mut desk, 2, "browser", CENTER, 0);
-    assert!(desk.can_send_to_center(WindowId(1)));
-    assert!(!desk.can_send_to_center(WindowId(2)));
-    assert!(!desk.can_send_to_center(WindowId(99)));
-
-    desk.set_anchored(WindowId(2), true).unwrap();
-
-    assert!(!desk.can_send_to_center(WindowId(1)));
-}
-
-#[test]
-fn a_window_under_a_side_game_cannot_be_sent_to_the_center() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "discord", LEFT, 0);
-    open_in(&mut desk, 2, "video", LEFT, 1);
-
-    desk.set_anchored(WindowId(2), true).unwrap();
-
-    assert!(!desk.can_send_to_center(WindowId(1)));
-    assert!(!desk.can_send_to_center(WindowId(2)));
 }
 
 #[test]
@@ -1711,50 +1575,6 @@ fn a_zone_is_occupied_when_another_window_is_there() {
     assert_eq!(occupied, [slot(RIGHT, 0)]);
 }
 
-// Suggestions for the placement bar.
-
-#[test]
-fn a_new_column_is_suggested_while_there_is_room() {
-    let mut desk = desk();
-    open(&mut desk, 1, "term", LEFT);
-    assert_eq!(desk.suggested_slot(WindowId(1)), Some(slot(LEFT, 0)));
-
-    desk.move_to_slot(WindowId(1), slot(LEFT, 0)).unwrap();
-    // Another application: the same one would reopen in its slot.
-    open(&mut desk, 2, "notes", LEFT);
-
-    assert_eq!(desk.suggested_slot(WindowId(2)), Some(slot(LEFT, 1)));
-}
-
-#[test]
-fn with_every_column_open_the_one_focused_last_is_suggested() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "guide", RIGHT, 0);
-    open_in(&mut desk, 2, "notes", RIGHT, 1);
-    desk.focus(WindowId(1)).unwrap();
-    open(&mut desk, 3, "browser", RIGHT);
-
-    assert_eq!(desk.suggested_slot(WindowId(3)), Some(slot(RIGHT, 0)));
-}
-
-#[test]
-fn nothing_is_suggested_on_an_anchored_screen() {
-    let mut desk = desk();
-    open(&mut desk, 2, "notes", CENTER);
-    anchor_game(&mut desk, 3);
-
-    assert_eq!(desk.suggested_slot(WindowId(2)), None);
-    assert_eq!(desk.suggested_slot(WindowId(9)), None);
-}
-
-#[test]
-fn nothing_is_suggested_for_a_window_already_in_a_slot() {
-    let mut desk = desk();
-    open_in(&mut desk, 1, "guide", RIGHT, 0);
-
-    assert_eq!(desk.suggested_slot(WindowId(1)), None);
-}
-
 // Floating windows take the size their client chooses.
 
 #[test]
@@ -2105,7 +1925,13 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                     let rect = Rect::new(x, x / 2, 300 + x.abs(), 200 + x.abs() / 2);
                     desk.float_window(window, output, rect)
                 }
-                5 => desk.send_to_center(window),
+                5 => match desk.lift(window) {
+                    Some(lifted) => {
+                        let _ = desk.float_window(window, output, Rect::new(40, 40, 500, 400));
+                        desk.put_down(lifted)
+                    }
+                    None => Ok(()),
+                },
                 6 => desk.set_layout(output, LayoutKind::ALL[rng.next(4) as usize]),
                 7 => {
                     let point = Point::new(rng.next(4000) as i32 - 300, 500);
@@ -2113,10 +1939,13 @@ fn any_sequence_of_operations_keeps_the_desk_consistent() {
                 }
                 8 => desk.focus(window),
                 9 => desk.set_anchored(window, rng.next(2) == 0),
-                10 => match desk.suggested_slot(window) {
-                    Some(suggested) => desk.move_to_slot(window, suggested),
-                    None => Ok(()),
-                },
+                10 => {
+                    next_id += 1;
+                    let app = AppKey::new(APPS[rng.next(4) as usize]);
+                    let request = OpenRequest::at(output).with_parent(window);
+                    desk.open_window(WindowId(next_id), Some(app), request)
+                        .map(drop)
+                }
                 11 => {
                     let x = rng.next(3000) as i32 - 400;
                     desk.set_floating_rect(window, Rect::new(x, x / 3, 200 + x.abs(), 150))
@@ -2915,6 +2744,9 @@ fn a_maximized_window_put_down_covers_its_screen_again() {
     assert_eq!(place(&desk, 1), Placement::Maximized(RIGHT));
     assert!(geo(&desk, 1).visible);
     assert!(!geo(&desk, 2).visible);
+    // Restored, it still goes back to its column.
+    desk.unmaximize(WindowId(1)).unwrap();
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(RIGHT, 0)));
 }
 
 #[test]

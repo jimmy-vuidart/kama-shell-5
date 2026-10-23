@@ -146,8 +146,8 @@ pub struct Layers<'a> {
     pub scale: f64,
     /// Shell hints above the windows (drop zones), in the global space.
     pub overlay: &'a [Shape],
-    /// A panel of the shell above everything but the cursor (the placement
-    /// bar), with its place in the global space.
+    /// A panel of the compositor above everything but the cursor, with its
+    /// place in the global space.
     pub panel: Option<(&'a MemoryRenderBuffer, Rect)>,
     /// Panels of other programs (the dock, its drawer), topmost first.
     pub panels: &'a [Panel],
@@ -410,7 +410,7 @@ fn panel_elements(
 }
 
 /// Every element of a frame, topmost first: cursor, panels above everything,
-/// placement bar, shell hints, menus, panels above the windows, windows from
+/// the shell's own panel, shell hints, menus, panels above the windows, windows from
 /// the top one down, capsules, panels under them. Positions are relative to the corner
 /// of the view.
 pub fn build(
@@ -759,7 +759,7 @@ pub fn build(
                     ));
                 }
             }
-            Err(error) => warn!(?error, "cannot upload the placement bar"),
+            Err(error) => warn!(?error, "cannot upload the panel of the compositor"),
         }
     }
     // Shell hints (drop zones) sit above every window, in the global space.

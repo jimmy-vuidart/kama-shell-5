@@ -15,7 +15,6 @@ mod keyboard_layout;
 mod outputs;
 mod panels;
 mod persist;
-mod placement;
 mod reload;
 mod render;
 mod resize;

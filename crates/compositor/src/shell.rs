@@ -665,15 +665,6 @@ impl State {
             }
             self.shell.sync();
         }
-        // Rule 1: a window that opens floating comes with the offer to tidy
-        // it. Not a dialog, a splash screen or a toolbox: they have no place
-        // of their own.
-        let offered = habits
-            && self
-                .shell
-                .by_id(id)
-                .is_some_and(|m| m.geometry.floating && !m.geometry.anchored);
-        self.placement_offer = offered.then_some(id);
         self.apply_arrangement();
         self.refresh_pointer_focus();
         Some(id)

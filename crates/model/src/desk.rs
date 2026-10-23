@@ -33,10 +33,6 @@ pub enum ModelError {
     Anchored(OutputId),
     #[error("window {0:?} is not floating")]
     NotFloating(WindowId),
-    #[error("window {0:?} is not on a side screen")]
-    NotOnSideScreen(WindowId),
-    #[error("there is no center screen")]
-    NoCenter,
 }
 
 /// Where a window lives.
@@ -110,7 +106,8 @@ enum LiftedFrom {
         index: usize,
         alone: bool,
     },
-    Maximized,
+    /// Maximized, with where it goes back to when restored.
+    Maximized(Option<Origin>),
     Floating(Rect),
 }
 
@@ -584,7 +581,7 @@ impl Desk {
                 index,
                 alone: screen.slots()[index].windows().len() == 1,
             },
-            Spot::Maximized => LiftedFrom::Maximized,
+            Spot::Maximized => LiftedFrom::Maximized(self.restore.get(&id).copied()),
             Spot::Floating(rect) => LiftedFrom::Floating(rect),
         };
         let app = self.windows.get(&id).and_then(|record| record.app.as_ref());
@@ -612,10 +609,13 @@ impl Desk {
             LiftedFrom::Slot { index, alone } => {
                 self.put_back(to, id, index, alone);
             }
-            LiftedFrom::Maximized => {
+            LiftedFrom::Maximized(origin) => {
                 let screen = &mut self.screens[to];
                 screen.maximized_mut().push(id);
                 screen.set_covered(true);
+                if let Some(origin) = origin {
+                    self.restore.insert(id, origin);
+                }
             }
             LiftedFrom::Floating(rect) => {
                 let area = self.screens[to].floating_area(&self.metrics);
@@ -626,36 +626,6 @@ impl Desk {
         self.remember(id, lifted.habit);
         self.mark_focused(id);
         Ok(())
-    }
-
-    /// Where tidying a floating window on its own screen would put it: a
-    /// new column while the layout has room, else the column focused last.
-    /// `None` on an anchored screen, or when the window is not floating.
-    pub fn suggested_slot(&self, id: WindowId) -> Option<SlotId> {
-        let (index, spot) = self.locate(id)?;
-        let screen = &self.screens[index];
-        if !matches!(spot, Spot::Floating(_)) || screen.anchored().is_some() {
-            return None;
-        }
-        Some(SlotId::new(screen.id(), self.tidy_slot(index, id)))
-    }
-
-    /// The slot a window tidied on a screen without saying where goes to:
-    /// a new column while there is room, else the column of the window
-    /// focused last there, else the first one.
-    fn tidy_slot(&self, screen: usize, id: WindowId) -> usize {
-        let screen = &self.screens[screen];
-        if screen.has_room() {
-            return screen.slots().len();
-        }
-        let mut others = self
-            .focus_order
-            .iter()
-            .rev()
-            .filter(|window| **window != id);
-        others
-            .find_map(|window| screen.slot_of(*window))
-            .unwrap_or(0)
     }
 
     /// A floating window's client chose another size. Unlike
@@ -670,28 +640,6 @@ impl Desk {
         let rect = rect.clamped_to(screen.floating_area(&self.metrics));
         screen.set_floating_rect(id, rect);
         Ok(())
-    }
-
-    /// "To the center": the user tidies a side window into the center
-    /// screen, in a new column while there is room, else in the column used
-    /// last there, as a tab (rule 3).
-    ///
-    /// Refused while a game is anchored on either screen.
-    pub fn send_to_center(&mut self, id: WindowId) -> Result<(), ModelError> {
-        let (side, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
-        if !self.screens[side].role().is_side() {
-            return Err(ModelError::NotOnSideScreen(id));
-        }
-        let center = self
-            .screens
-            .iter()
-            .position(|screen| screen.role() == OutputRole::Center)
-            .ok_or(ModelError::NoCenter)?;
-        self.ensure_not_anchored(center)?;
-        self.ensure_not_anchored(side)?;
-
-        let output = self.screens[center].id();
-        self.move_to_slot(id, SlotId::new(output, self.tidy_slot(center, id)))
     }
 
     /// Changes the layout of a screen, a setting of the user: columns
@@ -1040,21 +988,6 @@ impl Desk {
             .iter()
             .find(|screen| screen.anchored() == Some(focused))?;
         Some(screen.id())
-    }
-
-    /// "To the center" applies to `id`: it is on a side screen, there is a
-    /// center, and no game holds either of them.
-    pub fn can_send_to_center(&self, id: WindowId) -> bool {
-        let Some((side, _)) = self.locate(id) else {
-            return false;
-        };
-        let free = |screen: &Screen| screen.anchored().is_none();
-        let side = &self.screens[side];
-        let mut centers = self
-            .screens
-            .iter()
-            .filter(|screen| screen.role() == OutputRole::Center);
-        side.role().is_side() && free(side) && centers.next().is_some_and(free)
     }
 
     /// Where `dragged` can be released (rule 2): the columns of each screen,

@@ -19,7 +19,8 @@ l'emporte sur elles.
 4. `4-ranger-une-fenetre.png` : ranger une fenêtre en la glissant vers un
    emplacement.
 5. `5-appli-inhabituelle.png` : une appli jamais rangée, qui s'ouvre en
-   flottant avec sa barre de rangement.
+   flottant avec sa barre de rangement (retirée depuis : la fenêtre
+   reste flottante, sans barre).
 6. `6-gros-plan-fenetres.png` : barre de titre, anneau d'accent, espacement.
 7. `7-gros-plan-lanceur-notifications.png` : le lanceur et les notifications
    pendant un jeu.

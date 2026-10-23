@@ -680,7 +680,6 @@ impl State {
         }
         .map_or(Scale::ONE, |id| self.shell.scale_of(id));
         let cursor = self.cursor(true, scale);
-        self.refresh_bar();
         let overlay = self.overlay();
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
@@ -707,7 +706,7 @@ impl State {
                 view,
                 scale,
                 overlay: &overlay,
-                panel: self.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
+                panel: None,
                 panels: &panels,
                 cursor,
                 wallpapers: &wallpapers,

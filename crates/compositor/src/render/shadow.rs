@@ -1,4 +1,4 @@
-//! Soft Gaussian shadows behind floating windows and the placement bar.
+//! Soft Gaussian shadows behind floating windows and the shell's own panel.
 
 use coquille_model::{Point, Rect};
 use smithay::backend::renderer::{

@@ -86,8 +86,6 @@ struct Hit {
     button: Option<TitlebarButton>,
     /// The capsule there, above a slot.
     capsule: Option<CapsuleHit>,
-    /// The point is on the placement bar, on this button of it if any.
-    bar: Option<Option<usize>>,
     /// The point is on these edges of a floating window.
     resize: Option<Edges>,
     /// The panel of the shell there (the dock, its drawer).
@@ -128,8 +126,6 @@ pub enum Gesture {
         capsule: CapsuleHit,
         at: Point<f64, Logical>,
     },
-    /// Down on the placement bar, on this button of it if any.
-    BarPressed { button: Option<usize> },
     /// Dragging edges of a floating window. `from` is where the pointer went
     /// down and `frame` what the window was then, in the global space.
     Resizing {
@@ -727,7 +723,6 @@ impl State {
 
         self.hover = hit.window.zip(hit.button);
         self.capsule_hover = hit.capsule;
-        self.bar_hover = hit.bar.flatten();
         // Freed from a window, the pointer is free until it leaves it.
         if self.pointer_freed.is_some() && self.pointer_freed != hit.window {
             self.pointer_freed = None;
@@ -1280,13 +1275,6 @@ impl State {
                         let released = self.hit_test(location).capsule;
                         self.click_capsule(capsule, released);
                     }
-                    Some(Gesture::BarPressed {
-                        button: Some(pressed),
-                    }) => {
-                        if self.hit_test(location).bar == Some(Some(pressed)) {
-                            self.run_bar_action(pressed);
-                        }
-                    }
                     Some(Gesture::Placing { window, .. }) => self.drop_window(window, location),
                     // The client drew during the drag without the frame
                     // following: settle on what it has now.
@@ -1302,12 +1290,7 @@ impl State {
                     }
                     // Its widths are kept once the separation is let go.
                     Some(Gesture::Splitting { .. }) => self.save_proportions(),
-                    Some(
-                        Gesture::Pressed { .. }
-                        | Gesture::Moving { .. }
-                        | Gesture::BarPressed { button: None },
-                    )
-                    | None => {}
+                    Some(Gesture::Pressed { .. } | Gesture::Moving { .. }) | None => {}
                 }
                 for_clients = !std::mem::take(&mut self.swallowed_press);
                 self.queue_redraw();
@@ -1335,10 +1318,6 @@ impl State {
     /// Decides what a left press starts. Returns whether the shell keeps the
     /// press for itself.
     fn start_gesture(&mut self, hit: &Hit, location: Point<f64, Logical>, time: InputTime) -> bool {
-        if let Some(button) = hit.bar {
-            self.gesture = Some(Gesture::BarPressed { button });
-            return true;
-        }
         let mod_held = self.mod_held();
         // With the modifier, the separation wins over the windows next to it.
         if let Some((output, index)) = self.separator_at(location).filter(|_| mod_held) {
@@ -1475,7 +1454,7 @@ impl State {
     }
 
     /// Finds what is under `location`, in the order things are drawn: the
-    /// panels above everything, the placement bar, menus, the panels above
+    /// panels above everything, menus, the panels above
     /// the windows, the windows from the top one down, the capsules, then
     /// the panels under them.
     fn hit_test(&self, location: Point<f64, Logical>) -> Hit {
@@ -1519,17 +1498,6 @@ impl State {
         };
 
         let point = model_point(location);
-        if let Some(bar) = self.bar.as_ref().filter(|bar| bar.rect.contains(point)) {
-            let button = bar
-                .buttons
-                .iter()
-                .position(|(_, cell)| cell.contains(point));
-            return Hit {
-                bar: Some(button),
-                ..Hit::default()
-            };
-        }
-
         // X11 menus, tooltips and dropdowns sit above every window.
         for window in self.shell.visible_overrides().rev() {
             let origin = window.last_configure().loc;

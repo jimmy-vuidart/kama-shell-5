@@ -9,7 +9,7 @@ dans [`references/`](references/).
 - **Bureau** (`bureau_dark.png`, `bureau_light.png`) : deux fenêtres rangées
   dans leurs emplacements avec leurs capsules au-dessus, et une fenêtre
   flottante au centre avec sa barre de titre en verre, son ombre douce et sa
-  barre de rangement.
+  barre de rangement (retirée depuis).
 - **Dock déployé** (`dock_dark.png`, `dock_light.png`) : la barre latérale en
   verre avec le survol déployant les libellés.
 - **Tiroir / Lanceur** (`tiroir_dark.png`, `tiroir_light.png`) : le tiroir

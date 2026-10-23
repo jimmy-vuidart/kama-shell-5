@@ -96,7 +96,6 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         state.hover,
         state.capsule_hover,
     );
-    state.refresh_bar();
 
     // Filter out the drawer so it never appears in the screenshot.
     let all_panels = state.panels();
@@ -113,7 +112,7 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         view: screen_info.rect,
         scale: screen_info.scale.get(),
         overlay: &[],
-        panel: state.bar.as_ref().map(|bar| (&bar.buffer, bar.rect)),
+        panel: None,
         panels: &panels,
         cursor: None,
         wallpapers: &wallpapers,

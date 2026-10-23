@@ -52,7 +52,6 @@ use crate::game::{ModTap, StickyEdges};
 use crate::input::{Gesture, ScreenshotMode};
 use crate::ipc::Ipc;
 use crate::keyboard_layout::KeyboardLayout;
-use crate::placement::Bar;
 use crate::render::glass::GlassCache;
 use crate::render::scene::Cursor;
 use crate::shell::{CapsuleHit, ScreenInfo, Shell};
@@ -173,11 +172,6 @@ pub struct State {
     pub hover: Option<(WindowId, TitlebarButton)>,
     /// The capsule under the pointer.
     pub capsule_hover: Option<CapsuleHit>,
-    /// The window, freshly opened floating, the placement bar is offered for.
-    pub placement_offer: Option<WindowId>,
-    pub bar: Option<Bar>,
-    /// The button of the bar under the pointer.
-    pub bar_hover: Option<usize>,
     /// The panel the user clicked to type in: it has the keyboard until a
     /// click elsewhere.
     pub panel_focus: Option<LayerSurface>,
@@ -368,9 +362,6 @@ impl State {
             app_theme: None,
             hover: None,
             capsule_hover: None,
-            placement_offer: None,
-            bar: None,
-            bar_hover: None,
             panel_focus: None,
             gesture: None,
             last_bar_press: None,
