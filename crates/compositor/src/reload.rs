@@ -178,8 +178,16 @@ impl State {
             options: wanted.options.clone(),
             ..XkbConfig::default()
         };
+        // A new layout starts with every lock off: Num Lock and Caps Lock
+        // stay as they were.
+        let before = keyboard.modifier_state();
         match keyboard.set_xkb_config(self, config) {
             Ok(()) => {
+                let mut locks = keyboard.modifier_state();
+                locks.num_lock = before.num_lock;
+                locks.caps_lock = before.caps_lock;
+                keyboard.set_modifier_state(locks);
+                keyboard.advertise_modifier_state(self);
                 info!(
                     layout = wanted.layout,
                     variant = wanted.variant,

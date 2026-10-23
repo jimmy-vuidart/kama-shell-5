@@ -476,6 +476,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         accent: config.accent(),
         keyboard: keyboard_layout::detect(layout, variant),
         keyboard_pinned: cli.keyboard_layout.is_some(),
+        numlock: config.keyboard.numlock(),
         scale_pinned: cli.scale.is_some(),
         config_path: cli.config.clone(),
         mod_key,

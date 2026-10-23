@@ -67,6 +67,8 @@ pub struct Options {
     /// The layout comes from the command line: the configuration file does
     /// not change it.
     pub keyboard_pinned: bool,
+    /// Num Lock is on from the start.
+    pub numlock: bool,
     /// The scale comes from the command line: the configuration file does
     /// not change it.
     pub scale_pinned: bool,
@@ -269,6 +271,13 @@ impl State {
             200,
             25,
         )?;
+        if options.numlock {
+            if let Some(keyboard) = seat.get_keyboard() {
+                let mut locks = keyboard.modifier_state();
+                locks.num_lock = true;
+                keyboard.set_modifier_state(locks);
+            }
+        }
         seat.add_pointer();
 
         let mut outputs = Vec::new();

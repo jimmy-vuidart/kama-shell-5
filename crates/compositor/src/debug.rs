@@ -16,7 +16,7 @@
 //! `wheel` turns the wheel by notches, down when positive.
 
 /// XKB keycodes (evdev code + 8) of the keys a script can name.
-const KEYS: [(&str, u32); 15] = [
+const KEYS: [(&str, u32); 17] = [
     ("alt", 64),
     ("ctrl", 37),
     ("shift", 50),
@@ -32,6 +32,9 @@ const KEYS: [(&str, u32); 15] = [
     ("pageup", 112),
     ("pagedown", 117),
     ("print", 107),
+    ("tab", 23),
+    // The 1 of the keypad: a digit only while Num Lock is on.
+    ("kp1", 87),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]

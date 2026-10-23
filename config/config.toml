@@ -30,9 +30,11 @@ center = "DP-2"
 right = "DP-1"
 
 # Disposition du clavier ; par défaut, celle du système.
+# Verr. Num. est allumé au démarrage ; `numlock = false` le laisse éteint.
 # [keyboard]
 # layout = "fr"
 # variant = ""
+# numlock = true
 
 # Souris : vitesse du pointeur, profil d'accélération, défilement et boutons.
 # [mouse]

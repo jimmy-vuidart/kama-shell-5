@@ -151,6 +151,14 @@ impl ScaleConfig {
 pub struct KeyboardConfig {
     pub layout: Option<String>,
     pub variant: Option<String>,
+    /// Num Lock on when the session starts; on unless told otherwise.
+    pub numlock: Option<bool>,
+}
+
+impl KeyboardConfig {
+    pub fn numlock(&self) -> bool {
+        self.numlock.unwrap_or(true)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -417,6 +425,18 @@ mod tests {
         assert_eq!(config.terminal.as_deref(), Some("kitty"));
         assert_eq!(config.keyboard.layout.as_deref(), Some("fr"));
         assert_eq!(config.keyboard.variant, None);
+    }
+
+    #[test]
+    fn num_lock_is_on_unless_turned_off() {
+        assert!(parse("").unwrap().keyboard.numlock());
+        assert!(
+            !parse("[keyboard]\nnumlock = false")
+                .unwrap()
+                .keyboard
+                .numlock()
+        );
+        assert!(parse("[keyboard]\nnumlock = \"oui\"").is_err());
     }
 
     #[test]
