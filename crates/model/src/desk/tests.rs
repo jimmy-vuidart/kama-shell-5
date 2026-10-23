@@ -126,6 +126,135 @@ fn a_floating_window_without_preferred_size_fits_in_the_screen() {
     assert_eq!(rect, rect.clamped_to(Rect::new(8, 8, 1904, 1064)));
 }
 
+/// Opens a window of `size` floating, with `request` saying the rest.
+fn open_sized(desk: &mut Desk, id: u64, app: Option<&str>, request: OpenRequest) -> Rect {
+    let app = app.map(AppKey::new);
+    match desk.open_window(WindowId(id), app, request).unwrap() {
+        Placement::Floating { rect, .. } => rect,
+        other => panic!("expected a floating window, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_window_opening_where_another_floats_moves_down_and_right() {
+    let mut desk = desk();
+    let request = OpenRequest::at(RIGHT).with_size(Size::new(800, 600));
+
+    let first = open_sized(&mut desk, 1, Some("kitty"), request);
+    let second = open_sized(&mut desk, 2, Some("kitty"), request);
+    let third = open_sized(&mut desk, 3, Some("kitty"), request);
+
+    assert_eq!(first, Rect::new(560, 240, 800, 600));
+    assert_eq!(second, Rect::new(592, 272, 800, 600));
+    assert_eq!(third, Rect::new(624, 304, 800, 600));
+}
+
+#[test]
+fn a_window_opens_centered_again_once_the_place_is_free() {
+    let mut desk = desk();
+    let request = OpenRequest::at(RIGHT).with_size(Size::new(800, 600));
+    open_sized(&mut desk, 1, None, request);
+
+    desk.close_window(WindowId(1)).unwrap();
+
+    assert_eq!(
+        open_sized(&mut desk, 2, None, request),
+        Rect::new(560, 240, 800, 600)
+    );
+}
+
+#[test]
+fn a_window_that_chose_its_size_still_counts_where_it_is_centered() {
+    let mut desk = desk();
+    open_sized(&mut desk, 1, None, OpenRequest::at(RIGHT));
+    // Its client chose a smaller size: centered where it opened.
+    let rect = Rect::centered(Size::new(700, 500), geo(&desk, 1).frame);
+    desk.set_floating_rect(WindowId(1), rect).unwrap();
+
+    let second = open_sized(&mut desk, 2, None, OpenRequest::at(RIGHT));
+
+    let center = |rect: Rect| (rect.x + rect.w / 2, rect.y + rect.h / 2);
+    let ((x1, y1), (x2, y2)) = (center(rect), center(second));
+    assert_eq!((x2 - x1, y2 - y1), (32, 32));
+}
+
+#[test]
+fn dialogs_of_the_same_window_do_not_hide_each_other() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", RIGHT, 0);
+    let request = OpenRequest::at(RIGHT)
+        .with_size(Size::new(400, 300))
+        .with_parent(WindowId(1));
+
+    let first = open_sized(&mut desk, 2, Some("nautilus"), request);
+    let second = open_sized(&mut desk, 3, Some("nautilus"), request);
+
+    assert_eq!(second, first.translated(Point::new(32, 32)));
+}
+
+#[test]
+fn the_cascade_stops_at_the_edge_of_the_screen() {
+    let mut desk = desk();
+    let request = OpenRequest::at(LEFT).with_size(Size::new(1900, 1060));
+
+    let first = open_sized(&mut desk, 1, None, request);
+    let second = open_sized(&mut desk, 2, None, request);
+
+    assert_eq!(second, first);
+}
+
+#[test]
+fn a_dialog_opens_over_its_window_and_ignores_the_habit_of_its_application() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", RIGHT, 0);
+    open_in(&mut desk, 2, "firefox", RIGHT, 1);
+    let parent = geo(&desk, 1).frame;
+    let habits = desk.memory().clone();
+
+    let request = OpenRequest::at(RIGHT)
+        .with_size(Size::new(400, 300))
+        .with_parent(WindowId(1));
+    let dialog = open_sized(&mut desk, 3, Some("nautilus"), request);
+
+    assert_eq!(dialog, Rect::centered(Size::new(400, 300), parent));
+    assert_eq!(tabs(&desk, RIGHT, 0), [1]);
+    assert_eq!(desk.memory(), &habits);
+    assert_eq!(desk.focused(), Some(WindowId(3)));
+}
+
+#[test]
+fn a_dialog_whose_window_is_elsewhere_opens_centered_on_its_screen() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "nautilus", LEFT, 0);
+
+    let request = OpenRequest::at(RIGHT)
+        .with_size(Size::new(800, 600))
+        .with_parent(WindowId(1));
+
+    assert_eq!(
+        open_sized(&mut desk, 2, Some("nautilus"), request),
+        Rect::new(560, 240, 800, 600)
+    );
+}
+
+#[test]
+fn a_dialog_over_a_window_near_the_edge_stays_on_the_screen() {
+    let mut desk = desk();
+    let parent = OpenRequest::at(RIGHT).with_size(Size::new(300, 200));
+    open_sized(&mut desk, 1, None, parent);
+    desk.float_window(WindowId(1), RIGHT, Rect::new(8, 8, 300, 200))
+        .unwrap();
+
+    let request = OpenRequest::at(RIGHT)
+        .with_size(Size::new(800, 600))
+        .with_parent(WindowId(1));
+
+    assert_eq!(
+        open_sized(&mut desk, 2, None, request),
+        Rect::new(8, 8, 800, 600)
+    );
+}
+
 #[test]
 fn a_preferred_size_larger_than_the_screen_is_shrunk() {
     let mut desk = desk();
@@ -2730,4 +2859,79 @@ fn bringing_a_window_no_game_hides_only_focuses_it() {
         desk.bring(WindowId(9)),
         Err(ModelError::UnknownWindow(WindowId(9)))
     );
+}
+
+// Changing one's mind while dragging a window: it goes back where it was.
+
+/// The user drags window `id` by its title bar onto `output`: it floats.
+fn drag_out(desk: &mut Desk, id: u64, output: OutputId) -> Lifted {
+    let lifted = desk.lift(WindowId(id)).unwrap();
+    desk.float_window(WindowId(id), output, Rect::new(100, 100, 800, 600))
+        .unwrap();
+    lifted
+}
+
+#[test]
+fn a_window_put_down_goes_back_to_its_column_and_keeps_its_habit() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "discord", LEFT, 0);
+    open_in(&mut desk, 2, "browser", LEFT, 1);
+    let habit = desk.memory().get(&AppKey::new("discord"));
+
+    let lifted = drag_out(&mut desk, 1, CENTER);
+    assert_eq!(desk.memory().get(&AppKey::new("discord")), None);
+    assert_eq!(tabs(&desk, LEFT, 0), [2]);
+    desk.put_down(lifted).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(tabs(&desk, LEFT, 1), [2]);
+    assert_eq!(desk.memory().get(&AppKey::new("discord")), habit);
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+}
+
+#[test]
+fn a_tab_put_down_goes_back_to_its_stack() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 0);
+
+    let lifted = drag_out(&mut desk, 2, RIGHT);
+    desk.put_down(lifted).unwrap();
+
+    assert_eq!(tabs(&desk, RIGHT, 0), [1, 2]);
+    assert_eq!(active_tab(&desk, RIGHT, 0), Some(2));
+}
+
+#[test]
+fn a_maximized_window_put_down_covers_its_screen_again() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "guide", RIGHT, 0);
+    open_in(&mut desk, 2, "notes", RIGHT, 1);
+    desk.maximize(WindowId(1)).unwrap();
+
+    let lifted = drag_out(&mut desk, 1, RIGHT);
+    desk.put_down(lifted).unwrap();
+
+    assert_eq!(place(&desk, 1), Placement::Maximized(RIGHT));
+    assert!(geo(&desk, 1).visible);
+    assert!(!geo(&desk, 2).visible);
+}
+
+#[test]
+fn a_floating_window_put_down_goes_back_to_where_it_floated() {
+    let mut desk = desk();
+    let request = OpenRequest::at(RIGHT).with_size(Size::new(400, 300));
+    let rect = open_sized(&mut desk, 1, Some("gimp"), request);
+
+    let lifted = drag_out(&mut desk, 1, LEFT);
+    desk.put_down(lifted).unwrap();
+
+    assert_eq!(
+        place(&desk, 1),
+        Placement::Floating {
+            output: RIGHT,
+            rect
+        }
+    );
+    assert_eq!(desk.memory().get(&AppKey::new("gimp")), None);
 }

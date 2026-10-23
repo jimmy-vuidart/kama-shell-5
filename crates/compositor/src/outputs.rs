@@ -104,6 +104,40 @@ pub fn constrain(position: (f64, f64), screens: &[Rect]) -> (f64, f64) {
         .map_or(position, |(_, closest)| closest)
 }
 
+/// Where the pointer goes when it moves from `from` to `to`. Passing from
+/// one screen to the one beside it keeps the same share of the height: the
+/// screens are aligned at the top, and without this the bottom of the tall
+/// center would lead nowhere (a wall 360 px high on each side). Both edges
+/// of each screen meet those of its neighbour, as they do on a desk where
+/// the screens are about as tall as each other.
+pub fn cross(from: (f64, f64), to: (f64, f64), screens: &[Rect]) -> (f64, f64) {
+    let on = |rect: &Rect, (x, y): (f64, f64)| {
+        !rect.is_empty()
+            && (f64::from(rect.x)..f64::from(rect.right())).contains(&x)
+            && (f64::from(rect.y)..f64::from(rect.bottom())).contains(&y)
+    };
+    let Some(left) = screens.iter().find(|rect| on(rect, from)) else {
+        return constrain(to, screens);
+    };
+    if on(left, to) {
+        return to;
+    }
+    let entered = screens.iter().find(|rect| {
+        *rect != left
+            && !rect.is_empty()
+            && (f64::from(rect.x)..f64::from(rect.right())).contains(&to.0)
+    });
+    let Some(entered) = entered else {
+        return constrain(to, screens);
+    };
+    let share = (to.1 - f64::from(left.y)) / f64::from(left.h);
+    let y = f64::from(entered.y) + share * f64::from(entered.h);
+    (
+        to.0,
+        y.clamp(f64::from(entered.y), f64::from(entered.bottom() - 1)),
+    )
+}
+
 /// Splits the nested window into three simulated screens, in the proportions
 /// of the real setup (16:9, 21:9, 16:9 side by side).
 pub fn split_canvas(size: Size) -> [(OutputRole, Rect); 3] {
@@ -283,6 +317,50 @@ mod tests {
     #[test]
     fn a_position_under_a_side_screen_goes_to_its_bottom_edge() {
         assert_eq!(constrain((500.0, 1100.0), &LAYOUT), (500.0, 1079.0));
+    }
+
+    #[test]
+    fn the_bottom_of_the_center_leads_to_the_bottom_of_a_side_screen() {
+        let (x, y) = cross((1925.0, 1400.0), (1915.0, 1400.0), &LAYOUT);
+
+        assert_eq!(x, 1915.0);
+        assert!((1045.0..1080.0).contains(&y), "{y}");
+    }
+
+    #[test]
+    fn crossing_keeps_the_share_of_the_height_both_ways() {
+        let (_, low) = cross((1925.0, 720.0), (1915.0, 720.0), &LAYOUT);
+        let (_, high) = cross((5365.0, 540.0), (5355.0, 540.0), &LAYOUT);
+
+        assert_eq!(low, 540.0);
+        assert_eq!(high, 720.0);
+    }
+
+    #[test]
+    fn the_top_edges_still_meet() {
+        assert_eq!(cross((5.0, 0.0), (1925.0, 0.0), &LAYOUT), (1925.0, 0.0));
+    }
+
+    #[test]
+    fn a_move_inside_a_screen_is_kept() {
+        assert_eq!(
+            cross((2000.0, 1300.0), (2010.0, 1310.5), &LAYOUT),
+            (2010.0, 1310.5)
+        );
+    }
+
+    #[test]
+    fn a_move_past_the_bottom_of_a_screen_stops_there() {
+        assert_eq!(
+            cross((500.0, 1070.0), (500.0, 1100.0), &LAYOUT),
+            (500.0, 1079.0)
+        );
+        assert_eq!(cross((9.0, 9.0), (-40.0, 9.0), &LAYOUT), (0.0, 9.0));
+    }
+
+    #[test]
+    fn a_pointer_off_every_screen_comes_back_to_the_closest_one() {
+        assert_eq!(cross((9000.0, 9.0), (9001.0, 9.0), &LAYOUT), (7279.0, 9.0));
     }
 
     #[test]

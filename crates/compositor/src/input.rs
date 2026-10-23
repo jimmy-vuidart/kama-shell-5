@@ -1,7 +1,7 @@
 //! Input events: shortcuts, focus on click, title bar buttons.
 
 use coquille_model::{
-    Insets, OutputId, Placement, Point as ModelPoint, Rect, Size, StackId, WindowId,
+    Insets, Lifted, OutputId, Placement, Point as ModelPoint, Rect, Size, StackId, WindowId,
 };
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
@@ -25,7 +25,7 @@ use crate::debug::Step;
 use crate::decoration::capsules::CapsuleButton;
 use crate::decoration::layout::{TitlebarButton, TitlebarLayout};
 use crate::game::{StickyEdges, confine};
-use crate::outputs::constrain;
+use crate::outputs::cross;
 use crate::render::scene::Shape;
 use crate::resize::Edges;
 use crate::shell::{CapsuleHit, ManagedWindow};
@@ -47,6 +47,9 @@ const SEPARATOR_REACH: i32 = 8;
 /// How far the pointer must travel, button held, before a press on a
 /// window or on a capsule becomes a drag.
 const DRAG_THRESHOLD: f64 = 8.0;
+/// How far a window in a slot (or maximized) must be dragged by its title
+/// bar before it leaves its place: a click that slips is not a move.
+const UNTIDY_THRESHOLD: f64 = 32.0;
 /// The longest a second press on a title bar may come after the first for
 /// both to make a double-click.
 const DOUBLE_CLICK_MS: u32 = 400;
@@ -139,15 +142,21 @@ pub enum Gesture {
     /// the shell modifier.
     Splitting { output: OutputId, index: usize },
     /// Dragging a window with the shell modifier, or by its capsule: drop
-    /// zones are shown, and releasing on one places the window.
-    Placing { window: WindowId },
+    /// zones are shown, and releasing on one places the window. `lifted` is
+    /// where it stood before being moved by its title bar, if it was:
+    /// `Escape` puts it back there.
+    Placing {
+        window: WindowId,
+        lifted: Option<Lifted>,
+    },
     /// Dragging a window by its title bar: it floats and follows the
     /// pointer. `grab` is where the pointer holds it, from its corner, and
-    /// `width` how wide it was then.
+    /// `width` how wide it was then; `lifted` is where it stood before.
     Moving {
         window: WindowId,
         grab: Point<f64, Logical>,
         width: i32,
+        lifted: Option<Lifted>,
     },
 }
 
@@ -262,6 +271,7 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let mod_key = self.mod_key;
         let mut tapped = false;
+        let mut cancelled = false;
 
         let action = keyboard.input::<Option<Action>, _>(
             self,
@@ -297,6 +307,16 @@ impl State {
                 state
                     .mod_tap
                     .key_pressed(is_mod, mod_key.is_alone(modifiers));
+                if state.gesture.is_some() {
+                    // Held to show the drop zones in the middle of a drag,
+                    // the modifier is not a tap.
+                    state.mod_tap.disturb();
+                    if handle.raw_syms().contains(&Keysym::Escape) && state.can_cancel_gesture() {
+                        state.suppressed_keys.push(keycode);
+                        cancelled = true;
+                        return FilterResult::Intercept(None);
+                    }
+                }
                 let press = KeyPress {
                     main: mod_key.is_held(modifiers),
                     shift: modifiers.shift,
@@ -316,6 +336,9 @@ impl State {
         );
         if let Some(Some(action)) = action {
             self.run(action);
+        }
+        if cancelled {
+            self.cancel_gesture();
         }
         // The shell modifier alone, pressed and released: the drawer of the
         // dock, and with it the way out of a game that holds the pointer.
@@ -425,7 +448,7 @@ impl State {
         }
         let wanted = self.hold_at_sticky_edge((from.x, from.y), (wanted.x, wanted.y), time);
         let screens: Vec<_> = self.shell.screens.iter().map(|s| s.rect).collect();
-        let location = constrain(wanted, &screens);
+        let location = cross((from.x, from.y), wanted, &screens);
         self.pointer_moved(location.into(), time);
         self.refresh_constraint();
     }
@@ -746,9 +769,15 @@ impl State {
 
     /// Lets the gesture in progress react to the pointer moving.
     fn advance_gesture(&mut self, location: Point<f64, Logical>) {
-        let far = |at: Point<f64, Logical>| {
+        let beyond = |at: Point<f64, Logical>, threshold: f64| {
             let travelled = (location - at).to_i32_round::<i32>();
-            f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt() > DRAG_THRESHOLD
+            f64::from(travelled.x.pow(2) + travelled.y.pow(2)).sqrt() > threshold
+        };
+        let far = |at| beyond(at, DRAG_THRESHOLD);
+        let floating = |window| {
+            self.shell
+                .by_id(window)
+                .is_some_and(|managed| managed.geometry.floating)
         };
         match self.gesture {
             Some(Gesture::Pressed {
@@ -756,7 +785,17 @@ impl State {
                 at,
                 button: None,
                 drag: Drag::Move,
-            }) if far(at) => self.start_moving(window, at, location),
+            }) if beyond(
+                at,
+                if floating(window) {
+                    DRAG_THRESHOLD
+                } else {
+                    UNTIDY_THRESHOLD
+                },
+            ) =>
+            {
+                self.start_moving(window, at, location)
+            }
             Some(
                 Gesture::Pressed {
                     window,
@@ -773,11 +812,22 @@ impl State {
                         },
                     at,
                 },
-            ) if far(at) => self.gesture = Some(Gesture::Placing { window }),
+            ) if far(at) => {
+                self.gesture = Some(Gesture::Placing {
+                    window,
+                    lifted: None,
+                })
+            }
+            // The modifier pressed while moving a window: it stops where it
+            // is, and the drop zones show where it can go.
+            Some(Gesture::Moving { window, lifted, .. }) if self.mod_held() => {
+                self.gesture = Some(Gesture::Placing { window, lifted });
+            }
             Some(Gesture::Moving {
                 window,
                 grab,
                 width,
+                ..
             }) => self.move_floating(window, location, grab, width),
             Some(Gesture::Resizing {
                 window,
@@ -872,6 +922,7 @@ impl State {
             window,
             grab,
             width: frame.w,
+            lifted: self.shell.desk.lift(window),
         });
         self.move_floating(window, pointer, grab, frame.w);
     }
@@ -896,11 +947,15 @@ impl State {
         // Out of a slot, a window goes back to the size its client chooses:
         // the pointer keeps holding the same share of its title bar.
         let grab = Point::from((held_at(grab.x, width, size.w), grab.y));
-        self.gesture = Some(Gesture::Moving {
-            window,
-            grab,
-            width: size.w,
-        });
+        if let Some(Gesture::Moving {
+            grab: held,
+            width: was,
+            ..
+        }) = &mut self.gesture
+        {
+            *held = grab;
+            *was = size.w;
+        }
         let corner = model_point(pointer - grab);
         let rect = Rect::new(
             corner.x - screen.rect.x,
@@ -931,6 +986,44 @@ impl State {
             warn!(%error, "cannot place the window there");
         }
         self.apply_arrangement();
+    }
+
+    /// `Escape` can end the gesture in progress: a window being moved,
+    /// placed or resized.
+    fn can_cancel_gesture(&self) -> bool {
+        matches!(
+            self.gesture,
+            Some(Gesture::Moving { .. } | Gesture::Placing { .. } | Gesture::Resizing { .. })
+        )
+    }
+
+    /// The user changed their mind (`Escape`): the window dragged goes back
+    /// where it was, its habit with it, and releasing the button does
+    /// nothing more.
+    fn cancel_gesture(&mut self) {
+        match self.gesture.take() {
+            Some(
+                Gesture::Moving {
+                    lifted: Some(lifted),
+                    ..
+                }
+                | Gesture::Placing {
+                    lifted: Some(lifted),
+                    ..
+                },
+            ) => {
+                if let Err(error) = self.shell.desk.put_down(lifted) {
+                    warn!(%error, "cannot put the window back where it was");
+                }
+                self.apply_arrangement();
+            }
+            Some(Gesture::Resizing { window, frame, .. }) => self.resize_floating(window, frame),
+            _ => {}
+        }
+        // The release that ends the drag belongs to no client.
+        self.swallowed_press = true;
+        self.refresh_pointer_focus();
+        self.queue_redraw();
     }
 
     /// The hints drawn above the windows: while a window is dragged to be
@@ -1057,7 +1150,7 @@ impl State {
                 }
             }
         }
-        let Some(Gesture::Placing { window }) = self.gesture else {
+        let Some(Gesture::Placing { window, .. }) = self.gesture else {
             return Vec::new();
         };
         let point = model_point(self.pointer_location());
@@ -1194,7 +1287,7 @@ impl State {
                             self.run_bar_action(pressed);
                         }
                     }
-                    Some(Gesture::Placing { window }) => self.drop_window(window, location),
+                    Some(Gesture::Placing { window, .. }) => self.drop_window(window, location),
                     // The client drew during the drag without the frame
                     // following: settle on what it has now.
                     Some(Gesture::Resizing { window, .. }) => {

@@ -264,8 +264,9 @@ impl State {
             app_id: window.class(),
             title: window.title(),
             habits: follows_habits(window.window_type(), window.is_transient_for().is_some()),
-            // A dialog opens on the screen of its window.
+            // A dialog opens over its window, on its screen.
             screen: parent.map(|parent| parent.geometry.output),
+            parent: parent.map(|parent| parent.id),
             size: Some(ModelSize::new(wanted.w, wanted.h)),
             fullscreen,
             // It said it wants no decoration from the window manager (Steam

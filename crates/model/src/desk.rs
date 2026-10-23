@@ -58,6 +58,9 @@ pub struct OpenRequest {
     pub cursor_output: OutputId,
     /// Size the window asks for, decorations included.
     pub preferred_size: Option<Size>,
+    /// The window is a dialog of this one: it follows no habit, and opens
+    /// over it when it is on the same screen.
+    pub parent: Option<WindowId>,
 }
 
 impl OpenRequest {
@@ -65,11 +68,17 @@ impl OpenRequest {
         Self {
             cursor_output,
             preferred_size: None,
+            parent: None,
         }
     }
 
     pub const fn with_size(mut self, size: Size) -> Self {
         self.preferred_size = Some(size);
+        self
+    }
+
+    pub const fn with_parent(mut self, parent: WindowId) -> Self {
+        self.parent = Some(parent);
         self
     }
 }
@@ -81,6 +90,34 @@ pub struct WindowRecord {
     pub title: String,
     /// The client draws its own title bar, so the shell adds none.
     pub own_titlebar: bool,
+}
+
+/// Where a window stood when the user took hold of it, to put it back there
+/// if they change their mind ([`Desk::lift`], [`Desk::put_down`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lifted {
+    id: WindowId,
+    output: OutputId,
+    from: LiftedFrom,
+    /// The habit its application had then.
+    habit: Option<RememberedPlace>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiftedFrom {
+    /// Its column; `alone` when it was the only window there.
+    Slot {
+        index: usize,
+        alone: bool,
+    },
+    Maximized,
+    Floating(Rect),
+}
+
+impl Lifted {
+    pub fn window(&self) -> WindowId {
+        self.id
+    }
 }
 
 /// Where a dragged window can be released: a column of a screen, or the one
@@ -317,7 +354,9 @@ impl Desk {
     ///
     /// An application the user tidied reopens in its slot. Anything else opens
     /// floating on the cursor's screen, or, when a game is anchored, on the
-    /// side screen used last. No other window moves.
+    /// side screen used last. No other window moves. A dialog
+    /// ([`OpenRequest::with_parent`]) never follows a habit: it floats over
+    /// its window.
     pub fn open_window(
         &mut self,
         id: WindowId,
@@ -346,8 +385,9 @@ impl Desk {
         };
         let wanted = asked.or_else(|| is_game.then(center).flatten());
 
+        // A dialog has the name of its application, never its place.
         let remembered = app.as_ref().and_then(|app| self.memory.get(app));
-        let remembered = remembered.filter(|_| wanted.is_none());
+        let remembered = remembered.filter(|_| wanted.is_none() && request.parent.is_none());
         let placement = match remembered.and_then(|place| self.remembered_target(place)) {
             Some(Target::Slot { screen, slot }) => {
                 // Another window of the same application: the new one opens
@@ -379,7 +419,13 @@ impl Desk {
             None => {
                 let free = wanted.filter(|screen| self.screens[*screen].anchored().is_none());
                 let screen = free.unwrap_or_else(|| self.floating_screen(cursor));
-                self.open_floating(id, screen, request.preferred_size)
+                let rect = self.opening_rect_over(screen, request.preferred_size, request.parent);
+                let screen = &mut self.screens[screen];
+                screen.push_floating(id, rect);
+                Placement::Floating {
+                    output: screen.id(),
+                    rect,
+                }
             }
         };
 
@@ -525,6 +571,59 @@ impl Desk {
         if !matches!(spot, Spot::Floating(_)) {
             self.remember(id, None);
         }
+        self.mark_focused(id);
+        Ok(())
+    }
+
+    /// Where `id` stands, before the user drags it away.
+    pub fn lift(&self, id: WindowId) -> Option<Lifted> {
+        let (screen, spot) = self.locate(id)?;
+        let screen = &self.screens[screen];
+        let from = match spot {
+            Spot::Slot(index) => LiftedFrom::Slot {
+                index,
+                alone: screen.slots()[index].windows().len() == 1,
+            },
+            Spot::Maximized => LiftedFrom::Maximized,
+            Spot::Floating(rect) => LiftedFrom::Floating(rect),
+        };
+        let app = self.windows.get(&id).and_then(|record| record.app.as_ref());
+        Some(Lifted {
+            id,
+            output: screen.id(),
+            from,
+            habit: app.and_then(|app| self.memory.get(app)),
+        })
+    }
+
+    /// The user changed their mind while dragging a window: it goes back
+    /// where [`Desk::lift`] saw it (its column, opened again at its place
+    /// if it closed and there is room, else as a tab), and its application
+    /// gets its habit back.
+    pub fn put_down(&mut self, lifted: Lifted) -> Result<(), ModelError> {
+        let id = lifted.id;
+        let (from, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        let to = self.screen_index(lifted.output)?;
+        self.ensure_not_anchored(from)?;
+        self.ensure_not_anchored(to)?;
+
+        self.take(from, id);
+        match lifted.from {
+            LiftedFrom::Slot { index, alone } => {
+                self.put_back(to, id, index, alone);
+            }
+            LiftedFrom::Maximized => {
+                let screen = &mut self.screens[to];
+                screen.maximized_mut().push(id);
+                screen.set_covered(true);
+            }
+            LiftedFrom::Floating(rect) => {
+                let area = self.screens[to].floating_area(&self.metrics);
+                self.screens[to].push_floating(id, rect.clamped_to(area));
+            }
+        }
+        self.settle();
+        self.remember(id, lifted.habit);
         self.mark_focused(id);
         Ok(())
     }
@@ -1255,13 +1354,65 @@ impl Desk {
     /// Where a window opens floating on a screen: centered, at `preferred`
     /// size when it fits.
     fn opening_rect(&self, screen: usize, preferred: Option<Size>) -> Rect {
+        self.opening_rect_over(screen, preferred, None)
+    }
+
+    /// Where a window opens floating on a screen: centered on `parent` (the
+    /// window a dialog belongs to) when it is on that screen, else on the
+    /// screen, at `preferred` size when it fits. A floating window already
+    /// centered there moves it down and to the right, so that the new one
+    /// never hides it; the parent itself does not count.
+    ///
+    /// Centers are compared, not corners: a client that then chooses its own
+    /// size stays centered where it opened.
+    fn opening_rect_over(
+        &self,
+        screen: usize,
+        preferred: Option<Size>,
+        parent: Option<WindowId>,
+    ) -> Rect {
+        /// How far each window opened at the same place is moved from the
+        /// one before.
+        const CASCADE: i32 = 32;
+        /// Past this many, windows pile up where the cascade stopped.
+        const STEPS: usize = 12;
+
         let area = self.screens[screen].floating_area(&self.metrics);
         let size = preferred.unwrap_or(Size::new(area.w * 3 / 5, area.h * 7 / 10));
         let size = Size::new(
             size.w.clamp(1, area.w.max(1)),
             size.h.clamp(1, area.h.max(1)),
         );
-        Rect::centered(size, area)
+        let over = parent.and_then(|parent| self.frame_on(screen, parent));
+        let mut rect = Rect::centered(size, over.unwrap_or(area)).clamped_to(area);
+        let center = |rect: Rect| (rect.x + rect.w / 2, rect.y + rect.h / 2);
+        let others = self.screens[screen].floating().iter();
+        let others: Vec<Rect> = others
+            .filter(|window| Some(window.id) != parent)
+            .map(|window| window.rect)
+            .collect();
+        for _ in 0..STEPS {
+            let (x, y) = center(rect);
+            let taken = others.iter().any(|other| {
+                let (ox, oy) = center(*other);
+                (x - ox).abs() < CASCADE / 2 && (y - oy).abs() < CASCADE / 2
+            });
+            let next = rect.translated(Point::new(CASCADE, CASCADE));
+            if !taken || next.right() > area.right() || next.bottom() > area.bottom() {
+                break;
+            }
+            rect = next;
+        }
+        rect
+    }
+
+    /// The frame of `id`, relative to its screen, if it is on `screen`.
+    fn frame_on(&self, screen: usize, id: WindowId) -> Option<Rect> {
+        let output = self.screens[screen].id();
+        self.arrangement()
+            .into_iter()
+            .find(|geometry| geometry.id == id && geometry.output == output)
+            .map(|geometry| geometry.frame)
     }
 
     /// Records `id` as focused, shows its tab or raises it, and notes its

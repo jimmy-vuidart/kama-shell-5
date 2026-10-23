@@ -28,7 +28,7 @@ use crate::decoration::layout::TitlebarButton;
 use crate::decoration::naming::{badge_color, identity};
 use crate::decoration::paint::{CapsuleSpec, GroupSpec, Painter, TitlebarSpec};
 use crate::focus::KeyFocus;
-use crate::input::Gesture;
+use crate::input::{Drag, Gesture};
 use crate::render::scene::Chrome;
 use crate::state::State;
 use crate::theme::Theme;
@@ -160,6 +160,8 @@ pub struct NewWindow {
     pub habits: bool,
     /// The screen to open on, when it is not the one under the pointer.
     pub screen: Option<OutputId>,
+    /// The window it is a dialog of: it opens over it.
+    pub parent: Option<WindowId>,
     /// The size its client asks for, without decoration, when it is known
     /// beforehand (X11).
     pub size: Option<ModelSize>,
@@ -557,6 +559,13 @@ impl State {
             return;
         };
         let (app_id, title) = toplevel_names(toplevel);
+        // A dialog (a toplevel with a parent) follows no habit: it opens over
+        // its window, which has the same `app_id`, not in its slot.
+        let dialog = toplevel.parent().is_some();
+        let parent = toplevel
+            .parent()
+            .and_then(|parent| self.shell.by_surface(&parent))
+            .map(|parent| (parent.id, parent.geometry.output));
         // A client that never asked the compositor for decorations, or that
         // asked to draw them itself, gets no title bar from the shell.
         let own_titlebar = crate::handlers::draws_own_titlebar(surface);
@@ -564,8 +573,9 @@ impl State {
             window,
             app_id,
             title,
-            habits: true,
-            screen: None,
+            habits: !dialog,
+            screen: parent.map(|(_, output)| output),
+            parent: parent.map(|(id, _)| id),
             size: None,
             fullscreen,
             own_titlebar,
@@ -581,6 +591,7 @@ impl State {
             title,
             habits,
             screen,
+            parent,
             size,
             fullscreen,
             own_titlebar,
@@ -602,6 +613,9 @@ impl State {
             self.shell.desk.metrics().titlebar_height
         };
         let mut request = OpenRequest::at(output);
+        if let Some(parent) = parent {
+            request = request.with_parent(parent);
+        }
         if let Some(size) = size.filter(|size| size.w > 0 && size.h > 0) {
             request = request.with_size(ModelSize::new(size.w, size.h + bar));
         }
@@ -651,11 +665,14 @@ impl State {
             }
             self.shell.sync();
         }
-        // Rule 1: a window that opens floating comes with the offer to tidy it.
-        let offered = self
-            .shell
-            .by_id(id)
-            .is_some_and(|m| m.geometry.floating && !m.geometry.anchored);
+        // Rule 1: a window that opens floating comes with the offer to tidy
+        // it. Not a dialog, a splash screen or a toolbox: they have no place
+        // of their own.
+        let offered = habits
+            && self
+                .shell
+                .by_id(id)
+                .is_some_and(|m| m.geometry.floating && !m.geometry.anchored);
         self.placement_offer = offered.then_some(id);
         self.apply_arrangement();
         self.refresh_pointer_focus();
@@ -912,19 +929,29 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let movable = self
-            .shell
-            .by_id(window)
-            .is_some_and(|managed| !managed.geometry.anchored);
+        let Some(geometry) = self.shell.by_id(window).map(|managed| managed.geometry) else {
+            return;
+        };
         // Only while a button is held on the client, which is when its
         // implicit grab is active.
-        if !movable || self.gesture.is_some() || !pointer.is_grabbed() {
+        if geometry.anchored || self.gesture.is_some() || !pointer.is_grabbed() {
             return;
         }
         // The client keeps its implicit grab until the button is released;
         // what it does with the motion in the meantime does not matter.
         let location = pointer.current_location();
-        self.start_moving(window, location, location);
+        if geometry.floating {
+            self.start_moving(window, location, location);
+        } else {
+            // In its slot, it leaves only once dragged far enough, as by the
+            // shell's own title bar.
+            self.gesture = Some(Gesture::Pressed {
+                window,
+                at: location,
+                button: None,
+                drag: Drag::Move,
+            });
+        }
         self.queue_redraw();
     }
 
