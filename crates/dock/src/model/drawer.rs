@@ -204,22 +204,38 @@ pub fn summary(count: usize, page: usize) -> String {
 /// those with a word that does, then those that contain it. Within each
 /// group the order of `items` is kept.
 pub fn search<'a, T>(items: &'a [T], name: impl Fn(&T) -> &str, query: &str) -> Vec<&'a T> {
+    search_with(items, name, |_| Vec::new(), query)
+}
+
+/// Like [`search`], and after the names, the items with a word of `also`
+/// that starts with the search: what kind of application it is (« Navigateur
+/// web ») and the keywords of its desktop entry.
+pub fn search_with<'a, T>(
+    items: &'a [T],
+    name: impl Fn(&T) -> &str,
+    also: impl Fn(&T) -> Vec<&str>,
+    query: &str,
+) -> Vec<&'a T> {
     let query = fold(query.trim());
     if query.is_empty() {
         return Vec::new();
     }
+    let word_start = |text: &str| {
+        let breaks = |character: char| !character.is_alphanumeric();
+        fold(text)
+            .split(breaks)
+            .any(|word| word.starts_with(&query))
+    };
     let rank = |item: &T| {
         let folded = fold(name(item));
-        let word_start = || {
-            let breaks = |character: char| !character.is_alphanumeric();
-            folded.split(breaks).any(|word| word.starts_with(&query))
-        };
         if folded.starts_with(&query) {
             Some(0)
-        } else if word_start() {
+        } else if word_start(name(item)) {
             Some(1)
         } else if folded.contains(&query) {
             Some(2)
+        } else if also(item).into_iter().any(word_start) {
+            Some(3)
         } else {
             None
         }
@@ -487,6 +503,34 @@ mod tests {
         let hits = search(&apps, |name| name, "cod");
 
         assert_eq!(hits, [&"Code", &"Éditeur de code", &"Encodeur"]);
+    }
+
+    #[test]
+    fn an_application_is_found_by_its_kind_and_its_keywords_after_the_names() {
+        // A name, what kind of application it is, its keywords.
+        let apps = [
+            ("Firefox", "Navigateur web", "Internet;WWW"),
+            ("Kitty", "Émulateur de terminal", "shell;console"),
+            ("Navi", "Aide-mémoire", ""),
+        ];
+        fn also<'b>(app: &'b (&str, &str, &str)) -> Vec<&'b str> {
+            let mut terms = vec![app.1];
+            terms.extend(app.2.split(';'));
+            terms
+        }
+        let find = |query| {
+            let hits = search_with(&apps, |app| app.0, also, query);
+            hits.into_iter().map(|app| app.0).collect::<Vec<_>>()
+        };
+
+        assert_eq!(find("navig"), ["Firefox"]);
+        assert_eq!(find("terminal"), ["Kitty"]);
+        assert_eq!(find("emul"), ["Kitty"]);
+        assert_eq!(find("www"), ["Firefox"]);
+        // A name that matches comes before a kind that does.
+        assert_eq!(find("nav"), ["Navi", "Firefox"]);
+        // Inside a word of a kind is not enough: « Navigateur » holds « gat ».
+        assert!(find("gat").is_empty());
     }
 
     #[test]

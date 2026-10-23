@@ -1237,7 +1237,7 @@ impl Dock {
     /// What the drawer lists for the search in progress: applications,
     /// then games.
     pub fn hits(&self, query: &str) -> Vec<(Target, Identity)> {
-        let apps = drawer::search(&self.apps, |app| &app.name, query);
+        let apps = drawer::search_with(&self.apps, |app| &app.name, search_terms, query);
         let games = drawer::search(&self.games, |game| &game.name, query);
         let apps = apps
             .into_iter()
@@ -2250,6 +2250,14 @@ impl Dock {
 
 /// How far a bar should be unfolded: an upright bar unfolds under the
 /// pointer, a lying one shows a label above the icon instead.
+/// What else than its name an application is found by in the drawer: what
+/// kind of application it is, and its keywords.
+fn search_terms(app: &App) -> Vec<&str> {
+    let kind = app.generic_name.as_deref().into_iter();
+    kind.chain(app.keywords.iter().map(String::as_str))
+        .collect()
+}
+
 fn unfold_target(bar: &BarState) -> f32 {
     if bar.hovered && matches!(bar.orientation, Orientation::Vertical(_)) {
         1.0

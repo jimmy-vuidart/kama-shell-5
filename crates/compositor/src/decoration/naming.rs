@@ -42,6 +42,7 @@ mod tests {
             command: "nautilus --new-window".into(),
             icon: Some("org.gnome.Nautilus".into()),
             wm_class: None,
+            ..App::default()
         }])
     }
 

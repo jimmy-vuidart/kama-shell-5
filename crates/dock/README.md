@@ -145,7 +145,7 @@ n'est jamais réécrit.
   milieu ouvre une nouvelle fenêtre ; clic droit ouvre le menu (ouvrir sur un
   écran, épingler, oublier la place, fermer) ; glisser un favori le déplace.
 - **Tiroir** : clic sur le lanceur ou touche `Super` seule (`Alt` en
-  imbriqué). La saisie filtre aussitôt, les flèches choisissent, `Entrée`
+  imbriqué). La saisie filtre aussitôt, sur le nom des applis puis sur ce qu'elles sont et leurs mots-clés (`GenericName` et `Keywords` de leur fichier `.desktop`, dans la langue de la session : « navigateur » trouve Firefox, « terminal » kitty), les flèches choisissent, `Entrée`
   ouvre, `Échap` ou un clic en dehors ferme ; la molette sur la grille change
   de page. Tirer sa poignée le redimensionne : le bord du tiroir vertical
   opposé au dock (`[drawer] width`, jamais moins de 520 px ni au point de ne plus

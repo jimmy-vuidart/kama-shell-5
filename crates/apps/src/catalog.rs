@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// An application the user can start.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct App {
     /// The name of its desktop file, without the extension: `firefox`,
     /// `org.gnome.Nautilus`.
@@ -16,47 +16,116 @@ pub struct App {
     pub icon: Option<String>,
     /// What its windows call themselves, when that is not `id`.
     pub wm_class: Option<String>,
+    /// What kind of application it is (`GenericName`): « Navigateur web ».
+    pub generic_name: Option<String>,
+    /// Other words it can be found by (`Keywords`): « Internet », « WWW ».
+    pub keywords: Vec<String>,
+    /// What it can be started to do besides opening (`[Desktop Action]`):
+    /// « Nouvelle fenêtre privée ».
+    pub actions: Vec<AppAction>,
+}
+
+/// One of the actions of a desktop entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppAction {
+    pub name: String,
+    /// The command that does it, ready for a shell.
+    pub command: String,
 }
 
 /// Reads a desktop entry. `None` when it is not an application to list:
 /// hidden, without a command, or only there to open files.
 /// `languages` are tried in order for the translated name (`fr_FR`, `fr`).
 pub fn parse_entry(id: &str, text: &str, languages: &[String]) -> Option<App> {
-    let mut fields = BTreeMap::new();
-    let mut in_entry = false;
+    // The keys of each group: `[Desktop Entry]`, `[Desktop Action new-window]`…
+    let mut groups: BTreeMap<&str, BTreeMap<&str, &str>> = BTreeMap::new();
+    let mut group = None;
     for line in text.lines().map(str::trim) {
-        if line.starts_with('[') {
-            in_entry = line == "[Desktop Entry]";
-        } else if in_entry && !line.starts_with('#') {
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|line| line.strip_suffix(']'))
+        {
+            group = Some(name);
+        } else if let Some(group) = group.filter(|_| !line.starts_with('#')) {
             if let Some((key, value)) = line.split_once('=') {
+                let fields = groups.entry(group).or_default();
                 fields.entry(key.trim()).or_insert_with(|| value.trim());
             }
         }
     }
-    let field = |key: &str| fields.get(key).copied().filter(|value| !value.is_empty());
+    let entry = groups.get("Desktop Entry")?;
+    let field = |key: &str| entry.get(key).copied().filter(|value| !value.is_empty());
     let is = |key: &str| field(key) == Some("true");
     if field("Type") != Some("Application") || is("NoDisplay") || is("Hidden") {
         return None;
     }
-    let translated = languages
-        .iter()
-        .find_map(|language| field(&format!("Name[{language}]")));
-    let command = command_of(field("Exec")?);
-    if command.is_empty() {
-        return None;
-    }
-    let command = if is("Terminal") {
-        format!("xdg-terminal-exec {command}")
-    } else {
-        command
-    };
+    let terminal = is("Terminal");
+    let command = runnable(field("Exec")?, terminal)?;
+    let actions = field("Actions").map_or_else(Vec::new, list).into_iter();
+    let actions = actions
+        .filter_map(|action: String| {
+            let fields = groups.get(format!("Desktop Action {action}").as_str())?;
+            let name = translated(fields, "Name", languages)?;
+            let command = runnable(fields.get("Exec")?, terminal)?;
+            Some(AppAction { name, command })
+        })
+        .collect();
     Some(App {
         id: id.to_owned(),
-        name: translated.or(field("Name"))?.to_owned(),
+        name: translated(entry, "Name", languages)?,
         command,
         icon: field("Icon").map(str::to_owned),
         wm_class: field("StartupWMClass").map(str::to_owned),
+        generic_name: translated(entry, "GenericName", languages),
+        keywords: translated(entry, "Keywords", languages)
+            .map_or_else(Vec::new, |words| list(&words)),
+        actions,
     })
+}
+
+/// The value of `key` in the first of `languages` it is translated into,
+/// else as it is written.
+fn translated(fields: &BTreeMap<&str, &str>, key: &str, languages: &[String]) -> Option<String> {
+    let value = |key: &str| fields.get(key).copied().filter(|value| !value.is_empty());
+    languages
+        .iter()
+        .find_map(|language| value(&format!("{key}[{language}]")))
+        .or_else(|| value(key))
+        .map(str::to_owned)
+}
+
+/// The items of a list value (`Actions`, `Keywords`), separated by `;`
+/// (written `\;` inside an item).
+fn list(value: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut item = String::new();
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => item.extend(characters.next()),
+            ';' => items.push(std::mem::take(&mut item)),
+            other => item.push(other),
+        }
+    }
+    items.push(item);
+    items
+        .into_iter()
+        .map(|item| item.trim().to_owned())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// The command of an `Exec` line, ready for a shell: in a terminal when the
+/// entry says so. `None` when nothing is left once the placeholders go.
+fn runnable(exec: &str, terminal: bool) -> Option<String> {
+    let command = command_of(exec);
+    if command.is_empty() {
+        None
+    } else if terminal {
+        Some(format!("xdg-terminal-exec {command}"))
+    } else {
+        Some(command)
+    }
 }
 
 /// The command of an `Exec` line, without the placeholders for files and
@@ -206,9 +275,90 @@ Exec=nautilus --other
             id: id.into(),
             name: id.into(),
             command: command.into(),
-            icon: None,
             wm_class: wm_class.map(str::to_owned),
+            ..App::default()
         }
+    }
+
+    const FIREFOX: &str = "\
+[Desktop Entry]
+Name=Firefox
+GenericName=Web Browser
+GenericName[fr]=Navigateur web
+Keywords=Internet;WWW;Browser;
+Keywords[fr]=Internet;WWW;Navigateur;Web\\;Toile;
+Exec=firefox %u
+Terminal=false
+Type=Application
+Actions=new-window;new-private-window;missing;
+
+[Desktop Action new-private-window]
+Name=New Private Window
+Name[fr]=Nouvelle fenêtre de navigation privée
+Exec=firefox --private-window %u
+
+[Desktop Action new-window]
+Name=New Window
+Name[fr]=Nouvelle fenêtre
+Exec=firefox --new-window %u
+
+[Desktop Action profile-manager]
+Name=Profile Manager
+Exec=firefox --ProfileManager
+";
+
+    #[test]
+    fn an_entry_gives_its_kind_and_keywords_in_the_language_of_the_user() {
+        let app = parse_entry("firefox", FIREFOX, &french()).unwrap();
+
+        assert_eq!(app.generic_name.as_deref(), Some("Navigateur web"));
+        assert_eq!(app.keywords, ["Internet", "WWW", "Navigateur", "Web;Toile"]);
+        let english = parse_entry("firefox", FIREFOX, &[]).unwrap();
+        assert_eq!(english.generic_name.as_deref(), Some("Web Browser"));
+        assert_eq!(english.keywords, ["Internet", "WWW", "Browser"]);
+    }
+
+    #[test]
+    fn the_actions_listed_by_an_entry_are_given_in_its_order() {
+        let app = parse_entry("firefox", FIREFOX, &french()).unwrap();
+
+        let actions: Vec<_> = app
+            .actions
+            .iter()
+            .map(|action| (action.name.as_str(), action.command.as_str()))
+            .collect();
+        // `missing` has no group and `profile-manager` is not listed.
+        assert_eq!(
+            actions,
+            [
+                ("Nouvelle fenêtre", "firefox --new-window"),
+                (
+                    "Nouvelle fenêtre de navigation privée",
+                    "firefox --private-window"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_entry_without_actions_has_none() {
+        // Nautilus has an action group, but does not list it.
+        assert!(
+            parse_entry("nautilus", NAUTILUS, &[])
+                .unwrap()
+                .actions
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_actions_of_a_terminal_application_run_in_a_terminal() {
+        let text = "[Desktop Entry]\nName=Htop\nExec=htop\nType=Application\nTerminal=true\n\
+                    Actions=tree;\n[Desktop Action tree]\nName=Arbre\nExec=htop --tree\n";
+
+        let app = parse_entry("htop", text, &[]).unwrap();
+
+        assert_eq!(app.actions[0].command, "xdg-terminal-exec htop --tree");
     }
 
     #[test]

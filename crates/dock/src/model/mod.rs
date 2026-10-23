@@ -134,6 +134,7 @@ mod tests {
             command: "/usr/bin/code-oss --new-window".into(),
             icon: Some("com.visualstudio.code.oss".into()),
             wm_class: Some("Code".into()),
+            ..App::default()
         }])
     }
 
@@ -176,6 +177,7 @@ mod tests {
             command: "steam steam://rungameid/427520".into(),
             icon: Some("steam_icon_427520".into()),
             wm_class: None,
+            ..App::default()
         }]);
 
         let identity = identify(&catalog, &[], "Factorio");
