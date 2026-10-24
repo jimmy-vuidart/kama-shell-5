@@ -758,12 +758,11 @@ fn control_center<'a>(
     } else {
         (palette.card, palette.text)
     };
-    // The mixer opens beside the drawer, away from the bar, or above the
-    // launcher of a lying bar: the arrow points to it.
+    // The mixer opens beside the drawer, away from the bar: the arrow
+    // points to it.
     let towards = match drawer.orientation {
         Orientation::Vertical(Side::Right) => Glyph::ChevronLeft,
-        Orientation::Vertical(Side::Left) => Glyph::ChevronRight,
-        Orientation::Horizontal => Glyph::ChevronUp,
+        Orientation::Vertical(Side::Left) | Orientation::Horizontal => Glyph::ChevronRight,
     };
     let mixer_toggle =
         button(container(icons::glyph(towards, 14.0, mixer_fg)).center(Length::Fill))
@@ -795,13 +794,13 @@ fn control_center<'a>(
         Some(value) => level(value, palette, Message::Brightness),
         None => space().width(Length::Fill).into(),
     };
-    let volume = row![
-        mute,
-        level(dock.audio.volume, palette, Message::Volume),
-        mixer_toggle
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
+    let mut volume = row![mute, level(dock.audio.volume, palette, Message::Volume)]
+        .spacing(8)
+        .align_y(Alignment::Center);
+    // Above a lying bar, the mixer is always under the control center.
+    if let Orientation::Vertical(_) = drawer.orientation {
+        volume = volume.push(mixer_toggle);
+    }
     let light = row![
         container(icons::glyph(Glyph::Sun, 18.0, palette.text)).center_x(30),
         brightness,
@@ -1185,7 +1184,6 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
         .style(move |_| style::fill(palette.scrim, 0.0));
     let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
 
-    let screen = drawer.surface.map_or(1920.0, |surface| surface.width);
     let pinned = dock.pinned_in_drawer();
     let layout = drawer
         .lying_layout(pinned)
@@ -1215,13 +1213,14 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
             .width(layout.notices)
             .into(),
     );
-    columns.push(
-        container(control_center(dock, drawer, palette))
-            .width(layout.control)
-            .into(),
-    );
+    let control = column![
+        control_center(dock, drawer, palette),
+        mixer_card(dock, palette)
+    ]
+    .spacing(drawer::LYING_GAP);
+    columns.push(container(control).width(layout.control).into());
     // As high as the launcher lets it: the notifications fill that height,
-    // the control center keeps its own, at the top.
+    // the control center keeps its own, the mixer under it the rest.
     let body = Row::with_children(columns)
         .spacing(drawer::LYING_GAP)
         .height(layout.body);
@@ -1268,26 +1267,7 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
         .interaction(mouse::Interaction::ResizingVertically);
 
     let front = column![space().height(Length::Fill), edge, opaque(panel)];
-    let mut layers = stack![scrim, front];
-    if drawer.mixer {
-        // Above the control center, its right edge on the drawer's column.
-        // On its own layer: where the screen is low, it covers the top of
-        // the drawer rather than push it down.
-        let mixer = row![
-            space().width(Length::Fill),
-            opaque(mixer_panel(dock, palette))
-        ]
-        .padding(Padding {
-            right: layout.margin(screen),
-            ..Padding::ZERO
-        });
-        let under = drawer.height + bar_room + EDGE + 4.0;
-        layers = layers.push(column![
-            space().height(Length::Fill),
-            mixer,
-            space().height(under)
-        ]);
-    }
+    let layers = stack![scrim, front];
     layers.into()
 }
 
@@ -1320,40 +1300,24 @@ fn output_picker<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     .into()
 }
 
-/// The mixer: the general volume, then one line per application playing.
-fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+/// The title of the mixer, with the choice of the audio output.
+fn mixer_header<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     let title = text("Volume par application")
         .size(14)
         .font(style::SEMIBOLD)
         .color(palette.text);
-    let header = row![
+    row![
         title,
         space().width(Length::Fill),
         output_picker(dock, palette)
     ]
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+    .into()
+}
 
-    let percent = (dock.audio.volume * 100.0).round() as u32;
-    let general = row![
-        icons::glyph(Glyph::Volume, 18.0, palette.text),
-        text("Général")
-            .size(13)
-            .font(style::SEMIBOLD)
-            .color(palette.text)
-            .width(64),
-        level(dock.audio.volume, palette, Message::Volume),
-        text(percent.to_string())
-            .size(12)
-            .color(palette.muted)
-            .width(24)
-    ]
-    .spacing(10)
-    .align_y(Alignment::Center);
-    let general = container(general)
-        .padding(Padding::from([10.0, 12.0]))
-        .style(move |_| style::fill(palette.card, 10.0));
-
-    let mut lines: Column<'_, Message> = column![header, general].spacing(10);
+/// One line per application playing, or a word that none does.
+fn mixer_lines<'a>(dock: &'a Dock, palette: Palette) -> Column<'a, Message> {
+    let mut lines: Column<'_, Message> = column![].spacing(10);
     let playing = dock.mixer_lines();
     if playing.is_empty() {
         let nothing = text("Aucune application ne joue de son.")
@@ -1419,6 +1383,53 @@ fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
         .align_y(Alignment::Center);
         lines = lines.push(container(line).padding(Padding::from([0.0, 4.0])));
     }
+    lines
+}
+
+/// The mixer under the control center of the launcher above a lying bar,
+/// in a card like it, down to the foot of the launcher: the volume of each
+/// application, the general one being just above.
+fn mixer_card<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+    let lines = scrollable(mixer_lines(dock, palette))
+        .height(Length::Fill)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(4)
+                .scroller_width(4)
+                .spacing(4),
+        ));
+    container(column![mixer_header(dock, palette), lines].spacing(10))
+        .height(Length::Fill)
+        .padding(12)
+        .style(move |_| style::fill(palette.card, 14.0))
+        .into()
+}
+
+/// The mixer beside an upright bar: the general volume, then one line per
+/// application playing.
+fn mixer_panel<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+    let percent = (dock.audio.volume * 100.0).round() as u32;
+    let general = row![
+        icons::glyph(Glyph::Volume, 18.0, palette.text),
+        text("Général")
+            .size(13)
+            .font(style::SEMIBOLD)
+            .color(palette.text)
+            .width(64),
+        level(dock.audio.volume, palette, Message::Volume),
+        text(percent.to_string())
+            .size(12)
+            .color(palette.muted)
+            .width(24)
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    let general = container(general)
+        .padding(Padding::from([10.0, 12.0]))
+        .style(move |_| style::fill(palette.card, 10.0));
+
+    let top = column![mixer_header(dock, palette), general].spacing(10);
+    let mut lines = column![top, mixer_lines(dock, palette)].spacing(10);
 
     let note = row![
         icons::glyph(Glyph::Clock, 14.0, palette.muted),

@@ -40,13 +40,13 @@ pub fn width(wanted: Option<f32>, screen: Option<f32>) -> u32 {
 
 /// The height of the horizontal launcher unless the user gave it another,
 /// on a screen of 1080: a taller screen gives it as much more.
-pub const DEFAULT_HEIGHT: u32 = 500;
+pub const DEFAULT_HEIGHT: u32 = 600;
 const DEFAULT_SCREEN_HEIGHT: f32 = 1080.0;
-/// Lower, its control center no longer fits.
-pub const MIN_HEIGHT: u32 = 480;
+/// Lower, its control center and the mixer under it no longer fit.
+pub const MIN_HEIGHT: u32 = 580;
 /// What stays free of the horizontal launcher on its screen: the dock under
-/// it, and above it the mixer, which opens over the control center.
-const FREE_HEIGHT: u32 = 450;
+/// it, and above it a strip of the screen, clicked to close it.
+const FREE_HEIGHT: u32 = 200;
 
 /// The height the horizontal launcher takes when `wanted` is asked for, on
 /// a screen of a given height; without it, a share of the screen.
@@ -142,11 +142,6 @@ pub struct LyingLayout {
 }
 
 impl LyingLayout {
-    /// What is left on each side of the row, from the edge of the screen.
-    pub fn margin(&self, screen: f32) -> f32 {
-        ((screen - self.row) / 2.0).max(0.0)
-    }
-
     /// How many applications a page of the grid holds.
     pub fn page(&self) -> usize {
         self.app_columns * self.app_rows
@@ -487,16 +482,16 @@ mod tests {
     }
 
     #[test]
-    fn the_horizontal_launcher_is_500_high_unless_told_otherwise() {
-        assert_eq!(height(None, Some(1080.0)), 500);
-        assert_eq!(height(None, None), 500);
-        assert_eq!(height(Some(560.0), Some(1080.0)), 560);
+    fn the_horizontal_launcher_is_600_high_unless_told_otherwise() {
+        assert_eq!(height(None, Some(1080.0)), 600);
+        assert_eq!(height(None, None), 600);
+        assert_eq!(height(Some(640.0), Some(1080.0)), 640);
     }
 
     #[test]
     fn on_a_taller_screen_the_horizontal_launcher_is_taller() {
-        assert_eq!(height(None, Some(1440.0)), 667);
-        assert_eq!(height(None, Some(2160.0)), 1000);
+        assert_eq!(height(None, Some(1440.0)), 800);
+        assert_eq!(height(None, Some(2160.0)), 1200);
         // Never so low that its content does not fit.
         assert_eq!(height(None, Some(800.0)), MIN_HEIGHT);
     }
@@ -504,8 +499,8 @@ mod tests {
     #[test]
     fn the_horizontal_launcher_keeps_between_its_content_and_the_screen() {
         assert_eq!(height(Some(100.0), Some(1080.0)), MIN_HEIGHT);
-        // The dock under it and the mixer above stay free.
-        assert_eq!(height(Some(5000.0), Some(1080.0)), 1080 - 450);
+        // The dock under it and a strip above stay free.
+        assert_eq!(height(Some(5000.0), Some(1080.0)), 1080 - 200);
         assert_eq!(height(Some(900.0), Some(480.0)), MIN_HEIGHT);
         assert_eq!(height(Some(f32::NAN), None), DEFAULT_HEIGHT);
     }
@@ -517,7 +512,6 @@ mod tests {
         assert_eq!(layout.games, Some(260.0));
         assert_eq!((layout.notices, layout.control), (340.0, 340.0));
         assert_eq!(layout.apps, 1892.0 - 260.0 - 680.0 - 42.0);
-        assert_eq!(layout.margin(1920.0), 14.0);
         // Six columns of applications, one of games, as before.
         assert_eq!((layout.app_columns, layout.game_columns), (6, 1));
         assert_eq!(layout.games_shown(), 3);
@@ -557,7 +551,6 @@ mod tests {
     fn on_a_wider_screen_still_the_columns_keep_together_centered() {
         let layout = lying_layout(5120.0, 1440.0, 500.0, false);
         assert_eq!(layout.row, 1440.0 * WIDEST_SHAPE);
-        assert_eq!(layout.margin(5120.0), (5120.0 - layout.row) / 2.0);
     }
 
     #[test]

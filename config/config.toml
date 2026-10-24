@@ -127,9 +127,9 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # width = 640
 
 # Hauteur du lanceur d'un dock horizontal, en pixels (la barre en plus). Tirer
-# son bord haut la change et réécrit cette ligne ; la place du mixeur reste
-# libre au-dessus.
-# height = 500
+# son bord haut la change et réécrit cette ligne. Sans elle, 600 px sur un
+# écran de 1080, et autant de plus sur un écran plus haut (800 en 1440).
+# height = 600
 
 # Fond d'écran : image affichée en arrière-plan de chaque écran.
 # Sans cette section, le fond « glass » adapté à la définition de chaque écran

@@ -135,6 +135,12 @@ pub struct Drawer {
 }
 
 impl Drawer {
+    /// Whether the mixer shows: always under the control center of the
+    /// launcher above a lying bar, beside an upright one when asked for.
+    pub fn mixer_shown(&self) -> bool {
+        self.mixer || self.orientation == Orientation::Horizontal
+    }
+
     /// How the launcher above a lying bar shares its screen out, with or
     /// without `pinned` applications above the grid; before its surface
     /// says how large the screen is, as on a 16:9 one.
@@ -717,13 +723,16 @@ impl Dock {
         let wanted = self
             .drawer
             .as_ref()
-            .map(|drawer| (drawer.width, drawer.height));
-        let Some((width, height)) = wanted else {
+            .map(|drawer| (drawer.width, drawer.height, drawer.resizing));
+        let Some((width, height, resizing)) = wanted else {
             return;
         };
+        // Without a height of its own, the launcher takes a share of the
+        // screen, now that it is known.
+        let kept = resizing || self.config.drawer_height.is_some();
         let (width, height) = (
             self.drawer_width(Some(width)) as f32,
-            self.drawer_height(Some(height)) as f32,
+            self.drawer_height(kept.then_some(height)) as f32,
         );
         if let Some(drawer) = &mut self.drawer {
             (drawer.width, drawer.height) = (width, height);
@@ -1053,6 +1062,10 @@ impl Dock {
             resizing: false,
             surface: None,
         });
+        if orientation == Orientation::Horizontal {
+            // Its mixer is always there: its levels move.
+            self.request(Request::Levels(true));
+        }
         // The control center shows the notices: no toast over it.
         let toasts = self.sync_toasts();
         self.close_menu().chain(task).chain(toasts)
@@ -1922,7 +1935,7 @@ impl Dock {
                     return Task::none();
                 };
                 drawer.mixer = !drawer.mixer;
-                let shown = drawer.mixer;
+                let shown = drawer.mixer_shown();
                 self.request(Request::Levels(shown));
                 Task::none()
             }
@@ -2277,7 +2290,7 @@ impl Dock {
         }
         // The clock; with the mixer open, the made-up levels move faster.
         let simulated_levels = !self.options.is_real(Backend::Audio)
-            && self.drawer.as_ref().is_some_and(|drawer| drawer.mixer);
+            && self.drawer.as_ref().is_some_and(Drawer::mixer_shown);
         let pace = if simulated_levels {
             Duration::from_millis(120)
         } else {

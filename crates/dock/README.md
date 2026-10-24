@@ -105,7 +105,7 @@ right = "horizontal"
 [drawer]
 pinned = ["firefox", "discord", "kitty", "code", "obsidian", "mpv", "org.gnome.Nautilus"]
 width = 640            # tiroir d'un dock vertical
-height = 500           # lanceur d'un dock horizontal
+height = 600           # lanceur d'un dock horizontal
 ```
 
 Sans `[dock.screens]`, il y a un dock vertical sur l'écran gauche et aucun
@@ -151,14 +151,15 @@ n'est jamais réécrit.
   de page. Tirer sa poignée le redimensionne : le bord du tiroir vertical
   opposé au dock (`[drawer] width`, jamais moins de 520 px ni au point de ne plus
   laisser de place au mixeur), le bord haut du lanceur horizontal
-  (`[drawer] height`, jamais moins de 480 px, et la place du mixeur reste
-  libre au-dessus). La pagination montre cinq numéros au plus, autour de la
+  (`[drawer] height`, jamais moins de 580 px, qui gardent la place du
+  mixeur sous le centre de contrôle, ni plus haut que l'écran moins 200 px). La pagination montre cinq numéros au plus, autour de la
   page affichée.
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
   curseur pour le régler ; les touches de luminosité d'un portable la font
   aussi varier de 5 %, même en jeu) ; sur un portable, la batterie sous le
-  nom de l'utilisateur ; la flèche au bout du volume ouvre le mixeur, seul
-  endroit où choisir la sortie audio. Le bouton aux
+  nom de l'utilisateur ; la flèche au bout du volume ouvre le mixeur (dans
+  le lanceur horizontal, il est toujours affiché sous le centre de
+  contrôle), seul endroit où choisir la sortie audio. Le bouton aux
   curseurs, à côté de la déconnexion, ouvre l'écran « Paramètres »
   (`coquille-settings`, voir `crates/settings/README.md`) : c'est là que se
   règle le sens du dock sur chaque écran, que les barres suivent aussitôt.

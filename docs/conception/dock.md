@@ -96,17 +96,21 @@ toujours 3 lignes) : en 2560 px, 8 colonnes d'applis et 6 jeux ; en 21:9
 l'écran d'un bord à l'autre jusqu'au 21:9 ; plus large (32:9), elle reste
 groupée au milieu, 2,4 fois aussi large que l'écran est haut.
 
-En hauteur, le lanceur fait 500 px sur un écran de 1080 et autant de plus
-sur un écran plus haut (667 en 1440), tant qu'on ne l'a pas réglé par sa
-poignée. Sous la recherche, ses colonnes ont toute la hauteur qui reste :
-applications (lignes de 44 px), jeux (cartes de 92 px) et résultats d'une
-recherche prennent autant de lignes qu'il en tient, les notifications
-toute la hauteur ; le centre de contrôle garde la sienne, en haut. Le
-mixeur s'ouvre au-dessus du centre de contrôle.
+En hauteur, le lanceur fait 600 px sur un écran de 1080 et autant de plus
+sur un écran plus haut (800 en 1440), tant qu'on ne l'a pas réglé par sa
+poignée (580 px au moins). Sous la recherche, ses colonnes ont toute la
+hauteur qui reste : applications (lignes de 44 px), jeux (cartes de 92 px)
+et résultats d'une recherche prennent autant de lignes qu'il en tient, les
+notifications toute la hauteur. Le centre de contrôle garde la sienne, en
+haut, sans flèche au bout du volume : sous lui, le **mixeur est toujours
+affiché**, dans une carte comme lui qui descend jusqu'au pied du lanceur
+(titre et sortie audio, puis une ligne par appli, qui défilent quand elles
+ne tiennent pas ; ni « Général », que le volume juste au-dessus règle, ni
+la note).
 
 ## Mixeur
 
-Panneau (~290) à côté du tiroir, pointant vers la flèche du volume : sortie
+Dans le tiroir vertical, panneau (~290) à côté du tiroir, pointant vers la flèche du volume : sortie
 audio (seul endroit où la choisir), volume général, une ligne par appli
 (icône, nom, état, curseur, niveau en direct en vert, bouton « couper » rouge
 quand le son est coupé), note sur la mémorisation des volumes. Chaque appli
