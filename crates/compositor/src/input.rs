@@ -1358,6 +1358,8 @@ impl State {
         }
         if state == ButtonState::Pressed {
             self.refresh_constraint();
+        } else {
+            self.refresh_pointer_focus_over_panels();
         }
     }
 

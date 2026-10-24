@@ -830,7 +830,8 @@ fn lying_launcher<'a>(
             .center_y(metrics.lying_thickness()),
     );
     if live || open {
-        area.on_press(Message::Launcher(Some(state.screen))).into()
+        area.on_release(Message::Launcher(Some(state.screen)))
+            .into()
     } else {
         area.into()
     }
@@ -1235,7 +1236,8 @@ fn launcher<'a>(
         .align_x(outward(side));
     let area = mouse_area(content);
     if live || open {
-        area.on_press(Message::Launcher(Some(state.screen))).into()
+        area.on_release(Message::Launcher(Some(state.screen)))
+            .into()
     } else {
         area.into()
     }
