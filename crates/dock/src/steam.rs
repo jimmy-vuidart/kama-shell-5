@@ -1,5 +1,6 @@
 //! The games installed with Steam, read from its library folders.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 /// A game of the Steam library.
@@ -96,37 +97,65 @@ fn steam_root() -> Option<PathBuf> {
     roots.find(|root| root.join("steamapps").is_dir())
 }
 
+/// The folders of the libraries of the user, the one in Steam's own
+/// folder included.
+fn libraries(root: &Path) -> Vec<PathBuf> {
+    let folders = std::fs::read_to_string(root.join("steamapps/libraryfolders.vdf"));
+    let mut libraries = folders
+        .map(|text| parse_libraries(&text))
+        .unwrap_or_default();
+    if !libraries.iter().any(|library| library == root) {
+        libraries.push(root.to_owned());
+    }
+    libraries
+}
+
+/// The manifests of the titles installed in a library.
+fn manifests(library: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(library.join("steamapps")) else {
+        return Vec::new();
+    };
+    let paths = entries.flatten().map(|entry| entry.path());
+    let paths = paths.filter(|path| {
+        let name = path.file_name().and_then(|name| name.to_str());
+        name.is_some_and(|name| name.starts_with("appmanifest_"))
+    });
+    paths.collect()
+}
+
 /// Reads the library of the user. Empty when Steam is not installed.
 pub fn load() -> Vec<Game> {
     let Some(root) = steam_root() else {
         return Vec::new();
     };
-    let folders = std::fs::read_to_string(root.join("steamapps/libraryfolders.vdf"));
-    let mut libraries = folders
-        .map(|text| parse_libraries(&text))
-        .unwrap_or_default();
-    if !libraries.contains(&root) {
-        libraries.push(root.clone());
-    }
-
     let mut games = Vec::new();
-    for library in libraries {
-        let Ok(entries) = std::fs::read_dir(library.join("steamapps")) else {
-            continue;
-        };
-        for path in entries.flatten().map(|entry| entry.path()) {
-            let name = path.file_name().and_then(|name| name.to_str());
-            if !name.is_some_and(|name| name.starts_with("appmanifest_")) {
-                continue;
-            }
-            let manifest = std::fs::read_to_string(&path).unwrap_or_default();
-            if let Some(mut game) = parse_manifest(&manifest) {
-                game.cover = cover(&root, game.id);
-                games.push(game);
-            }
+    for path in libraries(&root)
+        .iter()
+        .flat_map(|library| manifests(library))
+    {
+        let manifest = std::fs::read_to_string(&path).unwrap_or_default();
+        if let Some(mut game) = parse_manifest(&manifest) {
+            game.cover = cover(&root, game.id);
+            games.push(game);
         }
     }
     sorted(games)
+}
+
+/// Which titles are installed, summed up: it changes when one is installed
+/// or removed, not while Steam rewrites their manifests (it does during a
+/// download).
+pub fn fingerprint() -> u64 {
+    let mut hasher = DefaultHasher::new();
+    if let Some(root) = steam_root() {
+        let mut found: Vec<PathBuf> = libraries(&root)
+            .iter()
+            .flat_map(|library| manifests(library))
+            .collect();
+        found.sort();
+        found.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// The picture of a game in Steam's cache. Steam keeps them next to each

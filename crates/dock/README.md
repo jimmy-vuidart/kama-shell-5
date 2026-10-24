@@ -170,6 +170,10 @@ n'est jamais réécrit.
   icônes, dans le thème Reversal qui va avec le thème et l'accent (le
   compositeur s'en sert aussi, pour ses barres de titre),
   `steam.rs` lit la ludothèque, `config.rs` lit et réécrit la configuration.
+  Applis et jeux sont relus quand on en installe ou en retire
+  (`backend/installed.rs` : une empreinte des dossiers toutes les 3 s, la
+  relecture une fois qu'elle ne bouge plus) ; le compositeur relit les siens
+  quand s'ouvre la fenêtre d'une appli qu'il ne connaît pas.
 - `ui/` : les vues, avec [iced](https://iced.rs) et `iced_layershell`.
 - `backend/` : le lien avec le compositeur (crate `coquille-ipc`) et les
   services. Le son passe par `pactl` et `parec` (l'interface PulseAudio de

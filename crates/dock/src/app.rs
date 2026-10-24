@@ -174,6 +174,9 @@ pub enum Message {
     Compositor(compositor::Update),
     Backend(backend::Update),
     IconsLoaded(Icons),
+    /// The applications and the games read again, and the summary of what
+    /// was installed they were read for.
+    Installed(u64, Catalog, Vec<Game>),
     Window(window::Id, window::Event),
     /// The edge of the drawer is grabbed, dragged to a place, let go.
     ResizeStart,
@@ -261,6 +264,8 @@ pub struct Dock {
     /// The applications of the drawer, from A to Z.
     pub apps: Vec<App>,
     pub games: Vec<Game>,
+    /// What was installed when `catalog` and `games` were read, summed up.
+    installed: u64,
     pub icons: Icons,
     /// What the icons last asked for were chosen from.
     icon_style: IconStyle,
@@ -301,15 +306,12 @@ pub struct Dock {
 
 impl Dock {
     pub fn new(options: Options) -> (Self, Task<Message>) {
+        // Taken first: what is installed meanwhile is read again later.
+        let installed = backend::installed::fingerprint();
         let catalog = Catalog::load();
         let games = steam::load();
         let config = read_config(&options.config, &catalog, &games);
-
-        // Steam writes a desktop file for each game: those are listed with
-        // the games, not among the applications.
-        let mut apps = catalog.apps().to_vec();
-        apps.retain(|app| steam::game_of_command(&app.command).is_none());
-        drawer::sort_by_name(&mut apps, |app| &app.name);
+        let apps = drawer_apps(&catalog);
         let theme = config.theme.unwrap_or_default();
         let icon_style = icons::style(theme, config.accent.as_deref().unwrap_or_default());
         let simulated = |backend| !options.is_real(backend);
@@ -360,6 +362,7 @@ impl Dock {
             catalog,
             apps,
             games,
+            installed,
             icons: Icons::default(),
             icon_style,
             snapshot,
@@ -846,6 +849,57 @@ impl Dock {
         self.rebuild_entries();
         tasks.push(self.fit_bars());
         tasks.push(self.sync_toasts());
+        Task::batch(tasks)
+    }
+
+    /// Something was installed or removed: the applications and the games
+    /// are read again, off the interface.
+    fn read_installed(&mut self, installed: u64) -> Task<Message> {
+        if installed == self.installed {
+            return Task::none();
+        }
+        self.installed = installed;
+        Task::perform(
+            tokio::task::spawn_blocking(|| (Catalog::load(), steam::load())),
+            move |read| match read {
+                Ok((catalog, games)) => Message::Installed(installed, catalog, games),
+                Err(_) => Message::Installed(installed, Catalog::default(), Vec::new()),
+            },
+        )
+    }
+
+    /// The applications and the games, as they are now: the drawer lists
+    /// them, the bars name and draw them so.
+    fn installed_read(
+        &mut self,
+        installed: u64,
+        catalog: Catalog,
+        games: Vec<Game>,
+    ) -> Task<Message> {
+        // Read for something older than what is now installed: the newer
+        // reading follows. Empty, the reading failed: the lists stay.
+        if installed != self.installed || catalog.apps().is_empty() {
+            return Task::none();
+        }
+        let before = (self.catalog.apps().len(), self.games.len());
+        self.catalog = catalog;
+        self.games = games;
+        self.apps = drawer_apps(&self.catalog);
+        info!(
+            applications = self.catalog.apps().len(),
+            games = self.games.len(),
+            ?before,
+            "installed applications read again"
+        );
+        if let Some(drawer) = &mut self.drawer {
+            drawer.page = drawer.page.min(drawer::page_count(self.apps.len()) - 1);
+            drawer.selected = None;
+        }
+        // The favorites are told apart by application: read them again.
+        let mut tasks = vec![self.reload_config()];
+        self.rebuild_entries();
+        tasks.push(self.fit_bars());
+        tasks.push(self.load_icons());
         Task::batch(tasks)
     }
 
@@ -1405,6 +1459,9 @@ impl Dock {
             }
             Message::Compositor(update) => self.compositor(update),
             Message::Backend(update) => self.backend(update),
+            Message::Installed(installed, catalog, games) => {
+                self.installed_read(installed, catalog, games)
+            }
             Message::IconsLoaded(icons) => {
                 // Icons asked for before the theme changed again are stale.
                 if icons.style() == Some(self.icon_style) {
@@ -2088,6 +2145,7 @@ impl Dock {
                 }
                 return Task::batch(tasks);
             }
+            backend::Update::Installed(installed) => return self.read_installed(installed),
             backend::Update::Tray(items) => {
                 self.tray = items;
                 return self.fit_bars();
@@ -2213,6 +2271,7 @@ impl Dock {
         if self.options.is_real(Backend::Notifications) {
             subscriptions.push(backend::notify::subscription().map(Message::Backend));
         }
+        subscriptions.push(backend::installed::subscription().map(Message::Backend));
         Subscription::batch(subscriptions)
     }
 
@@ -2265,6 +2324,15 @@ fn unfold_target(bar: &BarState) -> f32 {
     } else {
         0.0
     }
+}
+
+/// The applications of the drawer, from A to Z. Steam writes a desktop
+/// file for each game: those are listed with the games, not here.
+fn drawer_apps(catalog: &Catalog) -> Vec<App> {
+    let mut apps = catalog.apps().to_vec();
+    apps.retain(|app| steam::game_of_command(&app.command).is_none());
+    drawer::sort_by_name(&mut apps, |app| &app.name);
+    apps
 }
 
 /// Reads the configuration of the dock.

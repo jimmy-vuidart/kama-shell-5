@@ -57,5 +57,4 @@ il n'est pas concerné.
 
 ## Liens
 
-- Voisin de : 19 (catalogue des applis).
 - La phase 5 compte ce repli parmi les dépendances à un autre bureau.

@@ -3,6 +3,44 @@
 //! its `app_id` and a color.
 
 use coquille_apps::Catalog;
+use tracing::info;
+
+/// The applications installed, read again when a window belongs to one the
+/// catalog does not know and the desktop files changed since: an
+/// application installed while the shell runs gets its name and icon from
+/// its first window on.
+pub struct Applications {
+    catalog: Catalog,
+    /// The desktop files `catalog` was read from, summed up.
+    read_from: u64,
+}
+
+impl Applications {
+    pub fn load() -> Self {
+        // Taken first: what is installed meanwhile is read again later.
+        let read_from = coquille_apps::fingerprint();
+        Self {
+            catalog: Catalog::load(),
+            read_from,
+        }
+    }
+
+    /// The name and the icon of the application of a window.
+    pub fn identity(&mut self, app_id: &str) -> (String, Option<String>) {
+        if !app_id.is_empty() && self.catalog.find(app_id).is_none() {
+            // A few dozen `stat`, only for a window of an unknown
+            // application.
+            let now = coquille_apps::fingerprint();
+            if now != self.read_from {
+                self.read_from = now;
+                self.catalog = Catalog::load();
+                let count = self.catalog.apps().len();
+                info!(count, app_id, "installed applications read again");
+            }
+        }
+        identity(&self.catalog, app_id)
+    }
+}
 
 /// The name of the application of a window, and the name of its icon when
 /// the application is installed with a desktop entry.

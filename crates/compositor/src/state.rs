@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use coquille_apps::Catalog;
 use coquille_model::{
     AppMemory, OutputId, OutputRole, Point as ModelPoint, Proportions, Rect, Scale, WindowId,
 };
@@ -47,6 +46,7 @@ use crate::backend::Backend;
 use crate::config::{GlassConfig, LayoutConfig, WallpaperConfig};
 use crate::cursor::CursorImages;
 use crate::decoration::layout::TitlebarButton;
+use crate::decoration::naming::Applications;
 use crate::decoration::paint::Painter;
 use crate::game::{ModTap, StickyEdges};
 use crate::input::{Gesture, ScreenshotMode};
@@ -161,7 +161,7 @@ pub struct State {
     pub backend: Backend,
     pub shell: Shell,
     /// The applications installed, for the names and icons of title bars.
-    pub catalog: Catalog,
+    pub applications: Applications,
     pub theme: Theme,
     /// The accent the user chose, kept across changes of theme.
     pub accent: Option<Rgba>,
@@ -368,7 +368,7 @@ impl State {
                 None => Theme::new(options.theme),
             },
             accent: options.accent,
-            catalog: Catalog::load(),
+            applications: Applications::load(),
             painter: Painter::new(),
             ipc: None,
             app_theme: None,

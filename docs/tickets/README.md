@@ -51,7 +51,6 @@ jamais réutilisés : le suivant est le 33.
 | 15 | [Les habitudes n'ont ni version ni copie de secours](15-habitudes-version.md) | robustesse | tests |
 | 16 | [Le canal du shell n'a pas de version](16-version-du-canal.md) | dette | tests |
 | 18 | [Le dock lance trop de processus](18-processus-du-dock.md) | performance | imbriqué |
-| 19 | [Une appli installée en cours de session n'a ni nom ni icône](19-catalogue-a-chaud.md) | bug | imbriqué |
 | 26 | [Pas de raccourci pour fermer la fenêtre active](26-fermer-la-fenetre-active.md) | évolution | imbriqué |
 | 27 | [Halo autour du curseur quand on secoue la souris](27-halo-du-curseur.md) | évolution | imbriqué |
 | 28 | [Dock : messages non lus réels, glisser une icône vers un écran](28-dock-non-lus-et-glisser.md) | évolution | imbriqué |

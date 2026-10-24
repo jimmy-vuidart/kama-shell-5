@@ -9,6 +9,8 @@ mod icons;
 mod reversal;
 
 pub use appearance::tell_applications;
-pub use catalog::{App, AppAction, Catalog, command_of, data_directories, languages, parse_entry};
+pub use catalog::{
+    App, AppAction, Catalog, command_of, data_directories, fingerprint, languages, parse_entry,
+};
 pub use icons::find_icon;
 pub use reversal::{PACKAGE as ICON_PACKAGE, icon_theme_for};

@@ -1,6 +1,7 @@
 //! Desktop entries: reading one, and the catalog of all of them.
 
 use std::collections::BTreeMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 /// An application the user can start.
@@ -224,6 +225,39 @@ pub fn data_directories() -> Vec<PathBuf> {
         .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
     let system = system.split(':').filter(|path| !path.is_empty());
     user.into_iter().chain(system.map(PathBuf::from)).collect()
+}
+
+/// A summary of the desktop files of the system and of the user: it
+/// changes when one is added, removed or rewritten. Cheaper than reading
+/// them, so that a catalog is read again only when it would differ.
+pub fn fingerprint() -> u64 {
+    let directories = data_directories().into_iter();
+    fingerprint_of(directories.map(|directory| directory.join("applications")))
+}
+
+fn fingerprint_of(directories: impl Iterator<Item = PathBuf>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for directory in directories {
+        directory.hash(&mut hasher);
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        // The order of a directory is not always the same from one reading
+        // to the next.
+        let mut files: Vec<_> = entries
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
+            .map(|entry| {
+                // Followed, for links (Flatpak exports its entries so).
+                let metadata = std::fs::metadata(entry.path()).ok();
+                let modified = metadata.as_ref().and_then(|data| data.modified().ok());
+                (entry.file_name(), metadata.map(|data| data.len()), modified)
+            })
+            .collect();
+        files.sort();
+        files.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 fn read_directory(directory: &Path, languages: &[String], apps: &mut BTreeMap<String, App>) {
@@ -453,6 +487,27 @@ Exec=firefox --ProfileManager
             "com.discordapp.Discord"
         );
         assert_eq!(catalog.find("kitty").unwrap().id, "kitty-open");
+    }
+
+    #[test]
+    fn the_fingerprint_changes_when_an_entry_comes_or_goes() {
+        let directory = std::env::temp_dir().join(format!("coquille-apps-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let print = || fingerprint_of(std::iter::once(directory.clone()));
+        let empty = print();
+        assert_eq!(print(), empty);
+
+        std::fs::write(directory.join("notes.txt"), "").unwrap();
+        assert_eq!(print(), empty, "only desktop files count");
+        std::fs::write(directory.join("nautilus.desktop"), NAUTILUS).unwrap();
+        let installed = print();
+        assert_ne!(installed, empty);
+        std::fs::write(directory.join("nautilus.desktop"), "[Desktop Entry]").unwrap();
+        assert_ne!(print(), installed, "a rewritten entry counts");
+        std::fs::remove_file(directory.join("nautilus.desktop")).unwrap();
+        assert_eq!(print(), empty);
+
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]

@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 use crate::config::LayoutConfig;
 use crate::decoration::capsules::{CapsuleButton, GroupLayout};
 use crate::decoration::layout::TitlebarButton;
-use crate::decoration::naming::{badge_color, identity};
+use crate::decoration::naming::badge_color;
 use crate::decoration::paint::{CapsuleSpec, GroupSpec, Painter, TitlebarSpec};
 use crate::focus::KeyFocus;
 use crate::input::{Drag, Gesture};
@@ -639,7 +639,7 @@ impl State {
         debug!(?id, app_id, title, x11, "window mapped");
 
         let origin = self.shell.origin_of(&geometry);
-        let (name, icon) = identity(&self.catalog, &app_id);
+        let (name, icon) = self.applications.identity(&app_id);
         self.shell.windows.push(ManagedWindow {
             id,
             window,
@@ -782,7 +782,7 @@ impl State {
         };
         // An application that names itself late gets its name and icon then.
         if managed.app_id != app_id {
-            (managed.name, managed.icon) = identity(&self.catalog, &app_id);
+            (managed.name, managed.icon) = self.applications.identity(&app_id);
         }
         managed.app_id = app_id;
         managed.title = title.clone();

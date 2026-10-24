@@ -6,6 +6,7 @@ pub mod audio;
 pub mod backlight;
 pub mod battery;
 pub mod compositor;
+pub mod installed;
 pub mod mock;
 pub mod notify;
 pub mod services;
@@ -104,6 +105,9 @@ pub enum Update {
     /// A laptop's battery; `None` when it has none, or it is gone.
     Battery(Option<crate::model::battery::Battery>),
     Notify(Notice),
+    /// What is installed, summed up: when it changes, the applications and
+    /// the games are read again.
+    Installed(u64),
     NotifyClosed {
         id: u32,
         reason: u32,
