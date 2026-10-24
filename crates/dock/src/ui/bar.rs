@@ -207,6 +207,13 @@ impl Metrics {
         (side, (side * ICON_ROUNDNESS).round())
     }
 
+    /// Standing: the side of the rounded square of an icon, in its box of
+    /// `icon_size`, and its radius.
+    fn standing_tile(&self) -> (f32, f32) {
+        let side = (self.icon_size * ICON_FILL).round();
+        (side, (side * ICON_ROUNDNESS).round())
+    }
+
     /// Lying down: the distance that comes back everywhere, between what
     /// shows of two tiles, and between a tile and the edge of the bar.
     fn lying_beat(&self) -> f32 {
@@ -1295,7 +1302,15 @@ fn entry_row<'a>(
             Side::Right => Alignment::Start,
         });
 
-    let icon = container(icons::app(&dock.icons, &entry.identity, metrics.icon_size))
+    let tile = icons::tile(
+        &dock.icons,
+        &entry.identity,
+        metrics.icon_size,
+        metrics.standing_tile(),
+        palette,
+        false,
+    );
+    let icon = container(tile)
         .center_x(metrics.slot)
         .center_y(metrics.slot)
         .style(move |_| {
