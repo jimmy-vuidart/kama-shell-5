@@ -17,7 +17,7 @@ use super::opaque::opaque;
 use super::style::{self, Palette};
 use crate::app::{Dock, Drawer, Message, OutputChoice, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
-use crate::model::drawer::{self, PAGE};
+use crate::model::drawer;
 use crate::model::mixer;
 use crate::model::notify::{self, Notice};
 use crate::model::{Identity, Orientation, Side};
@@ -307,11 +307,11 @@ fn cell<'a>(
 
 /// Cells in rows of `columns`; the last row is filled with blanks so that
 /// the cells keep their width.
-fn grid<'a>(cells: Vec<Element<'a, Message>>, columns: usize) -> Element<'a, Message> {
-    let mut rows: Column<'_, Message> = column![].spacing(4);
+fn grid<'a>(cells: Vec<Element<'a, Message>>, columns: usize, gap: f32) -> Element<'a, Message> {
+    let mut rows: Column<'_, Message> = column![].spacing(gap);
     let mut cells = cells.into_iter().peekable();
     while cells.peek().is_some() {
-        let mut line: Row<'_, Message> = row![].spacing(4);
+        let mut line: Row<'_, Message> = row![].spacing(gap);
         for _ in 0..columns {
             line = line.push(match cells.next() {
                 Some(cell) => cell,
@@ -325,7 +325,8 @@ fn grid<'a>(cells: Vec<Element<'a, Message>>, columns: usize) -> Element<'a, Mes
 
 fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
     let count = dock.apps.len();
-    let pages = drawer::page_count(count);
+    let size = drawer.page_size();
+    let pages = drawer::page_count(count, size);
     let page = drawer.page.min(pages - 1);
 
     let arrow = |glyph: Glyph, forward: bool, enabled: bool| {
@@ -378,13 +379,13 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
     }
     pager = pager.push(arrow(Glyph::ChevronRight, true, page + 1 < pages));
 
-    let header = heading("Applications", drawer::summary(count, page), palette)
+    let header = heading("Applications", drawer::summary(count, page, size), palette)
         .push(space().width(Length::Fill))
         .push(pager);
-    let columns = drawer::COLUMNS;
-    let rows = PAGE / columns;
+    let columns = drawer.app_columns();
+    let rows = drawer::ROWS;
     let height = 44.0;
-    let cells = drawer::page(&dock.apps, page)
+    let cells = drawer::page(&dock.apps, page, size)
         .iter()
         .enumerate()
         .map(|(index, app)| {
@@ -400,8 +401,8 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
             )
         });
     // Always as high as a full page, so that nothing jumps on the last one.
-    let full = rows as f32 * height + (rows - 1) as f32 * 4.0;
-    let rows = container(grid(cells.collect(), columns)).height(full);
+    let full = rows as f32 * height + (rows - 1) as f32 * drawer::APP_GAP;
+    let rows = container(grid(cells.collect(), columns, drawer::APP_GAP)).height(full);
     let body = mouse_area(rows).on_scroll(|delta| {
         let down = match delta {
             mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => y < 0.0,
@@ -420,17 +421,17 @@ fn results<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<
     };
     // Without an arrow key, Enter opens the first one: show it.
     let selected = drawer.selected.unwrap_or(0);
-    let columns = drawer::COLUMNS;
-    let cells =
-        hits.into_iter()
-            .take(4 * columns)
-            .enumerate()
-            .map(|(index, (target, identity))| {
-                cell(dock, target, &identity, index == selected, 44.0, palette)
-            });
+    let columns = drawer.result_columns();
+    let cells = hits
+        .into_iter()
+        .take(drawer::RESULT_ROWS * columns)
+        .enumerate()
+        .map(|(index, (target, identity))| {
+            cell(dock, target, &identity, index == selected, 44.0, palette)
+        });
     column![
         heading("Résultats", detail, palette),
-        grid(cells.collect(), columns)
+        grid(cells.collect(), columns, drawer::APP_GAP)
     ]
     .spacing(8)
     .into()
@@ -482,28 +483,36 @@ fn game_card<'a>(game: &crate::steam::Game, height: f32, palette: Palette) -> El
         .into()
 }
 
-/// The games of the lying launcher: a column of the ones played last.
-fn games_column<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+/// The games of the lying launcher: a column of the ones played last, in
+/// as many columns of cards as its width holds.
+fn games_column<'a>(
+    dock: &'a Dock,
+    layout: &drawer::LyingLayout,
+    palette: Palette,
+) -> Element<'a, Message> {
     let count = dock.games.len();
     let title = text("Jeux")
         .size(15)
         .font(style::SEMIBOLD)
         .color(palette.text);
-    let mut cards: Column<'_, Message> = column![title].spacing(6);
+    let cards: Column<'_, Message> = column![title].spacing(drawer::GAME_GAP);
     if count == 0 {
         let nothing = text("Aucun jeu Steam installé.")
             .size(12)
             .color(palette.muted);
         return cards.push(nothing).into();
     }
-    for game in dock.games.iter().take(3) {
-        cards = cards.push(game_card(game, 62.0, palette));
-    }
+    let shown = dock
+        .games
+        .iter()
+        .take(layout.games_shown())
+        .map(|game| game_card(game, 62.0, palette));
     let library = text(format!("Toute la ludothèque · {count} ›"))
         .size(12)
         .font(style::MEDIUM)
         .color(palette.text);
     cards
+        .push(grid(shown.collect(), layout.game_columns, drawer::GAME_GAP))
         .push(
             button(library)
                 .padding(Padding::from([5.0, 10.0]))
@@ -1165,7 +1174,9 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
 
     let screen = drawer.surface.map_or(1920.0, |surface| surface.width);
-    let layout = drawer::lying_layout(screen);
+    let layout = drawer
+        .lying_layout()
+        .unwrap_or(drawer::lying_layout(1920.0, 1080.0));
     let bar_room = dock.metrics().exclusive_zone_for(Orientation::Horizontal) as f32;
 
     let mut columns: Vec<Element<'_, Message>> = Vec::new();
@@ -1177,11 +1188,12 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
         apps = apps.push(applications(dock, drawer, palette));
         columns.push(apps.width(layout.apps).into());
         if let Some(games) = layout.games {
-            columns.push(container(games_column(dock, palette)).width(games).into());
+            let column = games_column(dock, &layout, palette);
+            columns.push(container(column).width(games).into());
         }
     } else {
         // The results take the place of the applications and the games.
-        let wide = layout.apps + layout.games.map_or(0.0, |games| games + drawer::LYING_GAP);
+        let wide = layout.results();
         columns.push(container(results(dock, drawer, palette)).width(wide).into());
     }
     columns.push(

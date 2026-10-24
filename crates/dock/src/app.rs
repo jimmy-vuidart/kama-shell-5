@@ -25,7 +25,7 @@ use crate::backend::{
 use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::battery::{self, Alert, Battery, Charge};
-use crate::model::drawer::{self, Step};
+use crate::model::drawer::{self, LyingLayout, Step};
 use crate::model::mixer::{self, Volumes};
 use crate::model::notify::{
     CloseReason, Icon as NoticeIcon, Notice, NotifyState, ToastAnchor, ToastGeometry,
@@ -132,6 +132,36 @@ pub struct Drawer {
     pub resizing: bool,
     /// The size of the screen it is on, once the surface says.
     pub surface: Option<Size>,
+}
+
+impl Drawer {
+    /// How the launcher above a lying bar shares its screen out; before its
+    /// surface says how large the screen is, as on a 16:9 one.
+    pub fn lying_layout(&self) -> Option<LyingLayout> {
+        if self.orientation != Orientation::Horizontal {
+            return None;
+        }
+        let screen = self.surface.unwrap_or(Size::new(1920.0, 1080.0));
+        Some(drawer::lying_layout(screen.width, screen.height))
+    }
+
+    /// How many columns the grid of applications has.
+    pub fn app_columns(&self) -> usize {
+        let layout = self.lying_layout();
+        layout.map_or(drawer::COLUMNS, |layout| layout.app_columns)
+    }
+
+    /// How many applications a page of the grid holds.
+    pub fn page_size(&self) -> usize {
+        let layout = self.lying_layout();
+        layout.map_or(drawer::COLUMNS * drawer::ROWS, |layout| layout.page())
+    }
+
+    /// How many columns the results of a search have.
+    pub fn result_columns(&self) -> usize {
+        let layout = self.lying_layout();
+        layout.map_or(drawer::COLUMNS, |layout| layout.result_columns)
+    }
 }
 
 /// Overlay of the toasts on screen, in the bottom corner on one bar's side.
@@ -892,7 +922,8 @@ impl Dock {
             "installed applications read again"
         );
         if let Some(drawer) = &mut self.drawer {
-            drawer.page = drawer.page.min(drawer::page_count(self.apps.len()) - 1);
+            let pages = drawer::page_count(self.apps.len(), drawer.page_size());
+            drawer.page = drawer.page.min(pages - 1);
             drawer.selected = None;
         }
         // The favorites are told apart by application: read them again.
@@ -1826,7 +1857,7 @@ impl Dock {
                     return Task::none();
                 };
                 let target = if drawer.query.trim().is_empty() {
-                    let apps = drawer::page(&self.apps, drawer.page);
+                    let apps = drawer::page(&self.apps, drawer.page, drawer.page_size());
                     drawer
                         .selected
                         .and_then(|index| apps.get(index))
@@ -1843,14 +1874,16 @@ impl Dock {
             }
             Message::Page(page) => {
                 if let Some(drawer) = &mut self.drawer {
-                    drawer.page = page.min(drawer::page_count(self.apps.len()) - 1);
+                    let pages = drawer::page_count(self.apps.len(), drawer.page_size());
+                    drawer.page = page.min(pages - 1);
                     drawer.selected = None;
                 }
                 Task::none()
             }
             Message::TurnPage(forward) => {
                 if let Some(drawer) = &mut self.drawer {
-                    drawer.page = drawer::turn_page(drawer.page, self.apps.len(), forward);
+                    let size = drawer.page_size();
+                    drawer.page = drawer::turn_page(drawer.page, self.apps.len(), size, forward);
                     drawer.selected = None;
                 }
                 Task::none()
@@ -2189,13 +2222,18 @@ impl Dock {
             Named::ArrowDown => Step::Down,
             _ => return Task::none(),
         };
-        let count = if open.query.trim().is_empty() {
-            drawer::page(&self.apps, open.page).len()
+        let (count, columns) = if open.query.trim().is_empty() {
+            let page = drawer::page(&self.apps, open.page, open.page_size());
+            (page.len(), open.app_columns())
         } else {
-            self.hits(&open.query).len()
+            let shown = drawer::RESULT_ROWS * open.result_columns();
+            (
+                self.hits(&open.query).len().min(shown),
+                open.result_columns(),
+            )
         };
         if let Some(open) = &mut self.drawer {
-            open.selected = drawer::step(open.selected, count, drawer::COLUMNS, step);
+            open.selected = drawer::step(open.selected, count, columns, step);
         }
         Task::none()
     }

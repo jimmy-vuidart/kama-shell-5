@@ -6,10 +6,12 @@ use coquille_model::OutputRole;
 
 use super::Identity;
 
-/// The grid of applications: six columns of three rows per page.
+/// The grid of applications: six columns of three rows per page, more
+/// columns in a wide horizontal launcher.
 pub const COLUMNS: usize = 6;
 pub const ROWS: usize = 3;
-pub const PAGE: usize = COLUMNS * ROWS;
+/// How many rows of results a search shows.
+pub const RESULT_ROWS: usize = 4;
 
 /// The width of the drawer unless the user gave it another one.
 pub const DEFAULT_WIDTH: u32 = 640;
@@ -70,9 +72,25 @@ const NARROWEST_SIDE: f32 = 280.0;
 /// Narrower, the six columns of applications are no longer readable: the
 /// games give their place first.
 const NARROWEST_APPS: f32 = 540.0;
-/// The columns of a very wide screen keep together, centered, rather than
-/// stretch the grid of applications over it.
-const WIDEST_ROW: f32 = 1900.0;
+/// Up to this width (what a 16:9 screen of 1920 gives them), the
+/// applications take what the screen adds; beyond, they share it equally
+/// with the games.
+const ROOMY_APPS: f32 = 910.0;
+/// The row of columns is at most this many times as wide as the screen is
+/// high: a 16:9 or a 21:9 screen is filled from edge to edge, a wider one
+/// keeps it together, centered.
+const WIDEST_SHAPE: f32 = 2.4;
+/// The narrowest a cell of applications gets before the grid takes one
+/// more column, the gap after it included.
+const APP_CELL: f32 = 144.0;
+/// The gap between the cells of applications.
+pub const APP_GAP: f32 = 4.0;
+/// Likewise for a card of games, the gap between cards included.
+const GAME_CARD: f32 = 266.0;
+/// The gap between the cards of games.
+pub const GAME_GAP: f32 = 6.0;
+/// How many rows of games the column shows.
+pub const GAME_ROWS: usize = 3;
 
 /// How the horizontal launcher, as wide as its screen, shares it out.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,6 +102,13 @@ pub struct LyingLayout {
     pub games: Option<f32>,
     pub notices: f32,
     pub control: f32,
+    /// How many columns the grid of applications has.
+    pub app_columns: usize,
+    /// How many columns of cards the games have.
+    pub game_columns: usize,
+    /// How many columns the results of a search have: they take the place
+    /// of the applications and the games.
+    pub result_columns: usize,
 }
 
 impl LyingLayout {
@@ -91,33 +116,62 @@ impl LyingLayout {
     pub fn margin(&self, screen: f32) -> f32 {
         ((screen - self.row) / 2.0).max(0.0)
     }
+
+    /// How many applications a page of the grid holds.
+    pub fn page(&self) -> usize {
+        self.app_columns * ROWS
+    }
+
+    /// The width the results of a search take.
+    pub fn results(&self) -> f32 {
+        self.apps + self.games.map_or(0.0, |games| games + LYING_GAP)
+    }
+
+    /// How many games the column shows.
+    pub fn games_shown(&self) -> usize {
+        self.game_columns * GAME_ROWS
+    }
 }
 
-/// The columns of the horizontal launcher on a screen of a given width:
-/// applications, games, notifications, control center. Only the
-/// applications grow with the screen.
-pub fn lying_layout(screen: f32) -> LyingLayout {
-    let row = (screen - 2.0 * LYING_PADDING).clamp(0.0, WIDEST_ROW);
-    let with_games = row - GAMES_COLUMN - 2.0 * SIDE_COLUMN - 3.0 * LYING_GAP;
-    if with_games >= NARROWEST_APPS {
-        return LyingLayout {
-            row,
-            apps: with_games,
-            games: Some(GAMES_COLUMN),
-            notices: SIDE_COLUMN,
-            control: SIDE_COLUMN,
-        };
-    }
-    let apps = row - 2.0 * SIDE_COLUMN - 2.0 * LYING_GAP;
-    let shrink = ((NARROWEST_APPS - apps) / 2.0).clamp(0.0, SIDE_COLUMN - NARROWEST_SIDE);
-    let side = SIDE_COLUMN - shrink;
-    LyingLayout {
+/// How many cells fit in `width`, each `cell` wide with the gap after it,
+/// never fewer than `least`.
+fn fitting(width: f32, cell: f32, gap: f32, least: usize) -> usize {
+    let fit = ((width + gap) / cell).floor();
+    (fit.max(0.0) as usize).max(least)
+}
+
+/// The columns of the horizontal launcher on a screen of a given size:
+/// applications, games, notifications, control center. The notifications
+/// and the control center keep their width; the applications and the
+/// games grow with the screen.
+pub fn lying_layout(width: f32, height: f32) -> LyingLayout {
+    let widest = if height.is_finite() && height > 0.0 {
+        height * WIDEST_SHAPE
+    } else {
+        f32::MAX
+    };
+    let row = (width - 2.0 * LYING_PADDING).clamp(0.0, widest);
+    let free = row - GAMES_COLUMN - 2.0 * SIDE_COLUMN - 3.0 * LYING_GAP;
+    let (apps, games, side) = if free >= NARROWEST_APPS {
+        let extra = ((free - ROOMY_APPS) / 2.0).max(0.0);
+        (free - extra, Some(GAMES_COLUMN + extra), SIDE_COLUMN)
+    } else {
+        let apps = row - 2.0 * SIDE_COLUMN - 2.0 * LYING_GAP;
+        let shrink = ((NARROWEST_APPS - apps) / 2.0).clamp(0.0, SIDE_COLUMN - NARROWEST_SIDE);
+        ((apps + 2.0 * shrink).max(0.0), None, SIDE_COLUMN - shrink)
+    };
+    let mut layout = LyingLayout {
         row,
-        apps: (apps + 2.0 * shrink).max(0.0),
-        games: None,
+        apps,
+        games,
         notices: side,
         control: side,
-    }
+        app_columns: fitting(apps, APP_CELL, APP_GAP, COLUMNS),
+        game_columns: games.map_or(0, |games| fitting(games, GAME_CARD, GAME_GAP, 1)),
+        result_columns: COLUMNS,
+    };
+    layout.result_columns = fitting(layout.results(), APP_CELL, APP_GAP, COLUMNS);
+    layout
 }
 
 /// A text as it is compared: without case nor accents, so that "editeur"
@@ -155,9 +209,10 @@ pub fn sort_by_name<T>(items: &mut [T], name: impl Fn(&T) -> &str) {
     });
 }
 
-/// How many pages `count` applications take; an empty drawer still has one.
-pub fn page_count(count: usize) -> usize {
-    count.div_ceil(PAGE).max(1)
+/// How many pages `count` applications take, `size` to a page; an empty
+/// drawer still has one.
+pub fn page_count(count: usize, size: usize) -> usize {
+    count.div_ceil(size.max(1)).max(1)
 }
 
 /// How many page buttons the pager shows at most.
@@ -175,17 +230,18 @@ pub fn page_buttons(page: usize, pages: usize) -> std::ops::Range<usize> {
     first..first + PAGE_BUTTONS
 }
 
-/// The applications of a page, numbered from 0. A page past the last one
-/// is the last one.
-pub fn page<T>(items: &[T], page: usize) -> &[T] {
-    let page = page.min(page_count(items.len()) - 1);
-    let start = page * PAGE;
-    &items[start.min(items.len())..(start + PAGE).min(items.len())]
+/// The applications of a page, numbered from 0, `size` to a page. A page
+/// past the last one is the last one.
+pub fn page<T>(items: &[T], page: usize, size: usize) -> &[T] {
+    let size = size.max(1);
+    let page = page.min(page_count(items.len(), size) - 1);
+    let start = page * size;
+    &items[start.min(items.len())..(start + size).min(items.len())]
 }
 
 /// The page shown after a notch of the wheel, or a swipe.
-pub fn turn_page(current: usize, count: usize, forward: bool) -> usize {
-    let last = page_count(count) - 1;
+pub fn turn_page(current: usize, count: usize, size: usize, forward: bool) -> usize {
+    let last = page_count(count, size) - 1;
     if forward {
         (current + 1).min(last)
     } else {
@@ -194,8 +250,8 @@ pub fn turn_page(current: usize, count: usize, forward: bool) -> usize {
 }
 
 /// The line under the title of the grid: "47 · de A à Z · page 1 sur 3".
-pub fn summary(count: usize, page: usize) -> String {
-    let pages = page_count(count);
+pub fn summary(count: usize, page: usize, size: usize) -> String {
+    let pages = page_count(count, size);
     let page = page.min(pages - 1) + 1;
     format!("{count} · de A à Z · page {page} sur {pages}")
 }
@@ -324,6 +380,8 @@ pub fn step(selected: Option<usize>, count: usize, columns: usize, step: Step) -
 mod tests {
     use super::*;
 
+    const PAGE: usize = COLUMNS * ROWS;
+
     fn names(count: usize) -> Vec<String> {
         (0..count).map(|index| format!("app {index:02}")).collect()
     }
@@ -387,29 +445,65 @@ mod tests {
 
     #[test]
     fn the_horizontal_launcher_gives_the_applications_what_the_screen_adds() {
-        let layout = lying_layout(1920.0);
+        let layout = lying_layout(1920.0, 1080.0);
         assert_eq!(layout.row, 1892.0);
         assert_eq!(layout.games, Some(260.0));
         assert_eq!((layout.notices, layout.control), (340.0, 340.0));
         assert_eq!(layout.apps, 1892.0 - 260.0 - 680.0 - 42.0);
         assert_eq!(layout.margin(1920.0), 14.0);
+        // Six columns of applications, one of games, as before.
+        assert_eq!((layout.app_columns, layout.game_columns), (6, 1));
+        assert_eq!(layout.page(), PAGE);
+        assert_eq!(layout.games_shown(), 3);
     }
 
     #[test]
-    fn on_a_very_wide_screen_the_columns_keep_together_centered() {
-        let layout = lying_layout(3440.0);
-        assert_eq!(layout.row, WIDEST_ROW);
-        assert_eq!(layout.margin(3440.0), (3440.0 - WIDEST_ROW) / 2.0);
+    fn a_wider_screen_shares_what_it_adds_between_applications_and_games() {
+        let narrow = lying_layout(1920.0, 1080.0);
+        let wide = lying_layout(2560.0, 1440.0);
+        let games = |layout: LyingLayout| layout.games.unwrap();
+        assert_eq!(wide.row, 2532.0);
+        assert_eq!(wide.apps - narrow.apps, games(wide) - games(narrow));
+        assert_eq!((wide.notices, wide.control), (340.0, 340.0));
+        assert!(wide.app_columns > narrow.app_columns);
+        assert!(wide.game_columns > narrow.game_columns);
+        let used = wide.apps + games(wide) + wide.notices + wide.control + 3.0 * LYING_GAP;
+        assert_eq!(used, wide.row);
+    }
+
+    #[test]
+    fn an_ultra_wide_screen_is_filled_from_edge_to_edge() {
+        let layout = lying_layout(3440.0, 1440.0);
+        assert_eq!(layout.row, 3440.0 - 2.0 * LYING_PADDING);
+        assert_eq!((layout.notices, layout.control), (340.0, 340.0));
+        assert_eq!(
+            layout.apps - ROOMY_APPS,
+            layout.games.unwrap() - GAMES_COLUMN
+        );
+        assert_eq!((layout.app_columns, layout.game_columns), (11, 3));
+        assert_eq!(layout.page(), 33);
+        assert_eq!(layout.games_shown(), 9);
+        // The results of a search take both columns.
+        assert!(layout.result_columns > layout.app_columns);
+    }
+
+    #[test]
+    fn on_a_wider_screen_still_the_columns_keep_together_centered() {
+        let layout = lying_layout(5120.0, 1440.0);
+        assert_eq!(layout.row, 1440.0 * WIDEST_SHAPE);
+        assert_eq!(layout.margin(5120.0), (5120.0 - layout.row) / 2.0);
     }
 
     #[test]
     fn on_a_narrow_screen_the_games_give_their_place_first() {
-        let layout = lying_layout(1280.0);
+        let layout = lying_layout(1280.0, 800.0);
         assert_eq!(layout.games, None);
+        assert_eq!(layout.game_columns, 0);
         assert_eq!(layout.notices, 340.0);
         assert!(layout.apps >= NARROWEST_APPS);
+        assert_eq!(layout.app_columns, COLUMNS);
         // Narrower still, the notifications and the control center shrink.
-        let layout = lying_layout(1024.0);
+        let layout = lying_layout(1024.0, 768.0);
         assert_eq!(layout.notices, NARROWEST_SIDE);
         assert_eq!(layout.control, NARROWEST_SIDE);
         let used = layout.apps + layout.notices + layout.control + 2.0 * LYING_GAP;
@@ -445,48 +539,48 @@ mod tests {
     fn forty_seven_applications_take_three_pages() {
         let apps = names(47);
 
-        assert_eq!(page_count(apps.len()), 3);
-        assert_eq!(page(&apps, 0).len(), 18);
-        assert_eq!(page(&apps, 1).first().unwrap(), "app 18");
-        assert_eq!(page(&apps, 2).len(), 11);
-        assert_eq!(page(&apps, 2).last().unwrap(), "app 46");
+        assert_eq!(page_count(apps.len(), PAGE), 3);
+        assert_eq!(page(&apps, 0, PAGE).len(), 18);
+        assert_eq!(page(&apps, 1, PAGE).first().unwrap(), "app 18");
+        assert_eq!(page(&apps, 2, PAGE).len(), 11);
+        assert_eq!(page(&apps, 2, PAGE).last().unwrap(), "app 46");
     }
 
     #[test]
     fn a_full_last_page_does_not_add_an_empty_one() {
-        assert_eq!(page_count(36), 2);
-        assert_eq!(page_count(37), 3);
+        assert_eq!(page_count(36, PAGE), 2);
+        assert_eq!(page_count(37, PAGE), 3);
     }
 
     #[test]
     fn an_empty_drawer_has_one_empty_page() {
         let apps = names(0);
 
-        assert_eq!(page_count(0), 1);
-        assert!(page(&apps, 0).is_empty());
+        assert_eq!(page_count(0, PAGE), 1);
+        assert!(page(&apps, 0, PAGE).is_empty());
     }
 
     #[test]
     fn a_page_past_the_end_is_the_last_one() {
         let apps = names(20);
 
-        assert_eq!(page(&apps, 7), ["app 18", "app 19"]);
+        assert_eq!(page(&apps, 7, PAGE), ["app 18", "app 19"]);
     }
 
     #[test]
     fn the_wheel_turns_pages_and_stops_at_both_ends() {
-        assert_eq!(turn_page(0, 47, true), 1);
-        assert_eq!(turn_page(2, 47, true), 2);
-        assert_eq!(turn_page(1, 47, false), 0);
-        assert_eq!(turn_page(0, 47, false), 0);
-        assert_eq!(turn_page(9, 47, false), 1);
+        assert_eq!(turn_page(0, 47, PAGE, true), 1);
+        assert_eq!(turn_page(2, 47, PAGE, true), 2);
+        assert_eq!(turn_page(1, 47, PAGE, false), 0);
+        assert_eq!(turn_page(0, 47, PAGE, false), 0);
+        assert_eq!(turn_page(9, 47, PAGE, false), 1);
     }
 
     #[test]
     fn the_summary_counts_applications_and_pages() {
-        assert_eq!(summary(47, 0), "47 · de A à Z · page 1 sur 3");
-        assert_eq!(summary(47, 2), "47 · de A à Z · page 3 sur 3");
-        assert_eq!(summary(0, 0), "0 · de A à Z · page 1 sur 1");
+        assert_eq!(summary(47, 0, PAGE), "47 · de A à Z · page 1 sur 3");
+        assert_eq!(summary(47, 2, PAGE), "47 · de A à Z · page 3 sur 3");
+        assert_eq!(summary(0, 0, PAGE), "0 · de A à Z · page 1 sur 1");
     }
 
     #[test]

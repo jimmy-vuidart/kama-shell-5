@@ -85,10 +85,17 @@ les mesures.
 Le lanceur d'une barre horizontale est lui aussi un tiroir, **sur toute la
 largeur** de l'écran (comme le vertical est sur toute sa hauteur), qui monte
 du bord bas avec la barre dans son pied : recherche, puis quatre colonnes,
-Épinglées et Applications (seules à s'élargir avec l'écran), Jeux (cédés en
-premier sur un écran étroit), Notifications et centre de contrôle (340 px).
-Sur un écran très large, les colonnes restent groupées au milieu (1900 px au
-plus). Le mixeur s'ouvre au-dessus du centre de contrôle.
+Épinglées et Applications, Jeux (cédés en premier sur un écran étroit),
+Notifications et centre de contrôle (340 px, et toujours la même hauteur).
+Sur un écran de 1920 px, les applications ont 6 colonnes et les jeux une
+(3 jeux). Au-delà, ce que l'écran ajoute est partagé à parts égales entre
+applications et jeux, qui prennent autant de colonnes que la place en
+permet (une colonne d'applis tous les 144 px, une de jeux tous les 266 px,
+toujours 3 lignes) : en 2560 px, 8 colonnes d'applis et 6 jeux ; en 21:9
+(3440 px), 11 colonnes d'applis (33 par page) et 9 jeux. La rangée remplit
+l'écran d'un bord à l'autre jusqu'au 21:9 ; plus large (32:9), elle reste
+groupée au milieu, 2,4 fois aussi large que l'écran est haut. Le mixeur
+s'ouvre au-dessus du centre de contrôle.
 
 ## Mixeur
 
