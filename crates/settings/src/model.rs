@@ -19,17 +19,19 @@ pub enum Page {
     Audio,
     Game,
     Mouse,
+    Shortcuts,
     System,
 }
 
 impl Page {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Screens,
         Self::Audio,
         Self::Game,
         Self::Mouse,
+        Self::Shortcuts,
         Self::System,
     ];
 
@@ -41,6 +43,7 @@ impl Page {
             Self::Audio => "Son",
             Self::Game => "Mode jeu",
             Self::Mouse => "Souris et pavé",
+            Self::Shortcuts => "Raccourcis clavier",
             Self::System => "Système",
         }
     }
@@ -59,6 +62,7 @@ impl Page {
                 "La vitesse du pointeur, le profil d'accélération, le défilement et le pavé \
                  tactile."
             }
+            Self::Shortcuts => "Les raccourcis clavier et gestes du shell, en lecture seule.",
             Self::System => "Le clavier, le terminal et les applications X11.",
         }
     }
@@ -505,6 +509,131 @@ pub fn load_audio_sinks(settings: &Settings) -> Vec<AudioDeviceCard> {
     parse_audio_sinks(&sinks_json, default_sink.as_deref(), settings)
 }
 
+/// A group of keyboard shortcuts shown on the shortcuts page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShortcutGroup {
+    pub title: &'static str,
+    pub entries: &'static [ShortcutEntry],
+}
+
+/// A single keyboard shortcut and what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShortcutEntry {
+    pub title: &'static str,
+    pub detail: &'static str,
+    /// The keys or chord to press, shown as keycaps separated by `+`.
+    pub keys: &'static [&'static str],
+}
+
+/// The keyboard shortcuts and modifier gestures of the shell, grouped by section.
+pub const SHORTCUT_GROUPS: [ShortcutGroup; 4] = [
+    ShortcutGroup {
+        title: "Lanceur et applications",
+        entries: &[
+            ShortcutEntry {
+                title: "Tiroir d'applications",
+                detail: "Ouvre ou ferme le tiroir du dock (flèches et Page suiv./préc. pour naviguer, Échap pour fermer).",
+                keys: &["Super"],
+            },
+            ShortcutEntry {
+                title: "Terminal",
+                detail: "Ouvre le terminal choisi dans la page Système.",
+                keys: &["Super", "Entrée"],
+            },
+            ShortcutEntry {
+                title: "Paramètres",
+                detail: "Ouvre cette fenêtre de paramètres.",
+                keys: &["Super", "S"],
+            },
+            ShortcutEntry {
+                title: "Capture d'écran",
+                detail: "Sélectionne une région de l'écran à capturer (Échap pour annuler).",
+                keys: &["Impr. écran"],
+            },
+        ],
+    },
+    ShortcutGroup {
+        title: "Fenêtres et navigation",
+        entries: &[
+            ShortcutEntry {
+                title: "Fenêtre suivante",
+                detail: "Ouvre le sélecteur de fenêtres dans l'ordre d'utilisation (flèches pour choisir, Échap pour annuler).",
+                keys: &["Alt", "Tab"],
+            },
+            ShortcutEntry {
+                title: "Fenêtre précédente",
+                detail: "Recule dans le sélecteur de fenêtres.",
+                keys: &["Alt", "Maj", "Tab"],
+            },
+            ShortcutEntry {
+                title: "Onglet suivant",
+                detail: "Affiche la fenêtre suivante dans la pile de l'emplacement actif.",
+                keys: &["Super", "Page suiv."],
+            },
+            ShortcutEntry {
+                title: "Onglet précédent",
+                detail: "Affiche la fenêtre précédente dans la pile de l'emplacement actif.",
+                keys: &["Super", "Page préc."],
+            },
+            ShortcutEntry {
+                title: "Restaurer une fenêtre réduite",
+                detail: "Ramène la dernière fenêtre qui a été réduite.",
+                keys: &["Super", "R"],
+            },
+            ShortcutEntry {
+                title: "Ranger une fenêtre",
+                detail: "Affiche les emplacements des écrans pour y déposer la fenêtre (Échap pendant un glisser annule).",
+                keys: &["Super", "Glisser"],
+            },
+            ShortcutEntry {
+                title: "Redimensionner les colonnes",
+                detail: "Ajuste la largeur de deux colonnes sur leur séparation.",
+                keys: &["Super", "Glisser"],
+            },
+        ],
+    },
+    ShortcutGroup {
+        title: "Mode jeu",
+        entries: &[
+            ShortcutEntry {
+                title: "Quitter le plein écran",
+                detail: "Remet le jeu ancré en fenêtre.",
+                keys: &["Super", "Échap"],
+            },
+            ShortcutEntry {
+                title: "Libérer le pointeur",
+                detail: "Libère le curseur retenu par le jeu et ouvre le tiroir jusqu'au prochain clic dans le jeu.",
+                keys: &["Super"],
+            },
+        ],
+    },
+    ShortcutGroup {
+        title: "Matériel et session",
+        entries: &[
+            ShortcutEntry {
+                title: "Luminosité de l'écran",
+                detail: "Augmente ou diminue la luminosité sur un portable, même en jeu.",
+                keys: &["Luminosité −/+"],
+            },
+            ShortcutEntry {
+                title: "Quitter la session",
+                detail: "Ferme coquille et met fin à la session graphique.",
+                keys: &["Super", "Maj", "E"],
+            },
+            ShortcutEntry {
+                title: "Quitter la session (secours)",
+                detail: "Arrête coquille même si la touche Super ne répond pas.",
+                keys: &["Ctrl", "Alt", "Retour arrière"],
+            },
+            ShortcutEntry {
+                title: "Changer de console virtuelle",
+                detail: "Bascule vers un autre terminal système (VT 1 à 12).",
+                keys: &["Ctrl", "Alt", "F1…F12"],
+            },
+        ],
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use coquille_ipc::Screen;
@@ -762,6 +891,21 @@ mod tests {
         for page in Page::ALL {
             assert!(!page.name().is_empty());
             assert!(!page.summary().is_empty());
+        }
+    }
+
+    #[test]
+    fn every_shortcut_group_and_entry_is_complete() {
+        assert!(!SHORTCUT_GROUPS.is_empty());
+        for group in SHORTCUT_GROUPS {
+            assert!(!group.title.is_empty());
+            assert!(!group.entries.is_empty());
+            for entry in group.entries {
+                assert!(!entry.title.is_empty());
+                assert!(!entry.detail.is_empty());
+                assert!(!entry.keys.is_empty());
+                assert!(entry.keys.iter().all(|key| !key.is_empty()));
+            }
         }
     }
 

@@ -32,7 +32,7 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 | Option | Effet |
 |---|---|
 | `--config FICHIER` | Fichier de configuration (défaut : `~/.config/coquille/config.toml`). |
-| `--page PAGE` | Page d'ouverture : `appearance`, `wallpaper`, `screens`, `game`, `mouse`, `system`. |
+| `--page PAGE` | Page d'ouverture : `appearance`, `wallpaper`, `screens`, `audio`, `game`, `mouse`, `shortcuts`, `system`. |
 
 ## Les pages
 
@@ -47,6 +47,7 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 | Mode jeu | bords collants et leur délai, affichage direct, fréquence variable | aussitôt |
 | Souris et pavé | vitesse du pointeur, profil d'accélération, défilement naturel, inversion des boutons | aussitôt |
 | | pavé tactile (s'il y en a un, ou hors de coquille) : toucher pour cliquer, toucher puis glisser, clic droit à deux doigts ou dans le coin, défilement naturel, coupure pendant la frappe, vitesse | aussitôt |
+| Raccourcis clavier | raccourcis clavier et gestes du shell | lecture seule |
 | Système | disposition et variante du clavier, terminal | aussitôt |
 | | applications X11 (XWayland) | **au prochain démarrage** |
 

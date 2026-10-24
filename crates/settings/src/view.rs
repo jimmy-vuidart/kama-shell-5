@@ -81,7 +81,8 @@ fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, M
         Page::Audio => Glyph::Volume,
         Page::Game => Glyph::Gamepad,
         Page::Mouse => Glyph::Mouse,
-        Page::System => Glyph::Keyboard,
+        Page::Shortcuts => Glyph::Keyboard,
+        Page::System => Glyph::Sliders,
     };
     let (color, font) = if current {
         (palette.text, style::SEMIBOLD)
@@ -134,6 +135,7 @@ fn page<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         Page::Audio => audio(app, palette),
         Page::Game => game(app, palette),
         Page::Mouse => mouse(app, palette),
+        Page::Shortcuts => shortcuts(palette),
         Page::System => system(app, palette),
     };
     let content = content.push(settings);
@@ -1108,6 +1110,56 @@ fn touchpad<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         ),
     ];
     card(rows, palette)
+}
+
+fn shortcuts<'a>(palette: Palette) -> Element<'a, Message> {
+    let mut content: Column<'_, Message> = column![].spacing(18);
+    for group in model::SHORTCUT_GROUPS {
+        let rows = group
+            .entries
+            .iter()
+            .map(|entry| {
+                setting(
+                    entry.title,
+                    entry.detail,
+                    None,
+                    keycaps(entry.keys, palette),
+                    palette,
+                )
+            })
+            .collect();
+        content = content.push(section(group.title, card(rows, palette), palette));
+    }
+    let notes = column![
+        text("Ces raccourcis sont pour le moment en lecture seule.")
+            .size(12)
+            .color(palette.muted),
+        text("En session imbriquée (écrans simulés), la touche Alt remplace Super.")
+            .size(12)
+            .color(palette.muted),
+    ]
+    .spacing(4);
+    content.push(notes).into()
+}
+
+/// Keycap badges joined by `+`.
+fn keycaps<'a>(keys: &'static [&'static str], palette: Palette) -> Element<'a, Message> {
+    let mut line: Row<'_, Message> = row![].spacing(6).align_y(Alignment::Center);
+    for (index, key) in keys.iter().enumerate() {
+        if index > 0 {
+            line = line.push(text("+").size(12).font(style::MEDIUM).color(palette.muted));
+        }
+        let cap = container(
+            text(*key)
+                .size(12)
+                .font(style::SEMIBOLD)
+                .color(palette.text),
+        )
+        .padding(Padding::from([5.0, 10.0]))
+        .style(move |_| style::outlined(palette.card, palette.rim, 6.0));
+        line = line.push(cap);
+    }
+    line.into()
 }
 
 fn system<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
