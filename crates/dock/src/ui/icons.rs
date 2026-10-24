@@ -108,6 +108,9 @@ pub fn app<'a, Message: 'a>(icons: &Icons, identity: &Identity, size: f32) -> El
     }
 }
 
+/// The share of the box of an icon that the plate carrying its shadow takes.
+const PLATE: f32 = 0.76;
+
 /// The icon of an application on a tile of the dock: a rounded square of
 /// `side`, centered in a box of `slot`, with a faint shadow. Every icon is
 /// drawn as those of Reversal, whose rounded square fills `side` of a box of
@@ -127,12 +130,15 @@ pub fn tile<'a, Message: 'a>(
         palette.tile_shadow()
     };
     let found = identity.icon.as_deref().and_then(|name| icons.get(name));
-    // Under the icon, the plate only carries the shadow: a pixel smaller,
-    // it never shows past a rounded square that fills the tile.
+    // Under the icon, the plate only carries the shadow: without a color of
+    // its own, and well inside the rounded square of any icon (Reversal's
+    // fills 86 % of its box, the ones made for macOS 80 %), it never shows
+    // past one.
+    let plate_side = (slot * PLATE).round();
     let plate =
-        container(space().width(side - 2.0).height(side - 2.0)).style(move |_| container::Style {
+        container(space().width(plate_side).height(plate_side)).style(move |_| container::Style {
             shadow,
-            ..style::fill(palette.glass_strong, radius)
+            ..style::fill(Color::TRANSPARENT, radius)
         });
     let picture: Element<'a, Message> = if identity.cover.is_none() && found.is_some() {
         app(icons, identity, slot)
