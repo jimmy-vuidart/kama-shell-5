@@ -135,32 +135,41 @@ pub struct Drawer {
 }
 
 impl Drawer {
-    /// How the launcher above a lying bar shares its screen out; before its
-    /// surface says how large the screen is, as on a 16:9 one.
-    pub fn lying_layout(&self) -> Option<LyingLayout> {
+    /// How the launcher above a lying bar shares its screen out, with or
+    /// without `pinned` applications above the grid; before its surface
+    /// says how large the screen is, as on a 16:9 one.
+    pub fn lying_layout(&self, pinned: bool) -> Option<LyingLayout> {
         if self.orientation != Orientation::Horizontal {
             return None;
         }
         let screen = self.surface.unwrap_or(Size::new(1920.0, 1080.0));
-        Some(drawer::lying_layout(screen.width, screen.height))
+        let layout = drawer::lying_layout(screen.width, screen.height, self.height, pinned);
+        Some(layout)
     }
 
     /// How many columns the grid of applications has.
-    pub fn app_columns(&self) -> usize {
-        let layout = self.lying_layout();
+    pub fn app_columns(&self, pinned: bool) -> usize {
+        let layout = self.lying_layout(pinned);
         layout.map_or(drawer::COLUMNS, |layout| layout.app_columns)
     }
 
     /// How many applications a page of the grid holds.
-    pub fn page_size(&self) -> usize {
-        let layout = self.lying_layout();
+    pub fn page_size(&self, pinned: bool) -> usize {
+        let layout = self.lying_layout(pinned);
         layout.map_or(drawer::COLUMNS * drawer::ROWS, |layout| layout.page())
     }
 
     /// How many columns the results of a search have.
     pub fn result_columns(&self) -> usize {
-        let layout = self.lying_layout();
+        let layout = self.lying_layout(false);
         layout.map_or(drawer::COLUMNS, |layout| layout.result_columns)
+    }
+
+    /// How many results a search shows.
+    pub fn results_shown(&self) -> usize {
+        let layout = self.lying_layout(false);
+        let upright = drawer::COLUMNS * drawer::RESULT_ROWS;
+        layout.map_or(upright, |layout| layout.results_shown())
     }
 }
 
@@ -921,8 +930,9 @@ impl Dock {
             ?before,
             "installed applications read again"
         );
+        let pinned = self.pinned_in_drawer();
         if let Some(drawer) = &mut self.drawer {
-            let pages = drawer::page_count(self.apps.len(), drawer.page_size());
+            let pages = drawer::page_count(self.apps.len(), drawer.page_size(pinned));
             drawer.page = drawer.page.min(pages - 1);
             drawer.selected = None;
         }
@@ -1058,6 +1068,11 @@ impl Dock {
             Some(Size::new(screen.width as f32, screen.height as f32))
         };
         drawer.surface.or_else(told)
+    }
+
+    /// Whether the launcher shows pinned applications above the grid.
+    pub fn pinned_in_drawer(&self) -> bool {
+        !self.config.pinned.is_empty()
     }
 
     /// The width of the drawer when `wanted` is asked for; without it, the
@@ -1857,7 +1872,8 @@ impl Dock {
                     return Task::none();
                 };
                 let target = if drawer.query.trim().is_empty() {
-                    let apps = drawer::page(&self.apps, drawer.page, drawer.page_size());
+                    let size = drawer.page_size(self.pinned_in_drawer());
+                    let apps = drawer::page(&self.apps, drawer.page, size);
                     drawer
                         .selected
                         .and_then(|index| apps.get(index))
@@ -1873,16 +1889,18 @@ impl Dock {
                 }
             }
             Message::Page(page) => {
+                let pinned = self.pinned_in_drawer();
                 if let Some(drawer) = &mut self.drawer {
-                    let pages = drawer::page_count(self.apps.len(), drawer.page_size());
+                    let pages = drawer::page_count(self.apps.len(), drawer.page_size(pinned));
                     drawer.page = page.min(pages - 1);
                     drawer.selected = None;
                 }
                 Task::none()
             }
             Message::TurnPage(forward) => {
+                let pinned = self.pinned_in_drawer();
                 if let Some(drawer) = &mut self.drawer {
-                    let size = drawer.page_size();
+                    let size = drawer.page_size(pinned);
                     drawer.page = drawer::turn_page(drawer.page, self.apps.len(), size, forward);
                     drawer.selected = None;
                 }
@@ -2223,10 +2241,11 @@ impl Dock {
             _ => return Task::none(),
         };
         let (count, columns) = if open.query.trim().is_empty() {
-            let page = drawer::page(&self.apps, open.page, open.page_size());
-            (page.len(), open.app_columns())
+            let pinned = self.pinned_in_drawer();
+            let page = drawer::page(&self.apps, open.page, open.page_size(pinned));
+            (page.len(), open.app_columns(pinned))
         } else {
-            let shown = drawer::RESULT_ROWS * open.result_columns();
+            let shown = open.results_shown();
             (
                 self.hits(&open.query).len().min(shown),
                 open.result_columns(),

@@ -38,8 +38,10 @@ pub fn width(wanted: Option<f32>, screen: Option<f32>) -> u32 {
     u32::try_from(width).unwrap_or(DEFAULT_WIDTH)
 }
 
-/// The height of the horizontal launcher unless the user gave it another.
+/// The height of the horizontal launcher unless the user gave it another,
+/// on a screen of 1080: a taller screen gives it as much more.
 pub const DEFAULT_HEIGHT: u32 = 500;
+const DEFAULT_SCREEN_HEIGHT: f32 = 1080.0;
 /// Lower, its control center no longer fits.
 pub const MIN_HEIGHT: u32 = 480;
 /// What stays free of the horizontal launcher on its screen: the dock under
@@ -47,13 +49,18 @@ pub const MIN_HEIGHT: u32 = 480;
 const FREE_HEIGHT: u32 = 450;
 
 /// The height the horizontal launcher takes when `wanted` is asked for, on
-/// a screen of a given height.
+/// a screen of a given height; without it, a share of the screen.
 pub fn height(wanted: Option<f32>, screen: Option<f32>) -> u32 {
+    let screen = screen.filter(|screen| screen.is_finite() && *screen > 0.0);
     let wanted = wanted.filter(|wanted| wanted.is_finite());
     let Some(wanted) = wanted else {
-        return DEFAULT_HEIGHT;
+        let Some(screen) = screen else {
+            return DEFAULT_HEIGHT;
+        };
+        let share = DEFAULT_HEIGHT as f32 * screen / DEFAULT_SCREEN_HEIGHT;
+        return height(Some(share), Some(screen));
     };
-    let highest = match screen.filter(|screen| screen.is_finite()) {
+    let highest = match screen {
         Some(screen) => (screen.round() as i64 - i64::from(FREE_HEIGHT)).max(MIN_HEIGHT.into()),
         None => i64::from(u16::MAX),
     };
@@ -89,8 +96,24 @@ pub const APP_GAP: f32 = 4.0;
 const GAME_CARD: f32 = 266.0;
 /// The gap between the cards of games.
 pub const GAME_GAP: f32 = 6.0;
-/// How many rows of games the column shows.
-pub const GAME_ROWS: usize = 3;
+/// The heights inside the horizontal launcher, fixed so that it knows how
+/// many rows of applications, games and results its height holds: the
+/// search field and the gap under it, the margin above the bar.
+pub const SEARCH_HEIGHT: f32 = 44.0;
+pub const SEARCH_GAP: f32 = 12.0;
+pub const LYING_FOOT: f32 = 6.0;
+/// A title and its pager, and the gap under it.
+pub const HEADING_HEIGHT: f32 = 28.0;
+pub const HEADING_GAP: f32 = 8.0;
+/// The pinned applications, and the gap under them.
+pub const PINNED_HEIGHT: f32 = 136.0;
+pub const PINNED_GAP: f32 = 10.0;
+/// A row of applications or of results.
+pub const APP_ROW: f32 = 44.0;
+/// A card of games: its picture and its name.
+pub const GAME_CARD_HEIGHT: f32 = 92.0;
+/// The button to the whole library, under the games.
+pub const LIBRARY_HEIGHT: f32 = 26.0;
 
 /// How the horizontal launcher, as wide as its screen, shares it out.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -109,6 +132,13 @@ pub struct LyingLayout {
     /// How many columns the results of a search have: they take the place
     /// of the applications and the games.
     pub result_columns: usize,
+    /// The height of the columns, under the search field. The control
+    /// center keeps its own; the notifications take all of it.
+    pub body: f32,
+    /// How many rows of applications, of games and of results fit in it.
+    pub app_rows: usize,
+    pub game_rows: usize,
+    pub result_rows: usize,
 }
 
 impl LyingLayout {
@@ -119,7 +149,7 @@ impl LyingLayout {
 
     /// How many applications a page of the grid holds.
     pub fn page(&self) -> usize {
-        self.app_columns * ROWS
+        self.app_columns * self.app_rows
     }
 
     /// The width the results of a search take.
@@ -129,7 +159,12 @@ impl LyingLayout {
 
     /// How many games the column shows.
     pub fn games_shown(&self) -> usize {
-        self.game_columns * GAME_ROWS
+        self.game_columns * self.game_rows
+    }
+
+    /// How many results a search shows.
+    pub fn results_shown(&self) -> usize {
+        self.result_columns * self.result_rows
     }
 }
 
@@ -140,11 +175,18 @@ fn fitting(width: f32, cell: f32, gap: f32, least: usize) -> usize {
     (fit.max(0.0) as usize).max(least)
 }
 
-/// The columns of the horizontal launcher on a screen of a given size:
-/// applications, games, notifications, control center. The notifications
-/// and the control center keep their width; the applications and the
-/// games grow with the screen.
-pub fn lying_layout(width: f32, height: f32) -> LyingLayout {
+/// How many rows `row` high, `gap` apart, fit in `room`; at least one.
+fn rows(room: f32, row: f32, gap: f32) -> usize {
+    let fit = ((room + gap) / (row + gap)).floor();
+    (fit.max(0.0) as usize).max(1)
+}
+
+/// The columns of the horizontal launcher, `panel` high, on a screen of a
+/// given size: applications (under the `pinned` ones, if any), games,
+/// notifications, control center. The control center keeps its size; the
+/// applications and the games grow with the screen, in width and height,
+/// and the notifications in height.
+pub fn lying_layout(width: f32, height: f32, panel: f32, pinned: bool) -> LyingLayout {
     let widest = if height.is_finite() && height > 0.0 {
         height * WIDEST_SHAPE
     } else {
@@ -169,8 +211,24 @@ pub fn lying_layout(width: f32, height: f32) -> LyingLayout {
         app_columns: fitting(apps, APP_CELL, APP_GAP, COLUMNS),
         game_columns: games.map_or(0, |games| fitting(games, GAME_CARD, GAME_GAP, 1)),
         result_columns: COLUMNS,
+        body: 0.0,
+        app_rows: ROWS,
+        game_rows: 1,
+        result_rows: 1,
     };
     layout.result_columns = fitting(layout.results(), APP_CELL, APP_GAP, COLUMNS);
+    let body = (panel - LYING_PADDING - SEARCH_HEIGHT - SEARCH_GAP - LYING_FOOT).max(0.0);
+    let grid = body - HEADING_HEIGHT - HEADING_GAP;
+    let above = if pinned {
+        PINNED_HEIGHT + PINNED_GAP
+    } else {
+        0.0
+    };
+    layout.body = body;
+    layout.app_rows = rows(grid - above, APP_ROW, APP_GAP);
+    layout.result_rows = rows(grid, APP_ROW, APP_GAP);
+    let cards = grid - GAME_GAP - LIBRARY_HEIGHT;
+    layout.game_rows = rows(cards, GAME_CARD_HEIGHT, GAME_GAP);
     layout
 }
 
@@ -431,7 +489,16 @@ mod tests {
     #[test]
     fn the_horizontal_launcher_is_500_high_unless_told_otherwise() {
         assert_eq!(height(None, Some(1080.0)), 500);
+        assert_eq!(height(None, None), 500);
         assert_eq!(height(Some(560.0), Some(1080.0)), 560);
+    }
+
+    #[test]
+    fn on_a_taller_screen_the_horizontal_launcher_is_taller() {
+        assert_eq!(height(None, Some(1440.0)), 667);
+        assert_eq!(height(None, Some(2160.0)), 1000);
+        // Never so low that its content does not fit.
+        assert_eq!(height(None, Some(800.0)), MIN_HEIGHT);
     }
 
     #[test]
@@ -445,7 +512,7 @@ mod tests {
 
     #[test]
     fn the_horizontal_launcher_gives_the_applications_what_the_screen_adds() {
-        let layout = lying_layout(1920.0, 1080.0);
+        let layout = lying_layout(1920.0, 1080.0, 500.0, false);
         assert_eq!(layout.row, 1892.0);
         assert_eq!(layout.games, Some(260.0));
         assert_eq!((layout.notices, layout.control), (340.0, 340.0));
@@ -453,14 +520,13 @@ mod tests {
         assert_eq!(layout.margin(1920.0), 14.0);
         // Six columns of applications, one of games, as before.
         assert_eq!((layout.app_columns, layout.game_columns), (6, 1));
-        assert_eq!(layout.page(), PAGE);
         assert_eq!(layout.games_shown(), 3);
     }
 
     #[test]
     fn a_wider_screen_shares_what_it_adds_between_applications_and_games() {
-        let narrow = lying_layout(1920.0, 1080.0);
-        let wide = lying_layout(2560.0, 1440.0);
+        let narrow = lying_layout(1920.0, 1080.0, 500.0, false);
+        let wide = lying_layout(2560.0, 1440.0, 500.0, false);
         let games = |layout: LyingLayout| layout.games.unwrap();
         assert_eq!(wide.row, 2532.0);
         assert_eq!(wide.apps - narrow.apps, games(wide) - games(narrow));
@@ -473,7 +539,7 @@ mod tests {
 
     #[test]
     fn an_ultra_wide_screen_is_filled_from_edge_to_edge() {
-        let layout = lying_layout(3440.0, 1440.0);
+        let layout = lying_layout(3440.0, 1440.0, 500.0, false);
         assert_eq!(layout.row, 3440.0 - 2.0 * LYING_PADDING);
         assert_eq!((layout.notices, layout.control), (340.0, 340.0));
         assert_eq!(
@@ -481,7 +547,7 @@ mod tests {
             layout.games.unwrap() - GAMES_COLUMN
         );
         assert_eq!((layout.app_columns, layout.game_columns), (11, 3));
-        assert_eq!(layout.page(), 33);
+        assert_eq!(layout.page(), 11 * layout.app_rows);
         assert_eq!(layout.games_shown(), 9);
         // The results of a search take both columns.
         assert!(layout.result_columns > layout.app_columns);
@@ -489,25 +555,77 @@ mod tests {
 
     #[test]
     fn on_a_wider_screen_still_the_columns_keep_together_centered() {
-        let layout = lying_layout(5120.0, 1440.0);
+        let layout = lying_layout(5120.0, 1440.0, 500.0, false);
         assert_eq!(layout.row, 1440.0 * WIDEST_SHAPE);
         assert_eq!(layout.margin(5120.0), (5120.0 - layout.row) / 2.0);
     }
 
     #[test]
     fn on_a_narrow_screen_the_games_give_their_place_first() {
-        let layout = lying_layout(1280.0, 800.0);
+        let layout = lying_layout(1280.0, 800.0, 500.0, false);
         assert_eq!(layout.games, None);
         assert_eq!(layout.game_columns, 0);
         assert_eq!(layout.notices, 340.0);
         assert!(layout.apps >= NARROWEST_APPS);
         assert_eq!(layout.app_columns, COLUMNS);
         // Narrower still, the notifications and the control center shrink.
-        let layout = lying_layout(1024.0, 768.0);
+        let layout = lying_layout(1024.0, 768.0, 500.0, false);
         assert_eq!(layout.notices, NARROWEST_SIDE);
         assert_eq!(layout.control, NARROWEST_SIDE);
         let used = layout.apps + layout.notices + layout.control + 2.0 * LYING_GAP;
         assert_eq!(used, layout.row);
+    }
+
+    #[test]
+    fn a_launcher_of_500_shows_what_fits_under_the_search() {
+        let layout = lying_layout(1920.0, 1080.0, 500.0, false);
+        assert_eq!(layout.body, 500.0 - 14.0 - 44.0 - 12.0 - 6.0);
+        // 424 under the search: the heading, then rows of 44, 4 apart.
+        assert_eq!(layout.app_rows, 8);
+        assert_eq!(layout.result_rows, 8);
+        assert_eq!(layout.game_rows, 3);
+        assert_eq!(layout.page(), 48);
+        // The pinned applications take rows from the grid only.
+        let pinned = lying_layout(1920.0, 1080.0, 500.0, true);
+        assert_eq!(pinned.app_rows, 5);
+        assert_eq!((pinned.game_rows, pinned.result_rows), (3, 8));
+    }
+
+    #[test]
+    fn a_higher_launcher_shows_more_rows() {
+        let low = lying_layout(3440.0, 1440.0, 500.0, true);
+        let high = lying_layout(3440.0, 1440.0, 700.0, true);
+        assert_eq!(high.body - low.body, 200.0);
+        assert!(high.app_rows > low.app_rows);
+        assert!(high.game_rows > low.game_rows);
+        assert_eq!(high.games_shown(), high.game_rows * high.game_columns);
+        // The columns do not change with the height.
+        assert_eq!(high.app_columns, low.app_columns);
+    }
+
+    #[test]
+    fn rows_never_overflow_the_body() {
+        for panel in [480.0, 500.0, 567.0, 701.0, 990.0] {
+            for pinned in [false, true] {
+                let layout = lying_layout(1920.0, 1080.0, panel, pinned);
+                let above = if pinned {
+                    PINNED_HEIGHT + PINNED_GAP
+                } else {
+                    0.0
+                };
+                let rows = layout.app_rows as f32;
+                let apps =
+                    above + HEADING_HEIGHT + HEADING_GAP + rows * APP_ROW + (rows - 1.0) * APP_GAP;
+                assert!(apps <= layout.body, "{panel} {pinned}");
+                let rows = layout.game_rows as f32;
+                let games = HEADING_HEIGHT
+                    + HEADING_GAP
+                    + rows * GAME_CARD_HEIGHT
+                    + rows * GAME_GAP
+                    + LIBRARY_HEIGHT;
+                assert!(games <= layout.body, "{panel} {pinned}");
+            }
+        }
     }
 
     #[test]

@@ -205,7 +205,9 @@ fn search<'a>(drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
         .spacing(12)
         .align_y(Alignment::Center);
     container(line)
-        .padding(Padding::from([12.0, 16.0]))
+        .height(drawer::SEARCH_HEIGHT)
+        .align_y(Alignment::Center)
+        .padding(Padding::from([0.0, 16.0]))
         .style(move |_| container::Style {
             border: Border {
                 color: palette.accent,
@@ -325,7 +327,8 @@ fn grid<'a>(cells: Vec<Element<'a, Message>>, columns: usize, gap: f32) -> Eleme
 
 fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
     let count = dock.apps.len();
-    let size = drawer.page_size();
+    let pinned = dock.pinned_in_drawer();
+    let size = drawer.page_size(pinned);
     let pages = drawer::page_count(count, size);
     let page = drawer.page.min(pages - 1);
 
@@ -382,9 +385,11 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
     let header = heading("Applications", drawer::summary(count, page, size), palette)
         .push(space().width(Length::Fill))
         .push(pager);
-    let columns = drawer.app_columns();
-    let rows = drawer::ROWS;
-    let height = 44.0;
+    let header = container(header).center_y(drawer::HEADING_HEIGHT);
+    let columns = drawer.app_columns(pinned);
+    let layout = drawer.lying_layout(pinned);
+    let rows = layout.map_or(drawer::ROWS, |layout| layout.app_rows);
+    let height = drawer::APP_ROW;
     let cells = drawer::page(&dock.apps, page, size)
         .iter()
         .enumerate()
@@ -409,7 +414,7 @@ fn applications<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Ele
         };
         Message::TurnPage(down)
     });
-    column![header, body].spacing(8).into()
+    column![header, body].spacing(drawer::HEADING_GAP).into()
 }
 
 fn results<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
@@ -424,16 +429,23 @@ fn results<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<
     let columns = drawer.result_columns();
     let cells = hits
         .into_iter()
-        .take(drawer::RESULT_ROWS * columns)
+        .take(drawer.results_shown())
         .enumerate()
         .map(|(index, (target, identity))| {
-            cell(dock, target, &identity, index == selected, 44.0, palette)
+            cell(
+                dock,
+                target,
+                &identity,
+                index == selected,
+                drawer::APP_ROW,
+                palette,
+            )
         });
     column![
-        heading("Résultats", detail, palette),
+        container(heading("Résultats", detail, palette)).center_y(drawer::HEADING_HEIGHT),
         grid(cells.collect(), columns, drawer::APP_GAP)
     ]
-    .spacing(8)
+    .spacing(drawer::HEADING_GAP)
     .into()
 }
 
@@ -495,12 +507,13 @@ fn games_column<'a>(
         .size(15)
         .font(style::SEMIBOLD)
         .color(palette.text);
-    let cards: Column<'_, Message> = column![title].spacing(drawer::GAME_GAP);
+    // On the line of the title of the applications.
+    let title = container(title).center_y(drawer::HEADING_HEIGHT);
     if count == 0 {
         let nothing = text("Aucun jeu Steam installé.")
             .size(12)
             .color(palette.muted);
-        return cards.push(nothing).into();
+        return column![title, nothing].spacing(drawer::HEADING_GAP).into();
     }
     let shown = dock
         .games
@@ -511,15 +524,14 @@ fn games_column<'a>(
         .size(12)
         .font(style::MEDIUM)
         .color(palette.text);
-    cards
-        .push(grid(shown.collect(), layout.game_columns, drawer::GAME_GAP))
-        .push(
-            button(library)
-                .padding(Padding::from([5.0, 10.0]))
-                .on_press(Message::Library)
-                .style(style::tinted(palette.card, palette.hover, 8.0)),
-        )
-        .into()
+    let library = button(container(library).center_y(Length::Fill))
+        .height(drawer::LIBRARY_HEIGHT)
+        .padding(Padding::from([0.0, 10.0]))
+        .on_press(Message::Library)
+        .style(style::tinted(palette.card, palette.hover, 8.0));
+    let cards = grid(shown.collect(), layout.game_columns, drawer::GAME_GAP);
+    let cards = column![cards, library].spacing(drawer::GAME_GAP);
+    column![title, cards].spacing(drawer::HEADING_GAP).into()
 }
 
 fn games<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
@@ -1174,16 +1186,18 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
 
     let screen = drawer.surface.map_or(1920.0, |surface| surface.width);
+    let pinned = dock.pinned_in_drawer();
     let layout = drawer
-        .lying_layout()
-        .unwrap_or(drawer::lying_layout(1920.0, 1080.0));
+        .lying_layout(pinned)
+        .unwrap_or_else(|| drawer::lying_layout(1920.0, 1080.0, drawer.height, pinned));
     let bar_room = dock.metrics().exclusive_zone_for(Orientation::Horizontal) as f32;
 
     let mut columns: Vec<Element<'_, Message>> = Vec::new();
     if drawer.query.trim().is_empty() {
-        let mut apps: Column<'_, Message> = column![].spacing(10);
-        if !dock.config.pinned.is_empty() {
-            apps = apps.push(pinned(dock, layout.apps, palette));
+        let mut apps: Column<'_, Message> = column![].spacing(drawer::PINNED_GAP);
+        if pinned {
+            let pinned = container(self::pinned(dock, layout.apps, palette));
+            apps = apps.push(pinned.height(drawer::PINNED_HEIGHT));
         }
         apps = apps.push(applications(dock, drawer, palette));
         columns.push(apps.width(layout.apps).into());
@@ -1206,19 +1220,20 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
             .width(layout.control)
             .into(),
     );
-    // As high as its tallest column, the notifications as high as that.
+    // As high as the launcher lets it: the notifications fill that height,
+    // the control center keeps its own, at the top.
     let body = Row::with_children(columns)
         .spacing(drawer::LYING_GAP)
-        .height(Length::Shrink);
+        .height(layout.body);
     let content = column![search(drawer, palette), body]
-        .spacing(12)
+        .spacing(drawer::SEARCH_GAP)
         .width(layout.row);
     let content = container(content)
         .width(Length::Fill)
         .height(drawer.height)
         .padding(Padding {
             top: drawer::LYING_PADDING,
-            bottom: 6.0,
+            bottom: drawer::LYING_FOOT,
             ..Padding::ZERO
         })
         .center_x(Length::Fill);
