@@ -185,7 +185,7 @@ scripts/codegraph.sh files                                               # l'arb
 
 ### Décisions techniques
 
-- **Smithay est épinglé sur un commit git** (le même que niri, voir `Cargo.toml`), pas sur crates.io. Sa documentation se lit avec `cargo doc -p smithay --open` ; les exemples `anvil` et `smallvil` sont dans `~/.cargo/git/checkouts/smithay-*/`.
+- **Smithay est épinglé sur un commit git** (le même que niri, voir `Cargo.toml`), pas sur crates.io, et **copié dans `vendor/smithay`** avec un correctif du presse-papiers X11 (transferts INCR vers les fenêtres `InputOnly` de Chromium et Electron, qui gelaient en collant une image venue de Wayland) : changer de commit, c'est recopier et reporter le correctif (`vendor/README.md`). Sa documentation se lit avec `cargo doc -p smithay --open` ; les exemples `anvil` et `smallvil` sont dans `~/.cargo/git/checkouts/smithay-*/`.
 - **Décorations et verre en Rust pur / GLES** : `tiny-skia` (formes) et `cosmic-text` (texte) vers des textures, shaders GLES pour l'anneau, le rognage des coins, l'ombre douce (`render/shadow.rs`) et le flou (`render/glass.rs`, framebuffer effects de Smithay). Le flou fait des appels GL bruts par `frame.with_context` (`unsafe` documenté à chaque bloc). Pièges, tous rencontrés :
   - ne jamais rebrancher le framebuffer 0 : il n'existe pas sur le matériel (GBM), seulement en imbriqué. Lire la cible courante au début, tout remettre à la fin ;
   - tout placer d'après `gl_FragCoord` et la projection du rendu (`window_rect`), jamais en devinant le sens vertical de la cible ;

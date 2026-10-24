@@ -28,3 +28,24 @@ dock turned white).
 
 The root `Cargo.toml` substitutes this copy with `[patch.crates-io]`. Delete
 the directory and the patch once iced picks such a format itself.
+
+## `smithay` 0.7.0, commit `19c16d3` (MIT)
+
+Copy of the commit of <https://github.com/Smithay/smithay> that the
+compositor pins (the same as niri 26.4.0), without its examples, benches and
+workspace members.
+
+One change, in `src/xwayland/xwm/mod.rs` (`SelectionRequest`, marked
+`coquille:`): before an X11 client is sent a selection, the window manager
+watches property changes on the requestor's window. A selection larger than
+64 KiB goes by the INCR protocol, where each chunk waits for the requestor to
+delete a property; Smithay only watched the windows created as InputOutput,
+while Chromium and Electron ask from an InputOnly window. Pasting an image
+copied from a Wayland application (a screenshot) into an X11 Electron
+application hung its main process forever (Orca).
+
+The compositor's `Cargo.toml` still names the git commit; the root
+`Cargo.toml` substitutes this copy with
+`[patch."https://github.com/Smithay/smithay.git"]`. When moving to another
+Smithay commit, copy it here again and carry the change over, or delete the
+directory and the patch once Smithay fixes it.

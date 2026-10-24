@@ -44,6 +44,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 iced_exdevtools = { path = "vendor/iced_exdevtools" }
 iced_wgpu = { path = "vendor/iced_wgpu" }
 
+# The pinned Smithay commit, with one fix to the X11 clipboard bridge, see
+# `vendor/README.md`. To drop once Smithay carries it.
+[patch."https://github.com/Smithay/smithay.git"]
+smithay = { path = "vendor/smithay" }
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 
