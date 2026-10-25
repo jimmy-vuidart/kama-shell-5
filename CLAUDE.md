@@ -388,8 +388,7 @@ Limites connues :
 
 - un écran à une échelle et un autre à une autre : X11 prend la plus grande (les applis X11 sont petites sur l'écran à 100 %) ;
 - capot fermé avec un écran externe : rien n'est fait (il faudrait le branchement à chaud, ticket 03) ; pas de verrouillage avant la veille (ticket 23) ;
-- ni gestes du pavé (balayage à trois doigts), ni touches de volume et de lecture (phase 5, étape 7) ;
-- les icônes de la colonne du tiroir ouvert sont une image de la barre, pas des boutons.
+- ni gestes du pavé (balayage à trois doigts), ni touches de volume et de lecture (phase 5, étape 7).
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 

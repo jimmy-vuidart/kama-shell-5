@@ -521,12 +521,11 @@ pub fn entry_rect(
 }
 
 /// How an upright bar shows: the edge it stands on, whether its texts have
-/// room, whether it reacts to the pointer.
+/// room.
 #[derive(Clone, Copy)]
 struct Look {
     side: Side,
     labels: bool,
-    live: bool,
 }
 
 /// Where what follows the edge of the screen lines up in an upright bar.
@@ -619,7 +618,8 @@ pub fn view<'a>(dock: &'a Dock, state: &'a BarState) -> Element<'a, Message> {
     }
 }
 
-/// A bar as the launcher shows it under itself: folded and still.
+/// A bar as the launcher shows it over itself: folded, its icons still
+/// answering the pointer.
 pub fn still<'a>(dock: &'a Dock, state: &'a BarState, palette: Palette) -> Element<'a, Message> {
     let metrics = dock.metrics();
     match state.orientation {
@@ -726,11 +726,12 @@ fn label<'a>(
 }
 
 /// The bar lying on the bottom edge: launcher, favorites, other open
-/// applications, clock. `live` says whether it reacts to the pointer.
+/// applications, clock. `own` says it is on its own surface rather than in
+/// the launcher, where it names no icon.
 fn lying<'a>(
     dock: &'a Dock,
     state: &'a BarState,
-    live: bool,
+    own: bool,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
@@ -748,19 +749,17 @@ fn lying<'a>(
     };
 
     let mut items: Row<'_, Message> =
-        row![lying_launcher(dock, state, live, metrics, palette)].spacing(metrics.lying_gap());
+        row![lying_launcher(dock, state, metrics, palette)].spacing(metrics.lying_gap());
     for (index, entry) in state.entries.iter().enumerate() {
         if index == 0 || index == pinned {
             items = items.push(divider());
         }
-        items = items.push(lying_entry(
-            dock, state, index, entry, live, metrics, palette,
-        ));
+        items = items.push(lying_entry(dock, state, index, entry, metrics, palette));
     }
     if !dock.tray.is_empty() {
         items = items
             .push(divider())
-            .push(lying_tray(dock, state, live, metrics, palette));
+            .push(lying_tray(dock, state, metrics, palette));
     }
     items = items.push(divider()).push(lying_time(
         &dock.now,
@@ -775,19 +774,18 @@ fn lying<'a>(
         .height(thickness)
         .padding(Padding::from([0.0, metrics.lying_padding()]))
         .style(move |_| style::liquid_glass(palette, metrics.lying_radius()));
-    if !live {
-        return body.into();
+    let area = mouse_area(body).on_exit(Message::BarHover(state.id, false));
+    if own {
+        area.on_enter(Message::BarHover(state.id, true)).into()
+    } else {
+        // Leaving it still ends what the pointer did there (a drag).
+        area.into()
     }
-    mouse_area(body)
-        .on_enter(Message::BarHover(state.id, true))
-        .on_exit(Message::BarHover(state.id, false))
-        .into()
 }
 
 fn lying_launcher<'a>(
     dock: &Dock,
     state: &BarState,
-    live: bool,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
@@ -824,17 +822,13 @@ fn lying_launcher<'a>(
         .center_x(side)
         .center_y(side)
         .style(move |_| look);
-    let area = mouse_area(
+    mouse_area(
         container(tile)
             .center_x(metrics.lying_slot)
             .center_y(metrics.lying_thickness()),
-    );
-    if live || open {
-        area.on_release(Message::Launcher(Some(state.screen)))
-            .into()
-    } else {
-        area.into()
-    }
+    )
+    .on_release(Message::Launcher(Some(state.screen)))
+    .into()
 }
 
 /// An icon of a lying bar, with its mark under it.
@@ -843,11 +837,10 @@ fn lying_entry<'a>(
     state: &BarState,
     index: usize,
     entry: &'a Entry,
-    live: bool,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let hovered = live && state.hover_entry == Some(index);
+    let hovered = state.hover_entry == Some(index);
     let dragged = dock.drag.is_some_and(|drag| drag.at == index && drag.moved);
     let unread = dock.unread_of(entry);
 
@@ -894,9 +887,6 @@ fn lying_entry<'a>(
                 ..Padding::ZERO
             }),
     ];
-    if !live {
-        return slot.into();
-    }
     mouse_area(slot)
         .on_enter(Message::EntryHover(state.id, Some(index)))
         .on_exit(Message::EntryHover(state.id, None))
@@ -1014,7 +1004,6 @@ fn render_tray_slot<'a>(
     state: &BarState,
     index: usize,
     item: &'a TrayItem,
-    live: bool,
     palette: Palette,
 ) -> Element<'a, Message> {
     let hovered = state.hover_tray == Some(index);
@@ -1028,9 +1017,6 @@ fn render_tray_slot<'a>(
         .center_x(crate::model::tray::ICON_SIZE)
         .center_y(crate::model::tray::ICON_SIZE)
         .style(move |_| style::fill(tile_bg, 4.0));
-    if !live {
-        return slot.into();
-    }
     mouse_area(slot)
         .on_enter(Message::TrayHover(state.id, Some(index)))
         .on_exit(Message::TrayHover(state.id, None))
@@ -1043,7 +1029,6 @@ fn render_tray_slot<'a>(
 fn lying_tray<'a>(
     dock: &'a Dock,
     state: &'a BarState,
-    live: bool,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
@@ -1056,10 +1041,10 @@ fn lying_tray<'a>(
         let idx1 = c * 2;
         let idx2 = c * 2 + 1;
         if let Some(item) = dock.tray.get(idx1) {
-            col_slots = col_slots.push(render_tray_slot(dock, state, idx1, item, live, palette));
+            col_slots = col_slots.push(render_tray_slot(dock, state, idx1, item, palette));
         }
         if let Some(item) = dock.tray.get(idx2) {
-            col_slots = col_slots.push(render_tray_slot(dock, state, idx2, item, live, palette));
+            col_slots = col_slots.push(render_tray_slot(dock, state, idx2, item, palette));
         }
         columns = columns.push(col_slots);
     }
@@ -1076,7 +1061,7 @@ fn upright_tray<'a>(
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let Look { side, live, .. } = look;
+    let side = look.side;
     let count = dock.tray.len();
     let num_rows = crate::model::tray::vertical_rows(count);
 
@@ -1086,10 +1071,10 @@ fn upright_tray<'a>(
         let idx1 = r * 2;
         let idx2 = r * 2 + 1;
         if let Some(item) = dock.tray.get(idx1) {
-            row_items = row_items.push(render_tray_slot(dock, state, idx1, item, live, palette));
+            row_items = row_items.push(render_tray_slot(dock, state, idx1, item, palette));
         }
         if let Some(item) = dock.tray.get(idx2) {
-            row_items = row_items.push(render_tray_slot(dock, state, idx2, item, live, palette));
+            row_items = row_items.push(render_tray_slot(dock, state, idx2, item, palette));
         }
         col_items = col_items.push(row_items);
     }
@@ -1104,13 +1089,14 @@ fn upright_tray<'a>(
 }
 
 /// The bar standing on the left or the right edge. The drawer shows it too,
-/// folded and still: `live` says whether it reacts to the pointer.
+/// folded: `own` says it is on its own surface, where it unfolds under the
+/// pointer.
 fn bar<'a>(
     dock: &'a Dock,
     state: &'a BarState,
     side: Side,
     unfold: f32,
-    live: bool,
+    own: bool,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
@@ -1119,7 +1105,7 @@ fn bar<'a>(
     let labels = unfold > 0.4;
     let pinned = state.pinned();
     let others = state.entries.len() - pinned;
-    let look = Look { side, labels, live };
+    let look = Look { side, labels };
 
     let mut rows: Column<'_, Message> =
         column![launcher(dock, state, look, metrics, palette)].spacing(GAP);
@@ -1155,13 +1141,12 @@ fn bar<'a>(
             shadow: palette.shadow(),
             ..style::outlined(palette.glass, palette.rim, metrics.radius)
         });
-    let body: Element<'_, Message> = if live {
-        mouse_area(body)
-            .on_enter(Message::BarHover(state.id, true))
-            .on_exit(Message::BarHover(state.id, false))
-            .into()
+    let area = mouse_area(body).on_exit(Message::BarHover(state.id, false));
+    let body: Element<'_, Message> = if own {
+        area.on_enter(Message::BarHover(state.id, true)).into()
     } else {
-        body.into()
+        // Leaving it still ends what the pointer did there (a drag).
+        area.into()
     };
     // It unfolds away from its edge.
     let (left, right) = match side {
@@ -1188,7 +1173,7 @@ fn launcher<'a>(
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let Look { side, labels, live } = look;
+    let Look { side, labels } = look;
     let open = dock.drawer.is_some();
     let (color, style_fn) = if open {
         (
@@ -1234,13 +1219,9 @@ fn launcher<'a>(
         .height(metrics.slot)
         .width(Length::Fill)
         .align_x(outward(side));
-    let area = mouse_area(content);
-    if live || open {
-        area.on_release(Message::Launcher(Some(state.screen)))
-            .into()
-    } else {
-        area.into()
-    }
+    mouse_area(content)
+        .on_release(Message::Launcher(Some(state.screen)))
+        .into()
 }
 
 /// A hairline between two groups; unfolded, the name of the group.
@@ -1281,8 +1262,8 @@ fn entry_row<'a>(
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let Look { side, labels, live } = look;
-    let hovered = live && state.hover_entry == Some(index);
+    let Look { side, labels } = look;
+    let hovered = state.hover_entry == Some(index);
     let dragged = dock.drag.is_some_and(|drag| drag.at == index && drag.moved);
     let unread = dock.unread_of(entry);
 
@@ -1366,9 +1347,6 @@ fn entry_row<'a>(
         .align_x(outward(side))
         .style(move |_| style::fill(background, metrics.tile_radius));
     let row = container(row).padding(Padding::from([0.0, if labels { 4.0 } else { 0.0 }]));
-    if !live {
-        return row.into();
-    }
     mouse_area(row)
         .on_enter(Message::EntryHover(state.id, Some(index)))
         .on_exit(Message::EntryHover(state.id, None))

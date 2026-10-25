@@ -507,6 +507,75 @@ impl Dock {
         self.bars.iter().find(|bar| bar.screen == screen)
     }
 
+    /// Whether the launcher covers bar `id`, drawing it again over itself.
+    fn covered(&self, id: window::Id) -> bool {
+        let screen = self.bar(id).map(|bar| bar.screen);
+        self.drawer
+            .as_ref()
+            .is_some_and(|drawer| Some(drawer.screen) == screen)
+    }
+
+    /// What a menu of bar `id` hangs from, and next to what: `rect` is in
+    /// the surface of the bar. While the launcher covers the bar, the menu
+    /// hangs from the launcher, at the same place on the screen.
+    fn menu_parent(
+        &self,
+        id: window::Id,
+        rect: (i32, i32, i32, i32),
+    ) -> (window::Id, (i32, i32, i32, i32)) {
+        let drawer = self.drawer.as_ref().filter(|_| self.covered(id));
+        let (Some(drawer), Some(bar), Some(screen)) = (drawer, self.bar(id), self.drawer_screen())
+        else {
+            return (id, rect);
+        };
+        let (left, top) = crate::model::tray::surface_origin(
+            bar.orientation,
+            (screen.width as i32, screen.height as i32),
+            (bar.size.0 as i32, bar.size.1 as i32),
+        );
+        let (x, y, width, height) = rect;
+        (drawer.id, (left + x, top + y, width, height))
+    }
+
+    /// Closes the launcher when it covers bar `id`: what was clicked on the
+    /// bar it shows is what the user went for.
+    fn leave_drawer_of(&mut self, id: window::Id) -> Task<Message> {
+        if self.covered(id) {
+            self.update(Message::CloseDrawer)
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Likewise for a click on the tray item at `address`, from whichever
+    /// bar it was made on.
+    fn leave_drawer_for_tray(&mut self, address: &str) -> Task<Message> {
+        let index = self.tray.iter().position(|item| item.address == address);
+        let clicked = self
+            .bars
+            .iter()
+            .find(|bar| index.is_some() && bar.hover_tray == index)
+            .map(|bar| bar.id);
+        match clicked {
+            Some(id) => self.leave_drawer_of(id),
+            None => Task::none(),
+        }
+    }
+
+    /// The launcher of `screen` is gone without the pointer leaving the bar
+    /// it showed: that bar shows no icon under the pointer any more.
+    fn forget_drawer_pointer(&mut self, screen: OutputRole) {
+        if let Some(bar) = self.bars.iter_mut().find(|bar| bar.screen == screen) {
+            bar.hover_entry = None;
+            bar.hover_tray = None;
+        }
+        if let Some(drag) = self.drag.take() {
+            if drag.moved {
+                self.save_favorites();
+            }
+        }
+    }
+
     /// Where tray item `index` of bar `id` is on the whole desktop, as X11
     /// counts (in real pixels): where a program that draws its own menu
     /// (Wine) opens it.
@@ -524,7 +593,7 @@ impl Dock {
             pinned,
             bar.entries.len() - pinned,
             self.tray.len(),
-            bar.unfold > 0.5,
+            bar.unfold > 0.5 && !self.covered(id),
         );
         let surface = (bar.size.0 as i32, bar.size.1 as i32);
         let (left, top) = crate::model::tray::surface_origin(
@@ -1623,7 +1692,9 @@ impl Dock {
                 }
                 let drawer = self.drawer.as_ref().is_some_and(|drawer| drawer.id == id);
                 if drawer {
-                    self.drawer = None;
+                    if let Some(drawer) = self.drawer.take() {
+                        self.forget_drawer_pointer(drawer.screen);
+                    }
                 }
                 if self.toasts.as_ref().is_some_and(|surface| surface.id == id) {
                     self.toasts = None;
@@ -1700,14 +1771,14 @@ impl Dock {
                         None => warn!(name = entry.identity.name, "no command to start this"),
                     },
                 }
-                Task::none()
+                self.leave_drawer_of(id)
             }
             Message::EntryMiddle(id, index) => {
                 let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
                 if let Some(command) = entry.and_then(|entry| entry.identity.command.as_ref()) {
                     spawn(command);
                 }
-                Task::none()
+                self.leave_drawer_of(id)
             }
             Message::EntryMenu(id, index) => {
                 let Some(bar) = self.bar(id) else {
@@ -1718,10 +1789,11 @@ impl Dock {
                 };
                 let menu = bar::menu(entry, &self.present_screens());
                 let size = (ui::menu::WIDTH, ui::menu::height(&menu));
-                let unfolded = bar.unfold > 0.5;
-                let anchor =
+                let unfolded = bar.unfold > 0.5 && !self.covered(id);
+                let rect =
                     self.metrics()
                         .entry_rect(bar.orientation, index, bar.pinned(), unfolded);
+                let (parent, anchor) = self.menu_parent(id, rect);
                 // Beside an upright bar, above a lying one.
                 let (corner, grows) = match bar.orientation {
                     Orientation::Vertical(Side::Left) => {
@@ -1732,7 +1804,7 @@ impl Dock {
                     }
                     Orientation::Horizontal => (PopupAnchor::Top, PopupGravity::Top),
                 };
-                let settings = IcedNewPopupSettings::new(id, size, anchor)
+                let settings = IcedNewPopupSettings::new(parent, size, anchor)
                     .anchor(corner)
                     .gravity(grows);
                 let key = entry.identity.key.clone();
@@ -1751,13 +1823,15 @@ impl Dock {
             }
             Message::TrayClick(address) => {
                 let (x, y) = self.tray_pointed(&address);
+                let leave = self.leave_drawer_for_tray(&address);
                 self.request(backend::Request::TrayActivate { address, x, y });
-                Task::none()
+                leave
             }
             Message::TrayMiddle(address) => {
                 let (x, y) = self.tray_pointed(&address);
+                let leave = self.leave_drawer_for_tray(&address);
                 self.request(backend::Request::TraySecondary { address, x, y });
-                Task::none()
+                leave
             }
             Message::TrayMenu(id, index) => {
                 let Some(bar) = self.bar(id) else {
@@ -1772,14 +1846,16 @@ impl Dock {
                     let address = item.address.clone();
                     let (x, y) = self.tray_point(id, index);
                     self.request(backend::Request::TrayContextMenu { address, x, y });
-                    return self.close_tray_menu().chain(self.close_menu());
+                    // The item's own menu opens under the launcher.
+                    let leave = self.leave_drawer_of(id);
+                    return self.close_tray_menu().chain(self.close_menu()).chain(leave);
                 }
                 let height = ui::tray_menu::height(item);
                 let size = (ui::tray_menu::WIDTH, height);
-                let unfolded = bar.unfold > 0.5;
+                let unfolded = bar.unfold > 0.5 && !self.covered(id);
                 let pinned = bar.pinned();
                 let others = bar.entries.len() - pinned;
-                let anchor = self.metrics().tray_rect(
+                let rect = self.metrics().tray_rect(
                     bar.orientation,
                     index,
                     pinned,
@@ -1787,6 +1863,7 @@ impl Dock {
                     self.tray.len(),
                     unfolded,
                 );
+                let (parent, anchor) = self.menu_parent(id, rect);
                 let (corner, grows) = match bar.orientation {
                     Orientation::Vertical(Side::Left) => {
                         (PopupAnchor::TopRight, PopupGravity::BottomRight)
@@ -1796,7 +1873,7 @@ impl Dock {
                     }
                     Orientation::Horizontal => (PopupAnchor::Top, PopupGravity::Top),
                 };
-                let settings = IcedNewPopupSettings::new(id, size, anchor)
+                let settings = IcedNewPopupSettings::new(parent, size, anchor)
                     .anchor(corner)
                     .gravity(grows);
                 let address = item.address.clone();
@@ -1830,6 +1907,11 @@ impl Dock {
                 let Some(entry) = entry.cloned() else {
                     return self.close_menu();
                 };
+                // What starts or shows an application leaves the launcher.
+                let leaves = matches!(
+                    action,
+                    MenuAction::OpenOn(_) | MenuAction::Run { .. } | MenuAction::NewWindow
+                );
                 match action {
                     MenuAction::OpenOn(screen) => {
                         self.send(Command::OpenOn {
@@ -1866,10 +1948,15 @@ impl Dock {
                     MenuAction::Close(window) => self.send(Command::Close { window }),
                 }
                 self.rebuild_entries();
+                let leave = if leaves {
+                    self.leave_drawer_of(bar)
+                } else {
+                    Task::none()
+                };
                 if let Some(bar) = self.bar_mut(bar) {
                     bar.hovered = false;
                 }
-                Task::batch([self.close_menu(), self.fit_bars()])
+                Task::batch([self.close_menu(), self.fit_bars(), leave])
             }
             Message::Key(event) => self.key(event),
             Message::Query(query) => {
@@ -1926,7 +2013,12 @@ impl Dock {
             Message::CloseDrawer => match self.drawer.take() {
                 Some(drawer) => {
                     self.request(Request::Levels(false));
-                    window::close(drawer.id).chain(self.sync_toasts())
+                    self.forget_drawer_pointer(drawer.screen);
+                    // Its menus go with it.
+                    let menus = self.close_menu().chain(self.close_tray_menu());
+                    menus
+                        .chain(window::close(drawer.id))
+                        .chain(self.sync_toasts())
                 }
                 None => Task::none(),
             },

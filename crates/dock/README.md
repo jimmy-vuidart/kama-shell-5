@@ -154,6 +154,10 @@ n'est jamais réécrit.
   (`[drawer] height`, jamais moins de 580 px, qui gardent la place du
   mixeur sous le centre de contrôle, ni plus haut que l'écran moins 200 px). La pagination montre cinq numéros au plus, autour de la
   page affichée.
+  La barre qu'il redessine par-dessus la vraie répond comme elle (clics,
+  menu, glisser un favori, zone de notification), sans se déployer ni nommer
+  l'icône survolée ; ce qui lance ou montre une appli ferme le lanceur, et
+  les menus s'ouvrent par-dessus lui.
 - **Centre de contrôle** : bascules, volume et luminosité (molette sur un
   curseur pour le régler ; les touches de luminosité d'un portable la font
   aussi varier de 5 %, même en jeu) ; sur un portable, la batterie sous le
@@ -253,8 +257,6 @@ Le dock sert `org.freedesktop.Notifications` sur le bus de session
 - **Luminosité** : sur un PC fixe, il faut `ddcutil` et l'accès aux bus
   `i2c` des écrans ; sans eux le curseur est remplacé par « indisponible ».
   Sur un portable, seul l'écran intégré est réglé (pas un écran externe).
-- **Lanceur ouvert** : sa colonne d'icônes à gauche est une image de la
-  barre, pas des boutons ; on passe par les épinglées ou la recherche.
 - **Éclairage nocturne** retient sa position mais n'a pas d'effet : il n'y a
   pas encore d'éclairage nocturne.
 - **Notifications** : ni son, ni réponse dans la bulle, ni jeton
