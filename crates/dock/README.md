@@ -152,7 +152,10 @@ n'est jamais réécrit.
   opposé au dock (`[drawer] width`, jamais moins de 520 px ni au point de ne plus
   laisser de place au mixeur), le bord haut du lanceur horizontal
   (`[drawer] height`, jamais moins de 580 px, qui gardent la place du
-  mixeur sous le centre de contrôle, ni plus haut que l'écran moins 200 px). La pagination montre cinq numéros au plus, autour de la
+  mixeur sous le centre de contrôle, ni plus haut que l'écran moins 200 px). Pendant qu'on la tire, la poignée
+  (`ui/grip.rs`) ne donne la position du pointeur qu'une fois par image : chaque
+  message refait la vue de tous les panneaux, et une souris envoie jusqu'à
+  mille mouvements par seconde. La pagination montre cinq numéros au plus, autour de la
   page affichée.
   La barre qu'il redessine par-dessus la vraie répond comme elle (clics,
   menu, glisser un favori, zone de notification), sans se déployer ni nommer

@@ -9,7 +9,7 @@ use chrono::{DateTime, Local};
 use coquille_ipc::{Command, Event, GlassShape, ScreenshotTarget, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use iced::widget::operation;
-use iced::{Color, Element, Point, Size, Subscription, Task, keyboard, mouse, window};
+use iced::{Color, Element, Point, Size, Subscription, Task, keyboard, window};
 use iced_layershell::actions::{ActionCallback, IcedNewPopupSettings};
 use iced_layershell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption, PopupAnchor,
@@ -2367,19 +2367,6 @@ impl Dock {
             window::events().map(|(id, event)| Message::Window(id, event)),
             window::close_events().map(Message::Closed),
         ];
-        // While the edge of the drawer is held, the pointer drags it
-        // wherever it goes on the screen.
-        if self.drawer.as_ref().is_some_and(|drawer| drawer.resizing) {
-            subscriptions.push(iced::event::listen_with(|event, _, _| match event {
-                iced::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                    Some(Message::ResizeTo(position))
-                }
-                iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    Some(Message::ResizeEnd)
-                }
-                _ => None,
-            }));
-        }
         // The clock; with the mixer open, the made-up levels move faster.
         let simulated_levels = !self.options.is_real(Backend::Audio)
             && self.drawer.as_ref().is_some_and(Drawer::mixer_shown);

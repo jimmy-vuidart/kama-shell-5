@@ -12,6 +12,7 @@ use iced::{
     Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, border, mouse,
 };
 
+use super::grip::grip;
 use super::icons::{self, Glyph};
 use super::opaque::opaque;
 use super::style::{self, Palette};
@@ -79,15 +80,21 @@ fn edge<'a>(drawer: &Drawer, palette: Palette) -> Element<'a, Message> {
     } else {
         palette.rim
     };
-    let grip = container(space().width(4).height(44)).style(move |_| style::fill(color, 2.0));
-    let strip = container(grip)
+    let handle = container(space().width(4).height(44)).style(move |_| style::fill(color, 2.0));
+    let strip = container(handle)
         .width(EDGE)
         .center_x(EDGE)
         .center_y(Length::Fill);
-    mouse_area(strip)
-        .on_press(Message::ResizeStart)
-        .interaction(mouse::Interaction::ResizingHorizontally)
-        .into()
+    let held = drawer.resizing;
+    let interaction = mouse::Interaction::ResizingHorizontally;
+    grip(
+        strip,
+        held,
+        Message::ResizeStart,
+        Message::ResizeTo,
+        Message::ResizeEnd,
+        interaction,
+    )
 }
 
 fn panel<'a>(
@@ -1261,10 +1268,15 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     } else {
         palette.rim
     };
-    let grip = container(space().width(44).height(4)).style(move |_| style::fill(color, 2.0));
-    let edge = mouse_area(container(grip).center_x(Length::Fill).center_y(EDGE))
-        .on_press(Message::ResizeStart)
-        .interaction(mouse::Interaction::ResizingVertically);
+    let handle = container(space().width(44).height(4)).style(move |_| style::fill(color, 2.0));
+    let edge = grip(
+        container(handle).center_x(Length::Fill).center_y(EDGE),
+        drawer.resizing,
+        Message::ResizeStart,
+        Message::ResizeTo,
+        Message::ResizeEnd,
+        mouse::Interaction::ResizingVertically,
+    );
 
     let front = column![space().height(Length::Fill), edge, opaque(panel)];
     let layers = stack![scrim, front];

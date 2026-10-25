@@ -2,6 +2,7 @@
 
 pub mod bar;
 pub mod drawer;
+pub mod grip;
 pub mod icons;
 pub mod menu;
 pub mod opaque;
