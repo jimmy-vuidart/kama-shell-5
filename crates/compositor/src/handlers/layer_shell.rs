@@ -16,7 +16,9 @@ impl WlrLayerShellHandler for State {
     }
 
     /// A panel goes on the screen its client names, else on the one the
-    /// pointer is on. It is placed on its first commit.
+    /// pointer is on, unless a game holds it and another screen is free
+    /// (rule 7: the password asked by polkit). It is placed on its first
+    /// commit.
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -29,7 +31,10 @@ impl WlrLayerShellHandler for State {
             let known = self.outputs.iter().find(|screen| screen.output == output);
             known.map(|screen| screen.id)
         });
-        let pointer = || self.pointer_screen().map(|screen| screen.id);
+        let pointer = || {
+            let cursor = self.pointer_screen()?.id;
+            self.shell.desk.opening_screen(cursor).ok()
+        };
         let first = || self.outputs.first().map(|screen| screen.id);
         let Some(id) = named.or_else(pointer).or_else(first) else {
             warn!(namespace, "no screen to show a panel on");

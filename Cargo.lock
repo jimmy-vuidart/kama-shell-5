@@ -977,6 +977,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "coquille-polkit"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "coquille-config",
+ "coquille-ipc",
+ "coquille-ui",
+ "futures-util",
+ "iced",
+ "iced_layershell",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+ "zeroize",
+]
+
+[[package]]
 name = "coquille-settings"
 version = "0.1.0"
 dependencies = [
@@ -6913,6 +6931,12 @@ dependencies = [
  "syn 3.0.8",
  "synstructure",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 
 [[package]]
 name = "zerotrie"

@@ -20,10 +20,11 @@ jamais réutilisés : le suivant est le 36.
 |---|---|---|
 | 11 | [Les voyants du clavier ne s'allument pas](11-voyants-clavier.md) | bug |
 | 12 | [Aucun périphérique d'entrée n'est réglé](12-reglages-libinput.md) | évolution |
+| 34 | [Agent polkit : à essayer depuis l'écran de connexion](34-agent-polkit.md) | vérification |
 
 ## Priorité haute
 
-Les tickets 03, 04, 22, 23, 33, 34 et 35 sont ceux qui empêchent coquille
+Les tickets 03, 04, 22, 23, 33 et 35 sont ceux qui empêchent coquille
 de servir au quotidien (bilan du 26 octobre 2026).
 
 | N° | Ticket | Nature | Se vérifie |
@@ -34,7 +35,6 @@ de servir au quotidien (bilan du 26 octobre 2026).
 | 03 | [Un écran éteint puis rallumé reste noir](03-evenements-de-connecteur.md) | robustesse | matériel |
 | 04 | [XWayland n'est jamais relancé](04-relance-xwayland.md) | robustesse | imbriqué |
 | 33 | [Pas de partage d'écran](33-partage-d-ecran.md) (phase 5, étape 5) | fonction manquante | imbriqué, matériel |
-| 34 | [Pas d'agent polkit](34-agent-polkit.md) (phase 5, étape 2) | fonction manquante | session |
 | 35 | [Rien ne démarre avec la session](35-demarrage-de-la-session.md) (phase 5, étape 3) | fonction manquante | session |
 | 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) (phase 5, étape 4) | fonction manquante | matériel |
 | 23 | [Verrouillage de la session](23-verrouillage-de-session.md) (phase 5, étape 4) | fonction manquante | imbriqué |
@@ -82,7 +82,7 @@ de servir au quotidien (bilan du 26 octobre 2026).
 3. **05**, qui profite des drapeaux par écran du 01, puis **06**.
 4. **03 et 04**, et la vérification de **11 et 12** : demandent des essais
    sur le matériel avec Jimmy.
-5. **35, 34, puis 22 et 23 avec 03, puis 33** : la session de tous les
+5. **35, puis 22 et 23 avec 03, puis 33** : la session de tous les
    jours (phase 5). Le 35 d'abord, court, dont dépendent les portails du 33.
 6. Le reste selon l'envie ; **26 à 29**
    attendent une décision de Jimmy (touche, geste, indices) ; **25** quand

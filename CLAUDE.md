@@ -95,7 +95,7 @@ Précisions décidées en phase 3 (à revoir si elles gênent) :
 
 - **Quel écran ?** Celui que l'appli nomme (xdg-shell), sinon celui où se trouve sa fenêtre. Une fenêtre X11 qui démarre en plein écran en couvrant exactement un écran va sur celui-là ; le centre est annoncé à X11 comme écran principal (RandR), ce qui y envoie les jeux Wine/Proton. Un jeu lancé avec le pointeur sur un écran latéral et qui ne dit rien s'ouvre donc là : le ranger une fois au centre suffit, la mémoire par appli fait le reste.
 - **`Super` seul** (appuyé puis relâché sans autre touche ni clic) ouvre ou ferme le tiroir du dock, et libère au passage le pointeur du jeu qui le retient, jusqu'au prochain clic dans le jeu. Tant qu'il est libéré, les bords ne collent plus.
-- **Aucun panneau sur un écran ancré** : si un jeu prend l'écran gauche, le dock et le tiroir disparaissent, et reviennent quand l'écran est libéré. **Sauf quand des jeux tiennent tous les écrans** (le portable) : `Super` ouvre alors le tiroir par-dessus le jeu, avec les panneaux de cet écran, faute d'ailleurs. Une fenêtre ouverte pendant le jeu reste cachée derrière lui ; lancée depuis le tiroir alors qu'elle est ouverte (ou activée depuis le dock), elle vient **par-dessus le jeu**, qui reste en plein écran ; un clic dans le jeu le remet devant (modèle : `Desk::bring`).
+- **Aucun panneau sur un écran ancré** : si un jeu prend l'écran gauche, le dock et le tiroir disparaissent, et reviennent quand l'écran est libéré. **Sauf quand des jeux tiennent tous les écrans** (le portable) : `Super` ouvre alors le tiroir par-dessus le jeu, avec les panneaux de cet écran, faute d'ailleurs. Une fenêtre ouverte pendant le jeu reste cachée derrière lui ; lancée depuis le tiroir alors qu'elle est ouverte (ou activée depuis le dock), elle vient **par-dessus le jeu**, qui reste en plein écran ; un clic dans le jeu le remet devant (modèle : `Desk::bring`). Une **demande de mot de passe polkit** pendant un jeu s'ouvre sur l'écran latéral utilisé en dernier (règle 7, `Desk::opening_screen`), avec le clavier : elle se remplit sans quitter le jeu. Elle ne vient par-dessus le jeu que si des jeux tiennent tous les écrans, comme le tiroir.
 - **Bords collants seulement quand le jeu a le focus** : traverser l'écran d'un jeu laissé de côté (focus sur Discord) ne retient pas le curseur. Entrer sur l'écran du jeu n'est jamais retenu. Un glisser du shell n'est jamais retenu.
 - **Une fenêtre qui s'ouvre pendant que le jeu a le focus ne lui prend pas le clavier** : elle apparaît sur l'écran latéral (règle 7), sans le focus ; un clic dessus le lui donne.
 - `Super + Échap` vise le jeu qui a le focus, sinon celui de l'écran du pointeur, sinon le seul jeu ancré.
@@ -153,14 +153,15 @@ coquille/
 │  ├─ compositor/   # binaire `coquille` : Smithay, rendu, entrées, décorations, mode jeu.
 │  ├─ dock/         # binaire `coquille-dock` : barre, tiroir, centre de contrôle, mixeur.
 │  ├─ settings/     # binaire `coquille-settings` : l'écran « Paramètres ».
-│  └─ keyring/      # binaire `coquille-keyring` : le trousseau (Secret Service, portail Secret).
+│  ├─ keyring/      # binaire `coquille-keyring` : le trousseau (Secret Service, portail Secret).
+│  └─ polkit/       # binaire `coquille-polkit` : l'agent polkit (mots de passe administrateur).
 ├─ vendor/          # code tiers porté dans le dépôt (voir vendor/README.md).
 ├─ docs/            # phase en cours, tickets, conception, maquettes (voir docs/README.md)
 └─ CLAUDE.md
 ```
 
 - La crate `model` est le cœur : toute règle de placement doit y vivre et y être testée, le compositeur ne fait qu'appliquer ses décisions.
-- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Le trousseau (`coquille-keyring`) est un service sans fenêtre, sur le bus de session. Les notifications sont servies par le dock (voir son `README.md`). Les instantanés n'ont pas encore de forme.
+- Le shell est fait de **programmes séparés**, reliés au compositeur par un socket Unix (crate `ipc`) et écrits avec **iced**. Le dock est le premier, affiché par layer-shell (`iced_layershell`). L'écran « Paramètres » est le deuxième : une fenêtre ordinaire, que le compositeur traite comme n'importe quelle appli. Le trousseau (`coquille-keyring`) est un service sans fenêtre, sur le bus de session. L'agent polkit (`coquille-polkit`) est un panneau layer-shell qui n'apparaît que quand polkit demande un mot de passe. Les notifications sont servies par le dock (voir son `README.md`). Les instantanés n'ont pas encore de forme.
 - Configuration : `~/.config/coquille/config.toml` (identification des écrans par connecteur et/ou EDID, accent, thème, disposition de chaque écran, délai des bords collants).
 - État persistant (mémoire par appli, largeurs des colonnes, instantanés) : `~/.local/state/coquille/`.
 
@@ -213,6 +214,11 @@ scripts/codegraph.sh files                                               # l'arb
   - **lancé par `coquille-session`** avant le compositeur, et seulement depuis l'écran de connexion. `--until <pid du compositeur>` l'arrête avec lui. gnome-keyring, démarré par PAM ou par systemd, est arrêté pour la session (`systemctl --user stop`), désactivé nulle part ;
   - **Chromium et Electron** ne prennent le Secret Service que sur un bureau qu'ils connaissent : sinon ils gardent leurs clés en clair (`basic_text`, vérifié). La session exporte `GNOME_DESKTOP_SESSION_ID`, qu'ils lisent quand `XDG_CURRENT_DESKTOP` ne leur dit rien. `XDG_CURRENT_DESKTOP` reste `coquille` ;
   - **portail** : `~/.config/xdg-desktop-portal/coquille-portals.conf` nomme le Secret (`coquille`, puis `gnome-keyring` dont le fichier `.portal` vise le même nom de bus) et les réglages (`gtk`, voir « Thème des applis ») ; `config/coquille.portal` va dans `/usr/share/xdg-desktop-portal/portals/` avec `--session`.
+- **Agent polkit**, `crates/polkit` : `coquille-polkit` sert `org.freedesktop.PolicyKit1.AuthenticationAgent` sur le bus système, enregistré pour la session de connexion, et ne répond qu'au propriétaire du nom de polkit. Décisions :
+  - **le mot de passe est vérifié par l'assistant de polkit** (`polkit-agent-helper-1`, PAM), jamais par l'agent. polkit 128 (CachyOS) le lance par la socket `/run/polkit/agent-helper.socket` (l'assistant n'est plus setuid) ; le setuid reste un repli. Protocole lu dans les sources de polkit 128 : identifiant puis cookie, une ligne chacun, puis les questions de PAM échappées par `g_strescape` (octal pour tout octet hors ASCII), jusqu'à `SUCCESS` ou `FAILURE` ;
+  - **l'assistant ne démarre qu'à la validation du mot de passe**. Piège rencontré : par la socket, une conversation coupée (demande annulée, appli qui abandonne) compte comme un échec pour `pam_faillock`, qui a verrouillé le compte dix minutes après trois (`faillock --user jimmy`). Avant ce correctif, ouvrir la demande démarrait l'assistant ;
+  - logique pure dans `agent.rs` (une demande à la fois, les suivantes en attente, tentatives, compte choisi), testée ; le mot de passe n'y passe jamais (`Password`, effacé par `zeroize`, jamais journalisé) ;
+  - lancé par le compositeur (`--spawn` de `coquille-session`, session ouverte depuis l'écran de connexion seulement) : il dessine sur les écrans, et s'arrête avec le compositeur.
 - **Le dock passe par les outils des services** (`pactl`, `parec`, `nmcli`, `bluetoothctl`, `ddcutil`) plutôt que par leurs bibliothèques : rien à lier, un outil absent grise sa commande.
 - **Thème et accent** : `theme` et `accent` de la configuration valent pour le compositeur et le dock ; le thème change en cours de session (commande `set_theme`).
 - **Thème des applis** (`compositor/src/app_theme.rs`, `apps/src/appearance.rs`) : au démarrage et à chaque changement de thème, un fil à part (jamais le fil du compositeur : `gsettings` peut attendre D-Bus) donne le clair ou le sombre aux applis. Seulement quand coquille est la session (vrais écrans) : en imbriqué, ces réglages sont ceux de la session hôte, et ne sont touchés qu'avec `--app-theme`. Vérifié sur un bus D-Bus isolé, au démarrage et à chaud :
@@ -254,13 +260,13 @@ Réglages de `config.toml` (modèle commenté : `config/config.toml` ; les régl
 
 ### Installer
 
-`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-keyring` (le trousseau) et le choix de portail `~/.config/xdg-desktop-portal/coquille-portals.conf` s'il n'existe pas, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`). Il vérifie aussi que le thème d'icônes Reversal est là et, sinon, donne la commande pour installer le paquet (`paru -S reversal-icon-theme-git`) sans l'installer lui-même. À terme, coquille s'installera comme paquet AUR qui en dépendra (ticket 25).
+`scripts/install.sh` compile en release et installe **pour l'utilisateur** : `~/.local/bin/coquille`, `~/.local/bin/coquille-dock`, `~/.local/bin/coquille-keyring` (le trousseau), `~/.local/bin/coquille-polkit` (l'agent polkit) et le choix de portail `~/.config/xdg-desktop-portal/coquille-portals.conf` s'il n'existe pas, `~/.local/bin/coquille-session` (lanceur de session), `~/.local/bin/coquille-dock-watch` (lance le dock et le relance s'il tombe), `~/.local/bin/coquille-settings` et son entrée de menu `coquille-settings.desktop` (qui donne son nom et son icône à la fenêtre), une entrée de menu (imbriqué), et `~/.config/coquille/config.toml` s'il n'existe pas (modèle : `config/config.toml`). Il vérifie aussi que le thème d'icônes Reversal est là et, sinon, donne la commande pour installer le paquet (`paru -S reversal-icon-theme-git`) sans l'installer lui-même. À terme, coquille s'installera comme paquet AUR qui en dépendra (ticket 25).
 
 Le dock démarre avec le compositeur, dans la session comme depuis l'entrée de menu. Aucun terminal n'est ouvert au démarrage : `Mod+Entrée` en ouvre un. `COQUILLE_NO_DOCK=1` s'en passe ; `COQUILLE_DOCK_ARGS` lui passe des options. Ses boutons Se déconnecter, Redémarrer et Éteindre sont **réels** (après confirmation) partout sauf avec `--mock` : en imbriqué aussi, Redémarrer redémarre la machine.
 
 `scripts/install.sh --session` ajoute en plus deux sessions à l'écran de connexion (`/usr/share/wayland-sessions/`) : « coquille » et « coquille (essai, 60 secondes) », et le portail du trousseau (`/usr/share/xdg-desktop-portal/portals/coquille.portal`) ; ce sont les seuls endroits qui demandent `sudo`. La session par défaut n'est jamais modifiée. `scripts/install.sh --uninstall` retire tout.
 
-Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises. Ce que dit le serveur X va à côté, dans `xwayland.log`, ce que dit le dock dans `dock.log` (et `dock.previous.log`), et ce que dit le trousseau dans `keyring.log` (et `keyring.previous.log`).
+Journaux : `~/.local/state/coquille/session.log` (et `session.previous.log` pour le démarrage d'avant), paniques comprises. Ce que dit le serveur X va à côté, dans `xwayland.log`, ce que dit le dock dans `dock.log` (et `dock.previous.log`), ce que dit le trousseau dans `keyring.log` (et `keyring.previous.log`), et ce que dit l'agent polkit dans `polkit.log` (et `polkit.previous.log`).
 
 ### État de la phase 2
 
@@ -372,6 +378,18 @@ Limites connues :
 - qui ouvre la session ouvre les secrets (pas de verrouillage) ; root sur cette machine, avec le TPM, peut desceller la clé ;
 - si gnome-keyring prend le nom avant lui (activé par D-Bus entre son arrêt et le démarrage du trousseau), le trousseau attend son tour (`waiting for it to leave` dans `keyring.log`) ;
 - ni agent SSH, ni interfaces propres à gnome-keyring (Seahorse).
+
+### État de l'agent polkit
+
+Fait, **vérifié dans la vraie session coquille** avec Jimmy (bus système, polkit 128, agent lancé à la main, `setsid pkexec true` sans terminal) : bon mot de passe (`pkexec` rend 0), mauvais (erreur, nouvel essai), « Annuler » (`Request dismissed`, et rien de compté par faillock), demande annulée quand l'appli abandonne, deux demandes à la fois montrées l'une après l'autre. **En imbriqué** (`--demo`, captures relues) : mauvais mot de passe (erreur, champ qui reprend le clavier), « Vérification… », `Échap`, choix du compte ; demande sur l'écran latéral pendant un jeu au centre, par-dessus le jeu sur un écran seul. Tests unitaires : la logique de l'agent, le protocole de l'assistant, les comptes.
+
+Pas fait : lancé par `coquille-session` depuis l'écran de connexion ; une action d'udisks depuis le gestionnaire de fichiers.
+
+Limites connues :
+
+- chaque mauvais mot de passe compte pour `pam_faillock` (trois de suite verrouillent le compte, `sudo` compris, dix minutes) ; une demande annulée pendant la vérification aussi ;
+- un lecteur d'empreintes n'est pas pris en charge : l'assistant ne démarre qu'au mot de passe validé ;
+- un agent qui tombe n'est pas relancé ; ni icône de l'action ni détails dépliables.
 
 ### État du portable (mise à l'échelle, écran unique)
 

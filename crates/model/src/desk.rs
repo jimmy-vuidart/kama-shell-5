@@ -1251,6 +1251,14 @@ impl Desk {
         }
     }
 
+    /// The screen a panel that names none opens on (a password asked by
+    /// polkit): the one a floating window would open on, never in front of
+    /// a game while another screen is free (rules 1 and 7).
+    pub fn opening_screen(&self, cursor: OutputId) -> Result<OutputId, ModelError> {
+        let cursor = self.screen_index(cursor)?;
+        Ok(self.screens[self.floating_screen(cursor)].id())
+    }
+
     /// The screen a floating window opens on (rules 1 and 7).
     fn floating_screen(&self, cursor: usize) -> usize {
         let is_free = |screen: &Screen| screen.anchored().is_none();

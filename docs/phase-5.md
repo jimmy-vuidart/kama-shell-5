@@ -40,11 +40,11 @@ gros morceau (la capture pour le partage d'écran) ensuite.
       ouvertes dans le centre de contrôle, « Ne pas déranger » manuel et
       automatique pendant un jeu. Détail dans `crates/dock/README.md`. Pas
       encore vu dans la vraie session (Discord, Steam, Firefox).
-- [ ] 2. **Agent polkit** (ticket 34). Sans lui, toute demande de mot de
-      passe administrateur échoue en silence (mises à jour graphiques, montage d'un
-      disque interne, GParted…). Aujourd'hui `polkit-kde-agent`, lancé
-      seulement par Plasma. Un petit programme iced (`coquille-polkit`, dans
-      le style du shell) ; `polkit-gnome` peut servir en attendant.
+- [x] 2. **Agent polkit**. `coquille-polkit` (crate `crates/polkit`), lancé
+      par le compositeur depuis `coquille-session` : la demande de mot de
+      passe administrateur, dans le style du shell, sur l'écran du pointeur
+      ou à côté d'un jeu. Détail dans `crates/polkit/README.md`. Pas encore
+      lancé depuis l'écran de connexion.
 - [ ] 3. **Portails, cible systemd et démarrage automatique** (ticket 35).
       - `coquille-portals.conf` (installé par `scripts/install.sh`) : aucun
         `.portal` ne déclare `UseIn=coquille`, le choix dépend donc des replis
@@ -139,7 +139,7 @@ Pas indispensables, mais des applis les attendent : `wp-tearing-control`
   xdg-desktop-portal et xdg-desktop-portal-gtk, gnome-keyring, glib2 et
   dconf, wl-clipboard, kitty.
 - **À remplacer avant de retirer Plasma et GNOME** : plasma-login-manager,
-  polkit-kde-agent, le démon de
+  le démon de
   notifications de plasmashell. Et les applis du quotidien venues de KDE ou
   GNOME (Dolphin ou Nautilus, Spectacle, Discover…) : elles peuvent rester
   seules, mais tirent une part de leur bureau en dépendance.

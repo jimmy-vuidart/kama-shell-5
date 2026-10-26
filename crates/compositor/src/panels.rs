@@ -55,20 +55,23 @@ pub fn reserved(screen: Size, free: Rect) -> Insets {
     }
 }
 
-/// The launcher of the dock is open on this screen.
-fn has_drawer(output: &smithay::output::Output) -> bool {
+/// The launcher of the dock, or the password asked by polkit, is open on
+/// this screen.
+fn comes_over_game(output: &smithay::output::Output) -> bool {
     let map = layer_map_for_output(output);
     map.layers()
-        .any(|layer| layer.namespace() == DRAWER_NAMESPACE)
+        .any(|layer| OVER_GAME.contains(&layer.namespace()))
 }
 
-/// What the dock calls its launcher.
-const DRAWER_NAMESPACE: &str = "coquille-drawer";
+/// The panels that come over a game when games hold every screen: the
+/// launcher of the dock, the password asked by polkit.
+const OVER_GAME: [&str; 2] = ["coquille-drawer", "coquille-polkit"];
 
 impl State {
     /// The panels shown, topmost first. A screen held by a game shows none,
-    /// unless games hold every screen (a laptop) and the drawer is open on
-    /// it: with nowhere else to go, the dock comes over the game.
+    /// unless games hold every screen (a laptop) and the drawer (or a
+    /// password asked by polkit) is open on it: with nowhere else to go, it
+    /// comes over the game.
     pub fn panels(&self) -> Vec<Panel> {
         let elsewhere = self
             .outputs
@@ -80,7 +83,7 @@ impl State {
                 let Some(info) = self.shell.screen(screen.id) else {
                     continue;
                 };
-                let over_game = !elsewhere && has_drawer(&screen.output);
+                let over_game = !elsewhere && comes_over_game(&screen.output);
                 if self.is_anchored(screen.id) && !over_game {
                     continue;
                 }

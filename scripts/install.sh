@@ -20,6 +20,7 @@ dock_bin="$prefix/bin/coquille-dock"
 dock_watch="$prefix/bin/coquille-dock-watch"
 settings_bin="$prefix/bin/coquille-settings"
 keyring_bin="$prefix/bin/coquille-keyring"
+polkit_bin="$prefix/bin/coquille-polkit"
 session_bin="$prefix/bin/coquille-session"
 entry="$prefix/share/applications/coquille.desktop"
 # Named after the windows of the settings screen: their title bar and their
@@ -52,7 +53,7 @@ as_root() {
 
 if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f -- "${bin:?}" "${dock_bin:?}" "${dock_watch:?}" "${settings_bin:?}" "${session_bin:?}" \
-        "${keyring_bin:?}" "${entry:?}" "${settings_entry:?}" "${portals_config:?}"
+        "${keyring_bin:?}" "${polkit_bin:?}" "${entry:?}" "${settings_entry:?}" "${portals_config:?}"
     rm -rf -- "${wallpapers_dir:?}"
     for session_entry in "${session_entries[@]}"; do
         if [[ -e "$session_entry" ]]; then
@@ -69,11 +70,12 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 cargo build --release --locked -p coquille -p coquille-dock -p coquille-settings \
-    -p coquille-keyring
+    -p coquille-keyring -p coquille-polkit
 install -Dm755 target/release/coquille "$bin"
 install -Dm755 target/release/coquille-dock "$dock_bin"
 install -Dm755 target/release/coquille-settings "$settings_bin"
 install -Dm755 target/release/coquille-keyring "$keyring_bin"
+install -Dm755 target/release/coquille-polkit "$polkit_bin"
 install -Dm755 scripts/coquille-dock-watch "$dock_watch"
 install -Dm755 scripts/coquille-session "$session_bin"
 mkdir -p "$wallpapers_dir"
@@ -213,8 +215,9 @@ coquille est installé :
   programme        $bin
   dock             $dock_bin
   paramètres       $settings_bin  (bouton du dock, à côté de la déconnexion)
-  session          $session_bin  (lance aussi le dock et le trousseau)
+  session          $session_bin  (lance aussi le dock, le trousseau et l'agent polkit)
   trousseau        $keyring_bin  ($portal_note)
+  agent polkit     $polkit_bin  (mots de passe administrateur)
   menu             $entry
   configuration    $config  ($config_note)
   fonds d'écran    $wallpapers_dir/

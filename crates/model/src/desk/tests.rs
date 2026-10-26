@@ -585,6 +585,32 @@ fn with_no_side_screen_used_yet_the_first_one_is_chosen() {
 }
 
 #[test]
+fn a_panel_opens_where_the_pointer_is_without_a_game() {
+    let desk = desk();
+
+    assert_eq!(desk.opening_screen(CENTER), Ok(CENTER));
+    assert_eq!(desk.opening_screen(RIGHT), Ok(RIGHT));
+}
+
+#[test]
+fn with_a_game_anchored_a_panel_opens_on_the_last_used_side_screen() {
+    let mut desk = desk();
+    anchor_game(&mut desk, 1);
+    desk.note_output_used(RIGHT);
+
+    assert_eq!(desk.opening_screen(CENTER), Ok(RIGHT));
+}
+
+#[test]
+fn when_games_hold_every_screen_a_panel_opens_over_the_one_of_the_pointer() {
+    let only_center = vec![OutputInfo::new(CENTER, OutputRole::Center, CENTER_SIZE)];
+    let mut desk = Desk::new(only_center, Metrics::default());
+    anchor_game(&mut desk, 1);
+
+    assert_eq!(desk.opening_screen(CENTER), Ok(CENTER));
+}
+
+#[test]
 fn an_app_remembered_at_the_center_is_deflected_and_keeps_its_habit() {
     let mut desk = desk();
     open_in(&mut desk, 1, "browser", CENTER, 0);
