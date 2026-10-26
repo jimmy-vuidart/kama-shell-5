@@ -46,7 +46,6 @@ de servir au quotidien (bilan du 26 octobre 2026).
 | 05 | [`apply_arrangement` fait tout et redessine tout](05-apply-arrangement.md) | dette, performance | imbriqué |
 | 06 | [Plusieurs tests de survol par événement souris](06-tests-de-survol.md) | performance | imbriqué |
 | 07 | [Le mixeur meurt si PipeWire redémarre](07-mixeur-reconnexion.md) | robustesse | imbriqué |
-| 08 | [`gsettings` bloque le rendu du compositeur](08-gsettings-bloquant.md) | robustesse | imbriqué |
 | 09 | [L'écriture de `config.toml` peut détruire le fichier](09-ecriture-config.md) | bug | tests |
 | 10 | [Les programmes lancés par le compositeur restent en zombies](10-processus-zombies.md) | fuite | imbriqué |
 
@@ -54,6 +53,7 @@ de servir au quotidien (bilan du 26 octobre 2026).
 
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
+| 08 | [Les icônes des barres de titre sont chargées pendant le rendu](08-gsettings-bloquant.md) | robustesse, performance | imbriqué |
 | 13 | [Une fenêtre démappée sans être détruite reste en fantôme](13-fenetre-demappee.md) | bug | imbriqué |
 | 14 | [Une fenêtre refusée par `manage` n'est jamais configurée](14-echec-de-manage.md) | bug | tests |
 | 15 | [Les habitudes n'ont ni version ni copie de secours](15-habitudes-version.md) | robustesse | tests |
