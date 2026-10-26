@@ -40,12 +40,12 @@ gros morceau (la capture pour le partage d'écran) ensuite.
       ouvertes dans le centre de contrôle, « Ne pas déranger » manuel et
       automatique pendant un jeu. Détail dans `crates/dock/README.md`. Pas
       encore vu dans la vraie session (Discord, Steam, Firefox).
-- [ ] 2. **Agent polkit.** Sans lui, toute demande de mot de passe
-      administrateur échoue en silence (mises à jour graphiques, montage d'un
+- [ ] 2. **Agent polkit** (ticket 34). Sans lui, toute demande de mot de
+      passe administrateur échoue en silence (mises à jour graphiques, montage d'un
       disque interne, GParted…). Aujourd'hui `polkit-kde-agent`, lancé
       seulement par Plasma. Un petit programme iced (`coquille-polkit`, dans
       le style du shell) ; `polkit-gnome` peut servir en attendant.
-- [ ] 3. **Portails, cible systemd et démarrage automatique.**
+- [ ] 3. **Portails, cible systemd et démarrage automatique** (ticket 35).
       - `coquille-portals.conf` (installé par `scripts/install.sh`) : aucun
         `.portal` ne déclare `UseIn=coquille`, le choix dépend donc des replis
         de `xdg-desktop-portal`. Désigner gtk par défaut (sélecteur de
@@ -70,8 +70,9 @@ gros morceau (la capture pour le partage d'écran) ensuite.
         verrouillage à nous plus tard ;
       - bouton « Mettre en veille » dans le dock (`systemctl suspend`), et
         verrouillage avant la veille (inhibiteur `logind` « delay »).
-- [ ] 5. **Capture d'écran pour le partage** (Discord, navigateur, OBS). Le
-      backend GNOME des portails exige Mutter, celui de KDE exige KWin.
+- [ ] 5. **Capture d'écran pour le partage** (Discord, navigateur, OBS ;
+      ticket 33). Le backend GNOME des portails exige Mutter, celui de KDE
+      exige KWin.
       Implémenter `ext-image-copy-capture-v1` et `ext-image-capture-source-v1`
       (voire `wlr-screencopy`, plus répandu) pour `xdg-desktop-portal-wlr`,
       avec sa propre sélection d'écran ou un sélecteur à nous. Le plus gros

@@ -1,6 +1,6 @@
 # 23 — Verrouillage de la session
 
-- **Priorité :** évolution
+- **Priorité :** haute
 - **Nature :** fonction manquante
 - **Zone :** `crates/compositor` (protocole, rendu, entrées), `crates/dock`
 - **Se vérifie :** en imbriqué

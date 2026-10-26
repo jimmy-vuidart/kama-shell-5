@@ -1,6 +1,6 @@
 # 22 — Mise en veille des écrans
 
-- **Priorité :** évolution
+- **Priorité :** haute
 - **Nature :** fonction manquante
 - **Zone :** `crates/compositor` (protocoles, `backend/udev.rs`), `crates/config`, `crates/settings`
 - **Se vérifie :** protocoles en imbriqué, extinction sur le matériel
