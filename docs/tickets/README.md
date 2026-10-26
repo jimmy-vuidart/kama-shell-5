@@ -12,7 +12,7 @@ reste **à confirmer** par un essai.
 
 Un ticket terminé est supprimé dans le commit qui le règle (l'historique git
 en garde la trace), et sa ligne retirée de ce tableau. Les numéros ne sont
-jamais réutilisés : le suivant est le 33.
+jamais réutilisés : le suivant est le 36.
 
 ## Faits, à vérifier sur le matériel
 
@@ -23,6 +23,9 @@ jamais réutilisés : le suivant est le 33.
 
 ## Priorité haute
 
+Les tickets 03, 04, 22, 23, 33, 34 et 35 sont ceux qui empêchent coquille
+de servir au quotidien (bilan du 26 octobre 2026).
+
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
 | 30 | [Essayer coquille sur le portable](30-portable-sur-le-materiel.md) | vérification | portable |
@@ -30,6 +33,11 @@ jamais réutilisés : le suivant est le 33.
 | 02 | [Les fenêtres cachées ne reçoivent pas de « frame callback »](02-frame-callbacks-fenetres-cachees.md) | bug | imbriqué |
 | 03 | [Un écran éteint puis rallumé reste noir](03-evenements-de-connecteur.md) | robustesse | matériel |
 | 04 | [XWayland n'est jamais relancé](04-relance-xwayland.md) | robustesse | imbriqué |
+| 33 | [Pas de partage d'écran](33-partage-d-ecran.md) (phase 5, étape 5) | fonction manquante | imbriqué, matériel |
+| 34 | [Pas d'agent polkit](34-agent-polkit.md) (phase 5, étape 2) | fonction manquante | session |
+| 35 | [Rien ne démarre avec la session](35-demarrage-de-la-session.md) (phase 5, étape 3) | fonction manquante | session |
+| 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) (phase 5, étape 4) | fonction manquante | matériel |
+| 23 | [Verrouillage de la session](23-verrouillage-de-session.md) (phase 5, étape 4) | fonction manquante | imbriqué |
 
 ## Priorité moyenne
 
@@ -63,8 +71,6 @@ jamais réutilisés : le suivant est le 33.
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
 | 20 | [Sortir la cadence des images en logique pure](20-cadence-en-logique-pure.md) | dette | tests |
-| 22 | [Mise en veille des écrans](22-veille-des-ecrans.md) (phase 5, étape 4) | évolution | matériel |
-| 23 | [Verrouillage de la session](23-verrouillage-de-session.md) (phase 5, étape 4) | évolution | imbriqué |
 | 24 | [Protocole `wp_presentation`](24-presentation-time.md) | évolution | matériel |
 | 25 | [Installer coquille comme paquet AUR](25-paquet-aur.md) | évolution | chroot, session |
 
@@ -76,6 +82,8 @@ jamais réutilisés : le suivant est le 33.
 3. **05**, qui profite des drapeaux par écran du 01, puis **06**.
 4. **03 et 04**, et la vérification de **11 et 12** : demandent des essais
    sur le matériel avec Jimmy.
-5. Le reste selon l'envie ; **22 et 23** avec la phase 5 ; **26 à 29**
+5. **35, 34, puis 22 et 23 avec 03, puis 33** : la session de tous les
+   jours (phase 5). Le 35 d'abord, court, dont dépendent les portails du 33.
+6. Le reste selon l'envie ; **26 à 29**
    attendent une décision de Jimmy (touche, geste, indices) ; **25** quand
    coquille sera prête à être distribuée.
