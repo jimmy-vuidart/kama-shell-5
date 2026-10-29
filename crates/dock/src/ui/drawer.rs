@@ -9,12 +9,14 @@ use iced::widget::{
     scrollable, slider, space, stack, text, text_input,
 };
 use iced::{
-    Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, border, mouse,
+    Alignment, Background, Border, Color, ContentFit, Element, Length, Padding, Vector, border,
+    mouse,
 };
 
 use super::grip::grip;
 use super::icons::{self, Glyph};
 use super::opaque::opaque;
+use super::shift::shift;
 use super::style::{self, Palette};
 use crate::app::{Dock, Drawer, Message, OutputChoice, SEARCH, Target, Toggle};
 use crate::backend::{SessionAction, Switch};
@@ -38,12 +40,9 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
         Orientation::Vertical(side) => side,
         Orientation::Horizontal => return lying(dock, drawer, palette),
     };
+    let shown = drawer.reveal.at(dock.moment);
     // What is left of the screen is dimmed, and a click there closes.
-    let scrim = container(space())
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| style::fill(palette.scrim, 0.0));
-    let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
+    let scrim = scrim(palette, shown);
 
     // From the edge of the screen inwards.
     let mut front: Vec<Element<'_, Message>> = vec![
@@ -51,12 +50,15 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
         edge(drawer, palette),
     ];
     if drawer.mixer {
-        // Next to the button that opens it, at the foot of the drawer.
-        let aligned = column![
-            space().height(Length::Fill),
+        // Next to the button that opens it, at the foot of the drawer: it
+        // grows in, rising a little.
+        let open = drawer.mixer_reveal.at(dock.moment);
+        let mixer = shift(
             opaque(mixer_panel(dock, palette)),
-            space().height(28)
-        ];
+            Vector::new(0.0, 12.0 * (1.0 - open)),
+        )
+        .scale(0.94 + 0.06 * open);
+        let aligned = column![space().height(Length::Fill), mixer, space().height(28)];
         front.push(aligned.into());
     }
     let front: Element<'_, Message> = match side {
@@ -69,7 +71,57 @@ pub fn view<'a>(dock: &'a Dock, drawer: &'a Drawer) -> Element<'a, Message> {
                 .into()
         }
     };
-    stack![scrim, front].into()
+    if shown >= 1.0 {
+        return stack![scrim, front].into();
+    }
+    // On its way, it comes out from behind its bar: what is under the bar
+    // stays, the glass there getting as opaque as the drawer is out.
+    let bar_room = dock.metrics().exclusive_zone as f32;
+    let travel = (drawer.width + EDGE - bar_room) * (1.0 - shown);
+    let (offset, cut) = match side {
+        Side::Left => (-travel, Padding::ZERO.left(bar_room)),
+        Side::Right => (travel, Padding::ZERO.right(bar_room)),
+    };
+    let front = shift(front, Vector::new(offset, 0.0)).cut(cut);
+    let under = bar_copy(dock, drawer, palette, shown);
+    let under = container(container(under).width(bar_room))
+        .width(Length::Fill)
+        .align_x(match side {
+            Side::Left => Alignment::Start,
+            Side::Right => Alignment::End,
+        });
+    stack![scrim, under, front].into()
+}
+
+/// The dim veil over the rest of the screen, as dark as the launcher is
+/// out; a click on it closes the launcher.
+fn scrim<'a>(palette: Palette, shown: f32) -> Element<'a, Message> {
+    let veil = style::alpha(palette.scrim, palette.scrim.a * shown);
+    let scrim = container(space())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| style::fill(veil, 0.0));
+    mouse_area(scrim).on_press(Message::CloseDrawer).into()
+}
+
+/// The copy of the bar the launcher draws over it, on the glass of the
+/// launcher made as opaque as it is `shown`.
+fn bar_copy<'a>(
+    dock: &'a Dock,
+    drawer: &'a Drawer,
+    palette: Palette,
+    shown: f32,
+) -> Element<'a, Message> {
+    let bar: Element<'_, Message> = match dock.bar_on(drawer.screen) {
+        Some(state) => super::bar::still(dock, state, palette),
+        None => space().into(),
+    };
+    let glass = style::alpha(palette.glass, palette.glass.a * shown);
+    container(bar)
+        .width(Length::Fill)
+        .center_y(Length::Fill)
+        .style(move |_| style::fill(glass, 0.0))
+        .into()
 }
 
 /// The edge of the drawer away from its bar, which is dragged to make it
@@ -1185,11 +1237,8 @@ fn screenshot_selector<'a>(palette: Palette) -> Element<'a, Message> {
 /// from its bottom edge, the bar drawn again in its foot. Search on top,
 /// then four columns: applications, games, notifications, control center.
 fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a, Message> {
-    let scrim = container(space())
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| style::fill(palette.scrim, 0.0));
-    let scrim = mouse_area(scrim).on_press(Message::CloseDrawer);
+    let shown = drawer.reveal.at(dock.moment);
+    let scrim = scrim(palette, shown);
 
     let pinned = dock.pinned_in_drawer();
     let layout = drawer
@@ -1279,8 +1328,17 @@ fn lying<'a>(dock: &'a Dock, drawer: &'a Drawer, palette: Palette) -> Element<'a
     );
 
     let front = column![space().height(Length::Fill), edge, opaque(panel)];
-    let layers = stack![scrim, front];
-    layers.into()
+    if shown >= 1.0 {
+        return stack![scrim, front].into();
+    }
+    // On its way, it rises from behind its bar, which stays.
+    let travel = (drawer.height + EDGE) * (1.0 - shown);
+    let front = shift(front, Vector::new(0.0, travel)).cut(Padding::ZERO.bottom(bar_room));
+    let under = column![
+        space().height(Length::Fill),
+        container(bar_copy(dock, drawer, palette, shown)).height(bar_room)
+    ];
+    stack![scrim, under, front].into()
 }
 
 fn output_picker<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {

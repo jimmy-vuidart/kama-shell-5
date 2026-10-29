@@ -73,6 +73,7 @@ qui le relance s'il tombe (cinq chutes d'affilée et il renonce).
 | `--config FICHIER` | Fichier de configuration (défaut : `~/.config/coquille/config.toml`). |
 | `--state-dir DOSSIER` | Où garder les volumes par application (défaut : `~/.local/state/coquille`, et un dossier temporaire avec `--mock`). |
 | `--drawer` | Ouvre le tiroir dès le démarrage (pour une capture). |
+| `--animation-slowdown FOIS` | Ralentit les animations autant de fois (pour les capturer en route). |
 
 `RUST_LOG=coquille_dock=debug` détaille ce que fait le dock.
 
@@ -203,6 +204,16 @@ n'est jamais réécrit.
 - Les panneaux du lanceur retiennent les clics avec leur propre `opaque`
   (`ui/opaque.rs`) : celui d'iced demande le curseur `Idle`, dont
   `iced_layershell` 0.19.1 fait le curseur d'attente.
+- **Animations** (`model/motion.rs`, testé ; coupées par
+  `[animations] enabled = false`, comme celles du compositeur) : le tiroir
+  sort de derrière sa barre et y rentre (fermé une fois rentré), l'icône
+  d'une appli lancée saute (barre horizontale) ou bat (barre verticale)
+  jusqu'à sa première fenêtre, la tuile d'une appli qui s'ouvre grandit, le
+  mixeur monte. `ui/shift.rs` dessine un élément déplacé ou agrandi sans
+  toucher à la mise en page, rogné au besoin (le tiroir derrière la barre).
+  Piège : iced ne rogne pas une couche par celle qui la contient ; chaque
+  widget se rogne à son `viewport`, que `Shift` restreint donc lui-même.
+  Le compositeur, lui, n'anime pas le tiroir (`Arrival::Own`).
 
 ## Notifications
 

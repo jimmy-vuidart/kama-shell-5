@@ -27,6 +27,7 @@ use crate::model::bar::{self, Click, Entry, MenuAction};
 use crate::model::battery::{self, Alert, Battery, Charge};
 use crate::model::drawer::{self, LyingLayout, Step};
 use crate::model::mixer::{self, Volumes};
+use crate::model::motion::{self, Launch, Pace, Reveal, durations};
 use crate::model::notify::{
     CloseReason, Icon as NoticeIcon, Notice, NotifyState, ToastAnchor, ToastGeometry,
     ToastSurfacePlan, toast_geometry, toast_surface_plan, toasts_that_fit,
@@ -58,6 +59,8 @@ pub struct Options {
     pub drawer: bool,
     /// Open the mixer at once (to capture it without a click).
     pub mixer: bool,
+    /// How many times slower the dock moves.
+    pub slowdown: f32,
 }
 
 impl Options {
@@ -95,6 +98,8 @@ pub struct BarState {
     pub unfold: f32,
     pub hover_entry: Option<usize>,
     pub hover_tray: Option<usize>,
+    /// The entries that came in lately, by key: their tiles grow in.
+    pub arrivals: HashMap<String, Instant>,
 }
 
 impl BarState {
@@ -128,6 +133,10 @@ pub struct Drawer {
     pub width: f32,
     /// How high the panel is now (lying).
     pub height: f32,
+    /// How far it is out from behind its bar.
+    pub reveal: Reveal,
+    /// How far the mixer is open, beside an upright bar.
+    pub mixer_reveal: Reveal,
     /// The user is dragging its edge.
     pub resizing: bool,
     /// The size of the screen it is on, once the surface says.
@@ -326,6 +335,12 @@ pub struct Dock {
     pub user: String,
 
     last_frame: Option<Instant>,
+    /// The time of the frame being drawn, for what moves.
+    pub moment: Instant,
+    /// The launcher going back behind its bar, closed once it is there.
+    leaving: Option<Drawer>,
+    /// The applications started from the bar whose icons hop.
+    pub launches: Vec<Launch>,
     pub drag: Option<Drag>,
     /// The menu, with the bar it opened from and the key of its
     /// application.
@@ -418,6 +433,9 @@ impl Dock {
             now: Local::now(),
             user: user_name(),
             last_frame: None,
+            moment: Instant::now(),
+            leaving: None,
+            launches: Vec::new(),
             drag: None,
             menu: None,
             drawer: None,
@@ -674,9 +692,80 @@ impl Dock {
             .iter()
             .map(|bar| self.entries_for(bar.screen))
             .collect();
+        let now = Instant::now();
+        let pace = self.pace();
         for (bar, entries) in self.bars.iter_mut().zip(lists) {
+            if pace.enabled {
+                let known = |key: &str| bar.entries.iter().any(|entry| entry.identity.key == key);
+                let new: Vec<String> = entries
+                    .iter()
+                    .map(|entry| entry.identity.key.clone())
+                    .filter(|key| !known(key))
+                    .collect();
+                bar.arrivals.extend(new.into_iter().map(|key| (key, now)));
+            }
             bar.entries = entries;
         }
+        self.watch_launches(now);
+    }
+
+    /// How the dock moves now.
+    pub fn pace(&self) -> Pace {
+        Pace::new(self.config.animations, self.options.slowdown)
+    }
+
+    /// The windows the entry `key` has, on any bar; `None` without one.
+    fn windows_of(&self, key: &str) -> Option<usize> {
+        self.bars
+            .iter()
+            .flat_map(|bar| &bar.entries)
+            .find(|entry| entry.identity.key == key)
+            .map(|entry| entry.windows.len())
+    }
+
+    /// An application was started: its icon hops until its window comes.
+    fn launched(&mut self, key: &str) {
+        let Some(windows) = self.windows_of(key) else {
+            return;
+        };
+        let now = Instant::now();
+        let pace = self.pace();
+        self.launches.retain(|launch| launch.key != key);
+        let launch = Launch::new(key.to_owned(), windows, now, pace);
+        if !launch.over(now) {
+            self.moment = now;
+            self.launches.push(launch);
+        }
+    }
+
+    /// The icons that hop land once their window came, or it is too late.
+    fn watch_launches(&mut self, now: Instant) {
+        let counts: Vec<usize> = self
+            .launches
+            .iter()
+            .map(|launch| self.windows_of(&launch.key).unwrap_or(usize::MAX))
+            .collect();
+        for (launch, windows) in self.launches.iter_mut().zip(counts) {
+            launch.watch(windows, now);
+        }
+        self.launches.retain(|launch| !launch.over(now));
+    }
+
+    /// Whether anything moves at `now`: frames are then needed.
+    fn animating(&self, now: Instant) -> bool {
+        let pace = self.pace();
+        self.bars.iter().any(|bar| {
+            bar.unfold != unfold_target(bar)
+                || bar
+                    .arrivals
+                    .values()
+                    .any(|since| motion::arriving(*since, now, pace))
+        }) || self.leaving.is_some()
+            || !self.launches.is_empty()
+            || self
+                .drawer
+                .as_ref()
+                .is_some_and(|drawer| drawer.reveal.moving(now) || drawer.mixer_reveal.moving(now))
     }
 
     /// Opens the bar of each screen that must have one, once the dock knows
@@ -732,6 +821,7 @@ impl Dock {
                 unfold: 0.0,
                 hover_entry: None,
                 hover_tray: None,
+                arrivals: HashMap::new(),
             });
             tasks.push(task);
         }
@@ -1115,6 +1205,13 @@ impl Dock {
             events_transparent: false,
             namespace: Some("coquille-drawer".to_owned()),
         });
+        // One still going back goes at once.
+        let gone = match self.leaving.take() {
+            Some(leaving) => window::close(leaving.id),
+            None => Task::none(),
+        };
+        let now = Instant::now();
+        self.moment = now;
         self.drawer = Some(Drawer {
             id,
             screen,
@@ -1130,6 +1227,8 @@ impl Dock {
             height: self.drawer_height(None) as f32,
             resizing: false,
             surface: None,
+            reveal: Reveal::coming(now, self.pace().of(durations::DRAWER)),
+            mixer_reveal: Reveal::at_rest(0.0, now),
         });
         if orientation == Orientation::Horizontal {
             // Its mixer is always there: its levels move.
@@ -1137,7 +1236,7 @@ impl Dock {
         }
         // The control center shows the notices: no toast over it.
         let toasts = self.sync_toasts();
-        self.close_menu().chain(task).chain(toasts)
+        gone.chain(self.close_menu()).chain(task).chain(toasts)
     }
 
     /// The size of the screen of the launcher: what its surface says, and
@@ -1465,9 +1564,29 @@ impl Dock {
             });
         }
         match &identity.command {
-            Some(command) => spawn(command),
+            Some(command) => {
+                spawn(command);
+                self.launched(&identity.key);
+            }
             None => warn!(name = identity.name, "no command known to start this"),
         }
+    }
+
+    /// The launcher goes back behind its bar, and closes once there.
+    fn leave(&mut self, mut drawer: Drawer) -> Task<Message> {
+        let now = Instant::now();
+        let gone = match self.leaving.take() {
+            Some(leaving) => window::close(leaving.id),
+            None => Task::none(),
+        };
+        let duration = self.pace().of(durations::DRAWER_CLOSE);
+        if duration.is_zero() {
+            return gone.chain(window::close(drawer.id));
+        }
+        drawer.reveal.go(0.0, now, duration);
+        self.moment = now;
+        self.leaving = Some(drawer);
+        gone
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -1558,11 +1677,33 @@ impl Dock {
                 Task::none()
             }
             Message::Frame(now) => {
+                self.moment = now;
                 let elapsed = self
                     .last_frame
                     .replace(now)
                     .map_or(Duration::ZERO, |last| now - last);
-                let step = elapsed.as_secs_f32() / UNFOLD.as_secs_f32();
+                let unfold = self.pace().of(UNFOLD);
+                let step = if unfold.is_zero() {
+                    1.0
+                } else {
+                    elapsed.as_secs_f32() / unfold.as_secs_f32()
+                };
+                let pace = self.pace();
+                for bar in &mut self.bars {
+                    bar.arrivals
+                        .retain(|_, since| motion::arriving(*since, now, pace));
+                }
+                self.watch_launches(now);
+                let mut tasks = Vec::new();
+                if self
+                    .leaving
+                    .as_ref()
+                    .is_some_and(|drawer| !drawer.reveal.moving(now))
+                {
+                    if let Some(drawer) = self.leaving.take() {
+                        tasks.push(window::close(drawer.id));
+                    }
+                }
                 let mut settled = Vec::new();
                 for bar in &mut self.bars {
                     let target = unfold_target(bar);
@@ -1583,7 +1724,8 @@ impl Dock {
                 }
                 // Folded again: the windows beside the bar get the pointer
                 // back.
-                Task::batch(settled.into_iter().map(|id| self.input_region(id)))
+                tasks.extend(settled.into_iter().map(|id| self.input_region(id)));
+                Task::batch(tasks)
             }
             Message::Compositor(update) => self.compositor(update),
             Message::Backend(update) => self.backend(update),
@@ -1675,6 +1817,7 @@ impl Dock {
                 Task::none()
             }
             Message::Closed(id) => {
+                self.leaving.take_if(|drawer| drawer.id == id);
                 // A click outside the menu closes it without telling more;
                 // the bar, kept as it was for it, folds again.
                 if let Some((_, bar, _)) = self.menu.take_if(|(menu, ..)| *menu == id) {
@@ -1767,7 +1910,10 @@ impl Dock {
                 match bar::left_click(&entry) {
                     Click::Activate(window) => self.send(Command::Activate { window }),
                     Click::Launch => match &entry.identity.command {
-                        Some(command) => spawn(command),
+                        Some(command) => {
+                            spawn(command);
+                            self.launched(&entry.identity.key);
+                        }
                         None => warn!(name = entry.identity.name, "no command to start this"),
                     },
                 }
@@ -1775,8 +1921,12 @@ impl Dock {
             }
             Message::EntryMiddle(id, index) => {
                 let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
-                if let Some(command) = entry.and_then(|entry| entry.identity.command.as_ref()) {
-                    spawn(command);
+                let identity = entry.map(|entry| entry.identity.clone());
+                if let Some(identity) = identity {
+                    if let Some(command) = &identity.command {
+                        spawn(command);
+                        self.launched(&identity.key);
+                    }
                 }
                 self.leave_drawer_of(id)
             }
@@ -2016,17 +2166,23 @@ impl Dock {
                     self.forget_drawer_pointer(drawer.screen);
                     // Its menus go with it.
                     let menus = self.close_menu().chain(self.close_tray_menu());
-                    menus
-                        .chain(window::close(drawer.id))
-                        .chain(self.sync_toasts())
+                    menus.chain(self.leave(drawer)).chain(self.sync_toasts())
                 }
                 None => Task::none(),
             },
             Message::ToggleMixer => {
+                let pace = self.pace();
                 let Some(drawer) = &mut self.drawer else {
                     return Task::none();
                 };
                 drawer.mixer = !drawer.mixer;
+                let now = Instant::now();
+                drawer.mixer_reveal = if drawer.mixer {
+                    Reveal::coming(now, pace.of(durations::MIXER))
+                } else {
+                    Reveal::at_rest(0.0, now)
+                };
+                self.moment = now;
                 let shown = drawer.mixer_shown();
                 self.request(Request::Levels(shown));
                 Task::none()
@@ -2382,7 +2538,7 @@ impl Dock {
             subscriptions.push(iced::time::every(pace).map(|_| Message::ExpireToasts));
         }
 
-        if self.bars.iter().any(|bar| bar.unfold != unfold_target(bar)) {
+        if self.animating(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
         if self.drawer.is_some() {
@@ -2440,7 +2596,8 @@ impl Dock {
                 return ui::tray_menu::view(self, item);
             }
         }
-        if let Some(drawer) = self.drawer.as_ref().filter(|drawer| drawer.id == id) {
+        let drawers = self.drawer.iter().chain(&self.leaving);
+        if let Some(drawer) = drawers.into_iter().find(|drawer| drawer.id == id) {
             return ui::drawer::view(self, drawer);
         }
         if let Some(surface) = self.toasts.as_ref().filter(|surface| surface.id == id) {

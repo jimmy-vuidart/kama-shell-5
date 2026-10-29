@@ -38,6 +38,8 @@ pub struct Config {
     pub icon_size: Option<u32>,
     pub audio_hidden: Vec<String>,
     pub audio_nicks: BTreeMap<String, String>,
+    /// Whether the dock moves (`[animations] enabled`), as the compositor.
+    pub animations: bool,
 }
 
 impl Config {
@@ -79,7 +81,10 @@ impl Config {
 /// defaults: the compositor is the one that reports it.
 pub fn parse(text: &str) -> Config {
     let Ok(document) = text.parse::<DocumentMut>() else {
-        return Config::default();
+        return Config {
+            animations: true,
+            ..Config::default()
+        };
     };
     let names = |section: &str, key: &str| -> Option<Vec<String>> {
         let array = document.get(section)?.get(key)?.as_array()?;
@@ -95,6 +100,7 @@ pub fn parse(text: &str) -> Config {
         let value = document.get("dock")?.get(key)?.as_integer()?;
         u32::try_from(value).ok()
     };
+    let settings = Settings::parse(text);
     let favorites = names("dock", "favorites").unwrap_or_default();
     let audio_hidden = names("audio", "hidden").unwrap_or_default();
     let audio_nicks = document
@@ -116,7 +122,7 @@ pub fn parse(text: &str) -> Config {
             _ => None,
         },
         accent: text_of("accent").map(str::to_owned),
-        places: Settings::parse(text).docks,
+        places: settings.docks,
         pinned: names("drawer", "pinned").unwrap_or_else(|| favorites.clone()),
         drawer_width: length("width"),
         drawer_height: length("height"),
@@ -124,6 +130,7 @@ pub fn parse(text: &str) -> Config {
         favorites,
         audio_hidden,
         audio_nicks,
+        animations: settings.animations(),
     }
 }
 

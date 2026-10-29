@@ -5,15 +5,17 @@ use chrono::{DateTime, Datelike, Local, Timelike};
 use iced::widget::{
     Column, Row, column, container, image, mouse_area, row, space, stack, svg, text,
 };
-use iced::{Alignment, Color, ContentFit, Element, Length, Padding};
+use iced::{Alignment, Color, ContentFit, Element, Length, Padding, Vector};
 
 use coquille_ipc::GlassShape;
 
 use super::icons::{self, Glyph};
+use super::shift::shift;
 use super::style::{self, Palette};
 use crate::app::{BarState, Dock, Message};
 use crate::model::bar::{Entry, Indicator};
 use crate::model::battery::{Battery, Charge};
+use crate::model::motion;
 use crate::model::tray::TrayItem;
 use crate::model::{Orientation, Side};
 
@@ -520,6 +522,29 @@ pub fn entry_rect(
     Metrics::default().entry_rect(orientation, index, pinned, unfolded)
 }
 
+/// How a tile of the bar moves now: how high it hops, how much it beats
+/// (both while its application starts) and how big it is (growing in).
+struct TileMotion {
+    hop: f32,
+    beat: f32,
+    scale: f32,
+}
+
+fn tile_motion(dock: &Dock, state: &BarState, entry: &Entry) -> TileMotion {
+    let now = dock.moment;
+    let key = &entry.identity.key;
+    let launch = dock.launches.iter().find(|launch| launch.key == *key);
+    let scale = state
+        .arrivals
+        .get(key)
+        .map_or(1.0, |since| motion::arrival_scale(*since, now, dock.pace()));
+    TileMotion {
+        hop: launch.map_or(0.0, |launch| launch.height(now)),
+        beat: launch.map_or(0.0, |launch| launch.beat(now)),
+        scale,
+    }
+}
+
 /// How an upright bar shows: the edge it stands on, whether its texts have
 /// room.
 #[derive(Clone, Copy)]
@@ -861,6 +886,12 @@ fn lying_entry<'a>(
         palette,
         hovered || dragged,
     );
+    // Starting, it hops out of the bar, as high as half of itself.
+    let moving = tile_motion(dock, state, entry);
+    let rise = -0.5 * metrics.lying_tile().0 * moving.hop;
+    let icon: Element<'_, Message> = shift(icon, Vector::new(0.0, rise))
+        .scale(moving.scale)
+        .into();
     let icon: Element<'_, Message> = if unread > 0 {
         let count = container(badge(unread, 14.0))
             .width(metrics.lying_slot)
@@ -1293,6 +1324,9 @@ fn entry_row<'a>(
         palette,
         false,
     );
+    // Starting, it beats: the bar keeps what would hop out of it.
+    let moving = tile_motion(dock, state, entry);
+    let tile = shift(tile, Vector::ZERO).scale(moving.scale * (1.0 - 0.18 * moving.beat));
     let icon = container(tile)
         .center_x(metrics.slot)
         .center_y(metrics.slot)

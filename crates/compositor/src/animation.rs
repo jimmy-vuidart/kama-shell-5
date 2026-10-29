@@ -556,15 +556,19 @@ pub enum Arrival {
     /// Only getting opaque, in place: what covers the whole screen, and
     /// draws a copy of the bar of the dock where the bar is.
     Fade,
+    /// As it is: the panel moves by itself (the launcher of the dock).
+    Own,
 }
 
 impl Arrival {
-    /// Where a panel at `place` starts from; none to grow instead.
+    /// Where a panel at `place` starts from; none to grow instead (or, for
+    /// one that moves by itself, to stay as it is).
     pub fn offset(self, place: Rect) -> Option<(f64, f64)> {
         match self {
             Arrival::Slide(side) => Some(side.slide(place)),
             Arrival::Grow => None,
             Arrival::Fade => Some((0.0, 0.0)),
+            Arrival::Own => None,
         }
     }
 }

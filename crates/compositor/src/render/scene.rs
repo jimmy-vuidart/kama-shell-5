@@ -35,7 +35,7 @@ use super::glass::{Blur, GlassCache, GlassElement, Mask};
 use super::per_view::PerView;
 use super::shaders::Shaders;
 use super::shadow::{Shadow, ShadowCache};
-use crate::animation::{Area, Curve, Entry, Exit, Look, Pace, durations::PANEL};
+use crate::animation::{Area, Arrival, Curve, Entry, Exit, Look, Pace, durations::PANEL};
 use crate::config::GlassConfig;
 use crate::decoration::paint::TitlebarSpec;
 use crate::panels::Panel;
@@ -904,6 +904,7 @@ fn panel_elements(
                 state.entry = motion
                     .pace
                     .tween(now, PANEL, Curve::Settle)
+                    .filter(|_| panel.arrival != Arrival::Own)
                     .map(|tween| Entry {
                         tween,
                         slide: panel.arrival.offset(place),

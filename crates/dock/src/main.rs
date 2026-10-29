@@ -52,6 +52,11 @@ struct Cli {
     /// Ouvre le tiroir et le mixeur dès le démarrage.
     #[arg(long)]
     mixer: bool,
+
+    /// Ralentit les animations autant de fois (pour les regarder, ou les
+    /// capturer en route).
+    #[arg(long, value_name = "FOIS", default_value_t = 1.0)]
+    animation_slowdown: f32,
 }
 
 fn state_dir() -> PathBuf {
@@ -94,6 +99,7 @@ fn main() -> iced_layershell::Result {
             .unwrap_or_else(|| if cli.mock { scratch() } else { state_dir() }),
         drawer: cli.drawer,
         mixer: cli.mixer,
+        slowdown: cli.animation_slowdown,
     };
 
     let fonts = ui::style::FIGTREE

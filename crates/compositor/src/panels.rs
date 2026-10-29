@@ -17,12 +17,17 @@ use crate::state::State;
 
 /// The namespace of the bar of the dock.
 const BAR: &str = "coquille-dock";
+/// The launcher of the dock, which moves by itself.
+const DRAWER: &str = "coquille-drawer";
 
 /// How a panel comes in: from the one edge it holds on to; in place when
 /// it holds them all (the drawer, which draws a copy of the bar where the
 /// bar is); else from the side of the bar of the dock, `bar`
 /// (notifications, in a corner). A panel held by no edge grows in place.
 pub fn arrival_of(surface: &LayerSurface, bar: Option<Rect>, screen: Size) -> Arrival {
+    if surface.namespace() == DRAWER {
+        return Arrival::Own;
+    }
     let anchor = surface.cached_state().anchor;
     if anchor.is_empty() {
         return Arrival::Grow;

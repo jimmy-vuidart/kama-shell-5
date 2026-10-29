@@ -12,7 +12,7 @@ use coquille_model::{OutputId, Point as ModelPoint, Rect, WindowGeometry, Window
 use smithay::desktop::{LayerSurface, layer_map_for_output};
 use smithay::utils::IsAlive;
 
-use crate::animation::{Area, Curve, DOCK_SCALE, Entrance, Exit, Look, Side, durations};
+use crate::animation::{Area, Arrival, Curve, DOCK_SCALE, Entrance, Exit, Look, Side, durations};
 use crate::input::Gesture;
 use crate::render::scene::PanelGhost;
 use crate::state::State;
@@ -163,6 +163,9 @@ impl State {
             .get(&(panel.namespace().to_owned(), info.role))
             .cloned()
             .unwrap_or_default();
+        if arrival == Arrival::Own {
+            return;
+        }
         let tween = self
             .pace
             .tween(Instant::now(), durations::PANEL_CLOSE, Curve::EaseIn);

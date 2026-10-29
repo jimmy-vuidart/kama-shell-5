@@ -5,6 +5,7 @@ pub mod bar;
 pub mod battery;
 pub mod drawer;
 pub mod mixer;
+pub mod motion;
 pub mod notify;
 pub mod tray;
 
