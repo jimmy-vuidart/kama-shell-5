@@ -228,9 +228,12 @@ pub struct GlassElement {
     geometry: Rectangle<i32, Physical>,
     mask: Mask,
     blur: Blur,
+    /// Below 1 while what it is under fades in or out.
+    alpha: f32,
 }
 
 impl GlassElement {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         id: Id,
         commit: CommitCounter,
@@ -239,6 +242,7 @@ impl GlassElement {
         output_size: Size<i32, Physical>,
         mask: Mask,
         blur: Blur,
+        alpha: f32,
     ) -> Self {
         let margin = blur_margin(blur);
         let geometry = expanded_and_clipped_geometry(shape, margin, output_size);
@@ -250,6 +254,7 @@ impl GlassElement {
             geometry,
             mask,
             blur,
+            alpha,
         }
     }
 }
@@ -259,7 +264,7 @@ impl GlassElement {
 pub struct GlassCache {
     id: Id,
     commit: CommitCounter,
-    last_spec: Option<(Rectangle<i32, Physical>, MaskKey, Blur)>,
+    last_spec: Option<(Rectangle<i32, Physical>, MaskKey, Blur, f32)>,
 }
 
 impl Default for GlassCache {
@@ -281,7 +286,20 @@ impl GlassCache {
         mask: Mask,
         blur: Blur,
     ) -> GlassElement {
-        let spec = (shape, mask.key(), blur);
+        self.faded(shaders, shape, output_size, mask, blur, 1.0)
+    }
+
+    /// The glass under something that is `alpha` opaque, fading in or out.
+    pub fn faded(
+        &mut self,
+        shaders: &Shaders,
+        shape: Rectangle<i32, Physical>,
+        output_size: Size<i32, Physical>,
+        mask: Mask,
+        blur: Blur,
+        alpha: f32,
+    ) -> GlassElement {
+        let spec = (shape, mask.key(), blur, alpha);
         if self.last_spec != Some(spec) {
             self.commit.increment();
             self.last_spec = Some(spec);
@@ -294,6 +312,7 @@ impl GlassCache {
             output_size,
             mask,
             blur,
+            alpha,
         )
     }
 }
@@ -336,7 +355,7 @@ impl Element for GlassElement {
     }
 
     fn alpha(&self) -> f32 {
-        1.0
+        self.alpha
     }
 
     fn kind(&self) -> Kind {
@@ -876,7 +895,7 @@ impl GlassElement {
             damage,
             &[],
             Transform::Normal,
-            1.0,
+            self.alpha,
             Some(&self.shaders.glass),
             &uniforms,
         );

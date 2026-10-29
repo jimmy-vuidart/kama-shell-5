@@ -246,6 +246,8 @@ pub struct Settings {
     pub sticky_edges_ms: Option<u64>,
     pub direct_scanout: Option<bool>,
     pub vrr: Option<bool>,
+    /// Windows and panels ease from one place to the next.
+    pub animations: Option<bool>,
     pub docks: PerScreen<Option<DockPlace>>,
     /// How each screen arranges the windows tidied into it.
     pub layouts: PerScreen<Option<LayoutKind>>,
@@ -332,6 +334,7 @@ impl Settings {
                 .and_then(|delay| u64::try_from(delay).ok()),
             direct_scanout: switch(&["game", "direct_scanout"]),
             vrr: switch(&["game", "vrr"]),
+            animations: switch(&["animations", "enabled"]),
             docks: PerScreen::from_roles(|role| {
                 let said = text_of(&["dock", "screens", role_name(role)])?;
                 DockPlace::named(&said)
@@ -392,6 +395,10 @@ impl Settings {
 
     pub fn vrr(&self) -> bool {
         self.vrr.unwrap_or(true)
+    }
+
+    pub fn animations(&self) -> bool {
+        self.animations.unwrap_or(true)
     }
 
     pub fn dock(&self, role: OutputRole) -> DockPlace {
@@ -516,6 +523,7 @@ pub enum Change {
     StickyEdges(u64),
     DirectScanout(bool),
     Vrr(bool),
+    Animations(bool),
     Dock(OutputRole, DockPlace),
     Layout(OutputRole, LayoutKind),
     Scale(OutputRole, Scale),
@@ -590,6 +598,7 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
         }
         Change::DirectScanout(on) => with_value(text, &["game", "direct_scanout"], (*on).into()),
         Change::Vrr(on) => with_value(text, &["game", "vrr"], (*on).into()),
+        Change::Animations(on) => with_value(text, &["animations", "enabled"], (*on).into()),
         Change::Dock(role, place) => {
             let path = ["dock", "screens", role_name(*role)];
             with_value(text, &path, place.name().into())
@@ -708,6 +717,7 @@ mod tests {
         assert_eq!(settings, Settings::default());
         assert_eq!(settings.theme(), ThemeName::Light);
         assert!(settings.xwayland() && settings.direct_scanout() && settings.vrr());
+        assert!(settings.animations());
         assert_eq!(settings.sticky_edges_ms(), 300);
         assert_eq!(settings.dock(OutputRole::Left), DockPlace::Vertical);
         assert_eq!(settings.dock(OutputRole::Center), DockPlace::Off);
@@ -807,6 +817,7 @@ mod tests {
             Change::StickyEdges(450),
             Change::DirectScanout(false),
             Change::Vrr(false),
+            Change::Animations(false),
             Change::Dock(OutputRole::Left, DockPlace::Off),
             Change::Dock(OutputRole::Center, DockPlace::VerticalRight),
             Change::Dock(OutputRole::Right, DockPlace::Horizontal),
@@ -849,6 +860,7 @@ mod tests {
             sticky_edges_ms: Some(450),
             direct_scanout: Some(false),
             vrr: Some(false),
+            animations: Some(false),
             docks: PerScreen {
                 left: Some(DockPlace::Off),
                 center: Some(DockPlace::VerticalRight),

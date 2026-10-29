@@ -1,4 +1,5 @@
-//! A client surface drawn through the rounded-corner clip.
+//! A client surface drawn through the rounded-corner clip: live, or what it
+//! last showed once its client is gone.
 
 use smithay::backend::renderer::{
     Frame,
@@ -16,18 +17,19 @@ use super::clip::frag_to_local;
 
 /// Wraps a surface element so that nothing shows outside `clip`, whose
 /// corners are rounded by `radii` (top-left, top-right, bottom-right,
-/// bottom-left).
+/// bottom-left). The inner element must draw through the renderer's texture
+/// program, which the clip replaces for it.
 #[derive(Debug)]
-pub struct ClippedSurface {
-    inner: WaylandSurfaceRenderElement<GlesRenderer>,
+pub struct ClippedSurface<E = WaylandSurfaceRenderElement<GlesRenderer>> {
+    inner: E,
     program: GlesTexProgram,
     clip: Rectangle<i32, Physical>,
     radii: [f32; 4],
 }
 
-impl ClippedSurface {
+impl<E> ClippedSurface<E> {
     pub fn new(
-        inner: WaylandSurfaceRenderElement<GlesRenderer>,
+        inner: E,
         program: GlesTexProgram,
         clip: Rectangle<i32, Physical>,
         radii: [f32; 4],
@@ -41,7 +43,7 @@ impl ClippedSurface {
     }
 }
 
-impl Element for ClippedSurface {
+impl<E: Element> Element for ClippedSurface<E> {
     fn id(&self) -> &Id {
         self.inner.id()
     }
@@ -85,7 +87,7 @@ impl Element for ClippedSurface {
     }
 }
 
-impl RenderElement<GlesRenderer> for ClippedSurface {
+impl<E: RenderElement<GlesRenderer>> RenderElement<GlesRenderer> for ClippedSurface<E> {
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,

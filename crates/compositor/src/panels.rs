@@ -5,14 +5,53 @@
 
 use coquille_ipc::GlassShape;
 use coquille_model::{Insets, OutputId, OutputRole, Rect, Size};
-use smithay::desktop::{LayerSurface, WindowSurfaceType, layer_map_for_output};
+use smithay::desktop::{LayerMap, LayerSurface, WindowSurfaceType, layer_map_for_output};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::get_parent;
-use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer};
+use smithay::wayland::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer};
 use tracing::{debug, warn};
 
+use crate::animation::{Arrival, Side, edge_of};
 use crate::state::State;
+
+/// The namespace of the bar of the dock.
+const BAR: &str = "coquille-dock";
+
+/// How a panel comes in: from the one edge it holds on to; in place when
+/// it holds them all (the drawer, which draws a copy of the bar where the
+/// bar is); else from the side of the bar of the dock, `bar`
+/// (notifications, in a corner). A panel held by no edge grows in place.
+pub fn arrival_of(surface: &LayerSurface, bar: Option<Rect>, screen: Size) -> Arrival {
+    let anchor = surface.cached_state().anchor;
+    if anchor.is_empty() {
+        return Arrival::Grow;
+    }
+    if anchor.is_all() {
+        return Arrival::Fade;
+    }
+    let held = |edge: Anchor| anchor.contains(edge);
+    let own = edge_of(
+        held(Anchor::LEFT),
+        held(Anchor::TOP),
+        held(Anchor::RIGHT),
+        held(Anchor::BOTTOM),
+    );
+    let side = own.or_else(|| Some(Side::of_bar(bar?, Rect::new(0, 0, screen.w, screen.h))));
+    side.map_or(Arrival::Grow, Arrival::Slide)
+}
+
+/// Where the bar of the dock is on the screen of `map`, if it has one.
+fn bar_of(map: &LayerMap) -> Option<Rect> {
+    let bar = map.layers().find(|layer| layer.namespace() == BAR)?;
+    let place = map.layer_geometry(bar)?;
+    Some(Rect::new(
+        place.loc.x,
+        place.loc.y,
+        place.size.w,
+        place.size.h,
+    ))
+}
 
 /// A panel and where it is.
 #[derive(Debug, Clone)]
@@ -24,6 +63,8 @@ pub struct Panel {
     pub origin: Point<i32, Logical>,
     /// The liquid glass its program asked for (see `Command::SetGlass`).
     pub liquid: Vec<GlassShape>,
+    /// How it comes in and goes.
+    pub arrival: Arrival,
 }
 
 /// How a panel asks for the keyboard.
@@ -89,6 +130,7 @@ impl State {
                 }
                 let corner = Point::from((info.rect.x, info.rect.y));
                 let map = layer_map_for_output(&screen.output);
+                let bar = bar_of(&map);
                 for surface in map.layers_on(layer).rev() {
                     if let Some(geometry) = map.layer_geometry(surface) {
                         panels.push(Panel {
@@ -97,6 +139,7 @@ impl State {
                             output: screen.id,
                             origin: corner + geometry.loc,
                             liquid: self.liquid_of(surface, info.role),
+                            arrival: arrival_of(surface, bar, info.rect.size()),
                         });
                     }
                 }
@@ -136,6 +179,7 @@ impl State {
                 output: screen.id,
                 origin: Point::from((info.rect.x, info.rect.y)) + geometry.loc,
                 liquid: self.liquid_of(surface, info.role),
+                arrival: arrival_of(surface, bar_of(&map), info.rect.size()),
             })
         })
     }

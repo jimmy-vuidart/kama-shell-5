@@ -12,7 +12,7 @@ use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
 use smithay::utils::{Buffer, Physical, Rectangle, Size, Transform};
 use tracing::{info, warn};
 
-use crate::render::scene::{self, Layers};
+use crate::render::scene::{self, Layers, PanelAnimation};
 use crate::state::State;
 
 /// Finds or creates the folder where screenshots are stored.
@@ -123,6 +123,13 @@ pub fn capture_output(state: &mut State, output_id: OutputId) -> anyhow::Result<
         drop_glass: &mut state.drop_glass,
         bar_shadow: &mut state.bar_shadow,
         overlay_shapes: &mut state.overlay_shapes,
+        overlay_alpha: 1.0,
+        panel_motion: PanelAnimation {
+            motions: &mut state.panel_motions,
+            ghosts: &mut state.panel_ghosts,
+            pace: state.pace,
+            now: std::time::Instant::now(),
+        },
     };
     let elements = scene::build(renderer, &shaders, &mut state.shell, &state.theme, layers);
 

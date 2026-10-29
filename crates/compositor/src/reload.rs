@@ -40,6 +40,7 @@ impl State {
             udev.set_game(&config.game);
             udev.set_pointers(&config.mouse, &config.touchpad);
         }
+        self.pace.set_enabled(config.animations.enabled());
         self.set_layouts(&config.layout);
         if !self.scale_pinned {
             self.set_scales(&config.scale);

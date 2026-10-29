@@ -6,7 +6,7 @@
 
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use coquille_model::{OutputId, Rect, Scale, Size as ModelSize};
@@ -44,7 +44,7 @@ use super::Backend;
 use crate::config::{GameConfig, MouseConfig, ScaleConfig, TouchpadClick, TouchpadConfig};
 use crate::game::{Boost, FrameNote};
 use crate::outputs::{Connected, ModeInfo, RoleConfig, assign_roles, origins, pick_mode};
-use crate::render::scene::{self, Layers, SceneElement};
+use crate::render::scene::{self, Layers, PanelAnimation, SceneElement};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
 use crate::state::State;
@@ -683,6 +683,10 @@ impl State {
         let cursor = self.cursor(true, scale);
         self.refresh_switcher();
         let overlay = self.overlay();
+        let overlay_alpha = self.overlay_alpha(!overlay.is_empty());
+        let switcher = self.switcher.as_ref().and_then(Switcher::panel);
+        let switcher =
+            switcher.map(|(buffer, rect)| (buffer.clone(), rect, self.switcher_look(rect)));
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
         let freeze = self.active_freeze();
@@ -708,7 +712,9 @@ impl State {
                 view,
                 scale,
                 overlay: &overlay,
-                panel: self.switcher.as_ref().and_then(Switcher::panel),
+                panel: switcher
+                    .as_ref()
+                    .map(|(buffer, rect, look)| (buffer, *rect, *look)),
                 panels: &panels,
                 cursor,
                 wallpapers: &wallpapers,
@@ -719,6 +725,13 @@ impl State {
                 drop_glass: &mut self.drop_glass,
                 bar_shadow: &mut self.bar_shadow,
                 overlay_shapes: &mut self.overlay_shapes,
+                overlay_alpha,
+                panel_motion: PanelAnimation {
+                    motions: &mut self.panel_motions,
+                    ghosts: &mut self.panel_ghosts,
+                    pace: self.pace,
+                    now: Instant::now(),
+                },
             },
         );
         let crtc = screen.crtc;
@@ -864,6 +877,7 @@ impl State {
                 screen.pacing = Pacing::Idle;
             }
         }
+        self.keep_animating();
     }
 
     /// The screen showed the frame that was queued.

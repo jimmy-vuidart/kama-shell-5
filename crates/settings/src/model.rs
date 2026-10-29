@@ -51,7 +51,7 @@ impl Page {
     /// What the page is about, under its name.
     pub fn summary(self) -> &'static str {
         match self {
-            Self::Appearance => "Le thème et la couleur d'accent.",
+            Self::Appearance => "Le thème, la couleur d'accent et les animations.",
             Self::Wallpaper => "L'image derrière les fenêtres, et sa définition.",
             Self::Screens => "Quel écran est lequel, et où se tient le dock.",
             Self::Audio => {

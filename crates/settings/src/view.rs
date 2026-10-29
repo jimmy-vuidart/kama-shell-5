@@ -234,11 +234,28 @@ fn appearance<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     ]
     .spacing(12);
 
-    section(
-        "Thème",
-        card(vec![theme.into(), accent.into()], palette),
+    let effects = vec![setting(
+        "Animations",
+        "Les fenêtres glissent vers leur place, grandissent en s'ouvrant et rejoignent le \
+         dock quand on les réduit, au lieu d'apparaître d'un coup.",
+        None,
+        switch(
+            app.file.animations(),
+            |on| Message::Change(Change::Animations(on)),
+            palette,
+        ),
         palette,
-    )
+    )];
+    column![
+        section(
+            "Thème",
+            card(vec![theme.into(), accent.into()], palette),
+            palette,
+        ),
+        section("Effets", card(effects, palette), palette)
+    ]
+    .spacing(18)
+    .into()
 }
 
 /// The page of the wallpaper: its version, how it fits, the image.

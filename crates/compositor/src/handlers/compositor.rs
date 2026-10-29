@@ -73,6 +73,7 @@ impl CompositorHandler for State {
         on_commit_buffer_handler::<Self>(surface);
 
         let mut covers_anew = false;
+        let mut drawn_first = None;
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
             while let Some(parent) = get_parent(&root) {
@@ -84,6 +85,7 @@ impl CompositorHandler for State {
                 covers_anew = std::mem::replace(&mut managed.covered, covered) != covered;
                 if covered.w > 0 && covered.h > 0 && managed.drawn_at.is_none() {
                     managed.drawn_at = Some(std::time::Instant::now());
+                    drawn_first = Some(managed.id);
                 }
             }
         }
@@ -91,6 +93,9 @@ impl CompositorHandler for State {
         // First commit of a toplevel: the model places it, it gets configured.
         self.map_window(surface);
         self.follow_client_size(surface);
+        if let Some(id) = drawn_first {
+            self.window_drawn(id);
+        }
         // What the window covers changed (its first buffer, most of the
         // time): so may have what is under the pointer.
         if covers_anew {

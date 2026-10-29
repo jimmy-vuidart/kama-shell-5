@@ -2,6 +2,8 @@
 //! windows in the order they were used, and letting go of Alt shows the one
 //! chosen. Escape gives up.
 
+use std::time::Instant;
+
 use coquille_model::{OutputId, Rect, WindowId};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
@@ -83,6 +85,8 @@ pub struct Switcher {
     pub buffer: Option<MemoryRenderBuffer>,
     /// What it was painted from.
     spec: Option<SwitcherSpec>,
+    /// When it showed: it grows in.
+    pub opened: Instant,
 }
 
 impl State {
@@ -107,6 +111,7 @@ impl State {
                 rect: Rect::default(),
                 buffer: None,
                 spec: None,
+                opened: Instant::now(),
             });
         }
         self.queue_redraw();

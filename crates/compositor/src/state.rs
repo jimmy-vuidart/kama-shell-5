@@ -41,6 +41,7 @@ use smithay::wayland::xwayland_shell::XWaylandShellState;
 use smithay::xwayland::X11Wm;
 use tracing::{info, warn};
 
+use crate::animation::Pace;
 use crate::app_theme::AppTheme;
 use crate::backend::Backend;
 use crate::config::{GlassConfig, LayoutConfig, WallpaperConfig};
@@ -86,6 +87,8 @@ pub struct Options {
     pub wallpaper: WallpaperConfig,
     /// How each screen arranges the windows tidied into it.
     pub layout: LayoutConfig,
+    /// Whether animations run, and how fast.
+    pub pace: Pace,
 }
 
 /// A screen as clients see it.
@@ -211,6 +214,13 @@ pub struct State {
     pub drop_glass: HashMap<coquille_model::Rect, GlassCache>,
     pub bar_shadow: crate::render::per_view::PerView<crate::render::ShadowCache>,
     pub overlay_shapes: crate::render::scene::OverlayShapes,
+    /// Whether animations run, and how fast.
+    pub pace: Pace,
+    /// How the panels of the shell come in, and those gone fading out.
+    pub panel_motions: crate::render::scene::PanelMotions,
+    pub panel_ghosts: Vec<crate::render::scene::PanelGhost>,
+    /// The drop zones have been shown since then: they fade in.
+    pub overlay_since: Option<Instant>,
     pub wallpaper_config: WallpaperConfig,
     pub wallpaper_manager: WallpaperManager,
     pub wallpapers: Vec<ScreenWallpaper>,
@@ -390,6 +400,10 @@ impl State {
             drop_glass: HashMap::new(),
             bar_shadow: Default::default(),
             overlay_shapes: HashMap::new(),
+            pace: options.pace,
+            panel_motions: HashMap::new(),
+            panel_ghosts: Vec::new(),
+            overlay_since: None,
             wallpaper_config: options.wallpaper,
             wallpaper_manager: WallpaperManager::new(),
             wallpapers: Vec::new(),

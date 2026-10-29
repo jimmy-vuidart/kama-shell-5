@@ -1,5 +1,7 @@
 //! coquille: a Wayland compositor built around "Center + companions".
 
+mod animate;
+mod animation;
 mod app_theme;
 mod backend;
 mod config;
@@ -44,6 +46,7 @@ use smithay::reexports::wayland_server::Display;
 use smithay::wayland::socket::ListeningSocketSource;
 use tracing::{error, info, warn};
 
+use crate::animation::Pace;
 use crate::backend::Backend;
 use crate::backend::winit::{REFRESH, Simulated};
 use crate::config::Config;
@@ -207,6 +210,11 @@ struct Cli {
     /// Débogage : délai avant la capture, en millisecondes.
     #[arg(long, default_value_t = 2000, value_name = "MS")]
     screenshot_delay: u64,
+
+    /// Débogage : ralentit toutes les animations de ce facteur (10 : dix
+    /// fois plus lentes), pour les regarder de près.
+    #[arg(long, default_value_t = 1.0, value_name = "FACTEUR")]
+    animation_slowdown: f64,
 
     /// Débogage : rejoue des entrées, voir `debug.rs` pour la syntaxe.
     // Spelled with its full path so that clap reads one value holding a
@@ -487,6 +495,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         glass: config.glass,
         wallpaper: config.wallpaper.clone(),
         layout: config.layout,
+        pace: Pace::new(config.animations.enabled(), cli.animation_slowdown),
     }
 }
 

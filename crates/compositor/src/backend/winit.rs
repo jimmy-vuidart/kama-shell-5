@@ -2,7 +2,7 @@
 //! which stands for one screen or for the three of them side by side.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use coquille_model::{OutputId, OutputRole, Rect, Scale, Size as ModelSize};
@@ -26,7 +26,7 @@ use tracing::{info, warn};
 use super::Backend;
 use crate::config::ScaleConfig;
 use crate::outputs::split_canvas;
-use crate::render::scene::{self, Layers};
+use crate::render::scene::{self, Layers, PanelAnimation};
 use crate::render::shaders::Shaders;
 use crate::shell::ScreenInfo;
 use crate::state::State;
@@ -225,6 +225,10 @@ impl State {
         let cursor = self.cursor(false, scale);
         self.refresh_switcher();
         let overlay = self.overlay();
+        let overlay_alpha = self.overlay_alpha(!overlay.is_empty());
+        let switcher = self.switcher.as_ref().and_then(Switcher::panel);
+        let switcher =
+            switcher.map(|(buffer, rect)| (buffer.clone(), rect, self.switcher_look(rect)));
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
         let freeze = self.active_freeze();
@@ -273,7 +277,9 @@ impl State {
                         view,
                         scale: scale.get(),
                         overlay: &overlay,
-                        panel: self.switcher.as_ref().and_then(Switcher::panel),
+                        panel: switcher
+                            .as_ref()
+                            .map(|(buffer, rect, look)| (buffer, *rect, *look)),
                         panels: &panels,
                         cursor,
                         wallpapers: &wallpapers,
@@ -284,6 +290,13 @@ impl State {
                         drop_glass: &mut self.drop_glass,
                         bar_shadow: &mut self.bar_shadow,
                         overlay_shapes: &mut self.overlay_shapes,
+                        overlay_alpha,
+                        panel_motion: PanelAnimation {
+                            motions: &mut self.panel_motions,
+                            ghosts: &mut self.panel_ghosts,
+                            pace: self.pace,
+                            now: Instant::now(),
+                        },
                     },
                 );
                 let clear = self.theme.backdrop.premultiplied();
@@ -320,6 +333,7 @@ impl State {
         }
 
         self.send_frame_callbacks(None);
+        self.keep_animating();
         if screenshot.is_some() {
             self.loop_signal.stop();
         }

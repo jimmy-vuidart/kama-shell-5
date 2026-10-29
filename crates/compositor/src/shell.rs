@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 
+use crate::animation::{Curve, Exit, Motion, durations};
 use crate::config::LayoutConfig;
 use crate::decoration::capsules::{CapsuleButton, GroupLayout};
 use crate::decoration::layout::TitlebarButton;
@@ -70,6 +71,19 @@ pub struct ManagedWindow {
     /// When it first drew something.
     pub drawn_at: Option<Instant>,
     pub chrome: Chrome,
+    /// How it goes from where it showed to its place.
+    pub motion: Motion,
+}
+
+/// A window that closed, fading out where it was with what it showed last.
+pub struct Ghost {
+    pub geometry: WindowGeometry,
+    /// In the global space.
+    pub frame: Rect,
+    pub titlebar: Option<Rect>,
+    pub client: Rect,
+    pub chrome: Chrome,
+    pub exit: Exit,
 }
 
 /// How long after a window first draws its client is taken to be setting
@@ -182,6 +196,8 @@ pub struct Shell {
     /// X11 windows that manage themselves (menus, tooltips, dropdowns),
     /// bottom to top. They are shown where they say, above everything.
     pub overrides: Vec<X11Surface>,
+    /// Windows closed a moment ago, fading out.
+    pub ghosts: Vec<Ghost>,
     next_id: u64,
 }
 
@@ -213,6 +229,7 @@ impl Shell {
             capsules: Vec::new(),
             unmapped: Vec::new(),
             overrides: Vec::new(),
+            ghosts: Vec::new(),
             next_id: 1,
         }
     }
@@ -656,6 +673,7 @@ impl State {
             covered: Size::default(),
             drawn_at: None,
             chrome: Chrome::default(),
+            motion: Motion::default(),
         });
         // It opens fullscreen: its screen is anchored from the start.
         if let Some(output) = fullscreen {
@@ -742,9 +760,32 @@ impl State {
         }
     }
 
-    /// A managed window is gone: its place is given back.
+    /// A managed window is gone: its place is given back. What it showed
+    /// last fades out where it was.
     pub fn remove_window(&mut self, id: WindowId) {
-        self.shell.windows.retain(|managed| managed.id != id);
+        if let Some(index) = self
+            .shell
+            .windows
+            .iter()
+            .position(|managed| managed.id == id)
+        {
+            let managed = self.shell.windows.remove(index);
+            let geometry = managed.geometry;
+            let shown = geometry.visible && !geometry.anchored;
+            let tween = self
+                .pace
+                .tween(Instant::now(), durations::CLOSE, Curve::EaseOut);
+            if let (true, false, Some(tween)) = (shown, managed.chrome.snapshot.is_empty(), tween) {
+                self.shell.ghosts.push(Ghost {
+                    geometry,
+                    frame: managed.frame(),
+                    titlebar: managed.titlebar(),
+                    client: managed.client(),
+                    chrome: managed.chrome,
+                    exit: Exit { tween, slide: None },
+                });
+            }
+        }
         if let Err(error) = self.shell.desk.close_window(id) {
             warn!(%error, "the model did not know a closed window");
         }
@@ -796,7 +837,14 @@ impl State {
     /// Makes the Wayland side match the model: sizes and states go to
     /// clients, the keyboard focus follows the focused window.
     pub fn apply_arrangement(&mut self) {
+        let before: Vec<(WindowId, WindowGeometry, Rect)> = self
+            .shell
+            .windows
+            .iter()
+            .map(|managed| (managed.id, managed.geometry, managed.frame()))
+            .collect();
         self.shell.sync();
+        self.animate_changes(&before);
 
         for managed in &self.shell.windows {
             let geometry = managed.geometry;

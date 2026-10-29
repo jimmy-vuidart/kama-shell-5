@@ -65,6 +65,7 @@ impl WlrLayerShellHandler for State {
             return;
         };
         debug!(namespace = panel.namespace(), "panel gone");
+        self.panel_leaves(&panel, id);
         if let Some(output) = self.output(id) {
             layer_map_for_output(output).unmap_layer(&panel);
         }

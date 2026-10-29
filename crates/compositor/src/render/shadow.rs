@@ -21,6 +21,8 @@ pub struct Shadow {
     pub color: Rgba,
     /// Corner radii of the shape: top-left, top-right, bottom-right, bottom-left.
     pub radii: [f32; 4],
+    /// Below 1 while what casts it fades in or out.
+    pub alpha: f32,
 }
 
 impl Shadow {
@@ -63,7 +65,7 @@ pub fn shadow_element(program: &GlesPixelProgram, shadow: Shadow) -> PixelShader
         program.clone(),
         crate::render::scene::rectangle(area),
         None,
-        1.0,
+        shadow.alpha,
         vec![
             Uniform::new("shape_size", [shadow.shape.w as f32, shadow.shape.h as f32]),
             Uniform::new("shape_offset", shape_offset),

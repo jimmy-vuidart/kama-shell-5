@@ -35,6 +35,7 @@ pub struct Config {
     /// this says otherwise.
     pub xwayland: Option<bool>,
     pub glass: GlassConfig,
+    pub animations: AnimationsConfig,
     pub game: GameConfig,
     pub wallpaper: WallpaperConfig,
 }
@@ -263,6 +264,20 @@ impl WallpaperConfig {
 
     pub fn definition(&self) -> WallpaperDefinition {
         self.definition.unwrap_or_default()
+    }
+}
+
+/// Whether windows and panels ease from one place to the next.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AnimationsConfig {
+    /// On unless this says otherwise.
+    pub enabled: Option<bool>,
+}
+
+impl AnimationsConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
     }
 }
 
@@ -550,6 +565,7 @@ mod tests {
             Change::StickyEdges(450),
             Change::DirectScanout(false),
             Change::Vrr(false),
+            Change::Animations(false),
             Change::Dock(OutputRole::Center, DockPlace::Horizontal),
             Change::Dock(OutputRole::Right, DockPlace::VerticalRight),
             Change::Layout(OutputRole::Left, LayoutKind::MainSide),
@@ -594,6 +610,7 @@ mod tests {
         assert_eq!(config.keyboard.variant.as_deref(), Some("bepo"));
         assert_eq!(config.game.sticky_edges_ms(), 450);
         assert!(!config.game.direct_scanout() && !config.game.vrr());
+        assert!(!config.animations.enabled());
         assert_eq!(config.mouse.accel_speed, Some(0.2));
         assert_eq!(config.mouse.accel_profile, Some(MouseAccelProfile::Flat));
         assert_eq!(config.mouse.natural_scroll, Some(true));

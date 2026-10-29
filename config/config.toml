@@ -72,6 +72,13 @@ right = "DP-1"
 # l'écran et le pilote la proposent. En cas de scintillement, mettre `false`.
 # vrr = true
 
+# Animations : les fenêtres glissent vers leur place, grandissent en
+# s'ouvrant, s'estompent en se fermant et rejoignent le dock quand on les
+# réduit ; les panneaux du dock arrivent en glissant ou en fondu. Jamais sur
+# l'écran d'un jeu. `false` les coupe.
+[animations]
+# enabled = true
+
 # Disposition de chaque écran : jusqu'à combien de colonnes les fenêtres
 # rangées se partagent l'écran. Une seule fenêtre rangée prend tout l'écran,
 # deux se le partagent, et ainsi de suite jusqu'au maximum ; au-delà, elles
