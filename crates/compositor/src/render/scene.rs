@@ -44,7 +44,7 @@ use crate::theme::{Rgba, Theme};
 
 /// How far from a view the pointer may be and still show on it: more than
 /// any pointer image is large.
-const CURSOR_REACH: i32 = 256;
+pub const CURSOR_REACH: i32 = 256;
 
 render_elements! {
     pub SceneElement<=GlesRenderer>;

@@ -94,9 +94,14 @@ impl CursorImages {
 
 fn sprite_from(image: &Image) -> Sprite {
     Sprite {
+        // Despite its name, `pixels_rgba` holds the bytes of the file as they
+        // are: little-endian ARGB words, which is ARGB8888 in DRM's naming
+        // (Smithay's own example reads them so). Read as ABGR, red and blue
+        // were swapped, and the hardware cursor plane, which only takes
+        // ARGB8888, refused every pointer image.
         buffer: MemoryRenderBuffer::from_slice(
             &image.pixels_rgba,
-            Fourcc::Abgr8888,
+            Fourcc::Argb8888,
             (image.width as i32, image.height as i32),
             1,
             Transform::Normal,

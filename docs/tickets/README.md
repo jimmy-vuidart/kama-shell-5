@@ -12,12 +12,14 @@ reste **à confirmer** par un essai.
 
 Un ticket terminé est supprimé dans le commit qui le règle (l'historique git
 en garde la trace), et sa ligne retirée de ce tableau. Les numéros ne sont
-jamais réutilisés : le suivant est le 36.
+jamais réutilisés : le suivant est le 39.
 
 ## Faits, à vérifier sur le matériel
 
 | N° | Ticket | Nature |
 |---|---|---|
+| 01 | [Une image vide bloquait l'écran pendant une période](01-cadence-image-vide.md) | performance |
+| 02 | [Les fenêtres cachées ne recevaient pas de « frame callback »](02-frame-callbacks-fenetres-cachees.md) (en imbriqué) | bug |
 | 11 | [Les voyants du clavier ne s'allument pas](11-voyants-clavier.md) | bug |
 | 12 | [Aucun périphérique d'entrée n'est réglé](12-reglages-libinput.md) | évolution |
 | 34 | [Agent polkit : à essayer depuis l'écran de connexion](34-agent-polkit.md) | vérification |
@@ -30,8 +32,6 @@ de servir au quotidien (bilan du 26 octobre 2026).
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
 | 30 | [Essayer coquille sur le portable](30-portable-sur-le-materiel.md) | vérification | portable |
-| 01 | [Une image vide bloque l'écran pendant une période](01-cadence-image-vide.md) | performance | matériel |
-| 02 | [Les fenêtres cachées ne reçoivent pas de « frame callback »](02-frame-callbacks-fenetres-cachees.md) | bug | imbriqué |
 | 03 | [Un écran éteint puis rallumé reste noir](03-evenements-de-connecteur.md) | robustesse | matériel |
 | 04 | [XWayland n'est jamais relancé](04-relance-xwayland.md) | robustesse | imbriqué |
 | 33 | [Pas de partage d'écran](33-partage-d-ecran.md) (phase 5, étape 5) | fonction manquante | imbriqué, matériel |
@@ -43,7 +43,9 @@ de servir au quotidien (bilan du 26 octobre 2026).
 
 | N° | Ticket | Nature | Se vérifie |
 |---|---|---|---|
-| 05 | [`apply_arrangement` fait tout et redessine tout](05-apply-arrangement.md) | dette, performance | imbriqué |
+| 36 | [Une image de latence de trop : dessiner au plus tard avant le vblank](36-latence-dessin-avant-le-vblank.md) | ressenti | matériel |
+| 37 | [Redimensionner : la décoration court devant l'appli](37-redimensionnement-synchronise.md) | ressenti | imbriqué |
+| 05 | [`apply_arrangement` fait tout](05-apply-arrangement.md) | dette, performance | imbriqué |
 | 06 | [Plusieurs tests de survol par événement souris](06-tests-de-survol.md) | performance | imbriqué |
 | 07 | [Le mixeur meurt si PipeWire redémarre](07-mixeur-reconnexion.md) | robustesse | imbriqué |
 | 09 | [L'écriture de `config.toml` peut détruire le fichier](09-ecriture-config.md) | bug | tests |
@@ -63,7 +65,8 @@ de servir au quotidien (bilan du 26 octobre 2026).
 | 27 | [Halo autour du curseur quand on secoue la souris](27-halo-du-curseur.md) | évolution | imbriqué |
 | 28 | [Dock : messages non lus réels, glisser une icône vers un écran](28-dock-non-lus-et-glisser.md) | évolution | imbriqué |
 | 29 | [Seuls les jeux Steam sont reconnus comme jeux](29-jeux-reconnus.md) | évolution | tests |
-| 31 | [Gestes du pavé tactile](31-gestes-du-pave.md) | évolution | portable |
+| 31 | [Gestes du pavé tactile](31-gestes-du-pave.md) (relais aux applis fait) | évolution | portable |
+| 38 | [Les animations redessinent tous les écrans](38-animations-par-ecran.md) | performance | imbriqué |
 | 32 | [Un écran externe branché au portable](32-ecran-externe-du-portable.md) | évolution | portable |
 
 ## Architecture et évolutions
@@ -76,8 +79,9 @@ de servir au quotidien (bilan du 26 octobre 2026).
 
 ## Ordre conseillé
 
-1. **20 puis 01**, et **02** : le confort en jeu. Le 20 rend le 01 testable
-   sans le matériel.
+1. **Vérifier 01 et 02** (faits sans essai), puis **20, 36 et 37** : le
+   ressenti au quotidien. Le 20 rend testables la cadence du 01 et le
+   minuteur du 36.
 2. **07, 09, 10** : courts, sans dépendance.
 3. **05**, qui profite des drapeaux par écran du 01, puis **06**.
 4. **03 et 04**, et la vérification de **11 et 12** : demandent des essais

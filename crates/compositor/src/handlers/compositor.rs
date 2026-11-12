@@ -113,7 +113,9 @@ impl CompositorHandler for State {
             }
         }
 
-        self.queue_redraw();
+        // Only the screen the surface shows on: a video on a side screen
+        // no longer has the game's screen drawn with each of its frames.
+        self.queue_redraw_for(surface);
     }
 }
 

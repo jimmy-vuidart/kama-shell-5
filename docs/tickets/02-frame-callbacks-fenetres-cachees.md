@@ -1,47 +1,34 @@
-# 02 — Les fenêtres cachées ne reçoivent pas de « frame callback »
+# 02 — Les fenêtres cachées ne recevaient pas de « frame callback »
 
 - **Priorité :** haute
 - **Nature :** bug
-- **Zone :** `crates/compositor/src/backend/winit.rs` (`send_frame_callbacks`, commun aux deux backends)
+- **Zone :** `crates/compositor/src/backend/winit.rs` (`send_hidden_frame_callbacks`, commun aux deux backends), `main.rs`
 - **Se vérifie :** en imbriqué
-- **Certitude :** mécanisme lu dans le code ; gel du client à confirmer
+- **État :** **fait dans le code, pas encore essayé**
 
 ## Constat
 
-`send_frame_callbacks` (`winit.rs:284`) ne sert que les fenêtres dont
-`geometry.visible` est vrai et qui sont sur l'écran qui vient d'afficher une
-image. N'en reçoivent donc jamais :
+`send_frame_callbacks` ne sert que les fenêtres visibles sur l'écran qui
+vient d'afficher une image. Un onglet de derrière, une fenêtre réduite ou une
+fenêtre sous un jeu ne recevaient jamais le signal : un client qui l'attend
+pour dessiner (`eglSwapBuffers` avec synchronisation verticale, Vulkan FIFO)
+restait figé, et montrait une image périmée un instant quand on revenait sur
+son onglet.
 
-- un onglet qui n'est pas celui affiché dans son emplacement ;
-- une fenêtre réduite ;
-- une fenêtre sous un jeu ancré ;
-- un panneau sur un écran ancré.
+## Ce qui a été fait
 
-## Conséquence
-
-Un client qui attend ce signal pour rendre son image suivante reste bloqué
-tant qu'il est caché. C'est le cas d'`eglSwapBuffers` avec la synchronisation
-verticale (Mesa) et de Vulkan en mode FIFO. Or mettre des applis en onglets
-est l'usage normal du projet (« pages web ou Discord, en onglets »).
-
-Symptômes possibles : une appli figée quand on revient sur son onglet, un jeu
-ou un lecteur vidéo dont le fil principal s'arrête, du son qui se coupe.
-
-## Piste
-
-Un minuteur de secours, vers 1 Hz, qui envoie le signal aux surfaces qui ne
-sont visibles sur aucun écran. `Window::send_frame` prend déjà un délai
-minimal (`throttle`) : le passer à une seconde suffit à ne jamais dépasser ce
-rythme. niri fait de même (« fallback timer »).
-
-Les fenêtres visibles gardent leur chemin actuel.
+Un minuteur d'une seconde (`HIDDEN_FRAME_PERIOD`, armé dans `main.rs`)
+appelle `send_hidden_frame_callbacks` : chaque fenêtre dont la géométrie dit
+`visible = false` reçoit le signal, au plus une fois par période (le
+« throttle » de Smithay, avec une sortie principale nulle : c'est le chemin
+prévu pour une surface vue nulle part). Les fenêtres visibles gardent leur
+chemin.
 
 ## Terminé quand
 
-- Essai scripté en imbriqué : un client qui rend avec la synchronisation
-  verticale (`glxgears`, ou un client SDL) est mis en onglet caché ; avec
-  `WAYLAND_DEBUG=1`, il reçoit encore `wl_callback.done` environ une fois par
-  seconde.
+- Essai scripté en imbriqué : `glxgears` (ou un client SDL) mis en onglet
+  caché reçoit encore `wl_callback.done` environ une fois par seconde
+  (`WAYLAND_DEBUG=1`).
 - Même essai avec une fenêtre réduite.
 - Une fenêtre visible ne reçoit pas plus de signaux qu'avant.
 

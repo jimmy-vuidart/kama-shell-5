@@ -846,6 +846,17 @@ impl State {
         self.shell.sync();
         self.animate_changes(&before);
 
+        // The windows whose size the mouse is changing: told so, they may
+        // draw more simply until it is over (GTK does).
+        let gesture = self.gesture;
+        let resized = |geometry: &WindowGeometry| match gesture {
+            Some(Gesture::Resizing { window, .. }) => window == geometry.id,
+            Some(Gesture::Splitting { output, .. }) => {
+                output == geometry.output && !geometry.floating && geometry.visible
+            }
+            _ => false,
+        };
+
         for managed in &self.shell.windows {
             let geometry = managed.geometry;
             // Tells the client which output it is on, hence its scale.
@@ -891,6 +902,7 @@ impl State {
                 set(ToplevelState::Activated, geometry.focused);
                 set(ToplevelState::Fullscreen, geometry.anchored);
                 set(ToplevelState::Maximized, geometry.maximized);
+                set(ToplevelState::Resizing, resized(&geometry));
                 // Tiled clients drop their own shadows and rounded corners.
                 let tiled = !geometry.floating && !geometry.anchored && !geometry.maximized;
                 for edge in [
@@ -913,8 +925,27 @@ impl State {
         self.save_habits();
         self.save_proportions();
         self.shell_changed();
-        self.full_redraw = true;
-        self.queue_redraw();
+
+        // Drawn whole, but only on the screens where a window changed: a
+        // window dragged on a side screen no longer has the two others,
+        // the game's among them, repainted with each move of the mouse.
+        let before: Vec<(WindowId, WindowGeometry)> = before
+            .iter()
+            .map(|(id, geometry, _)| (*id, *geometry))
+            .collect();
+        let after: Vec<(WindowId, WindowGeometry)> = self
+            .shell
+            .windows
+            .iter()
+            .map(|managed| (managed.id, managed.geometry))
+            .collect();
+        let touched = touched_screens(&before, &after);
+        if touched.is_empty() {
+            self.queue_redraw();
+        }
+        for output in touched {
+            self.queue_full_redraw_on(output);
+        }
     }
 
     /// Writes the widths of the columns to disk when the user changed them.
@@ -1123,6 +1154,54 @@ fn configure_x11(window: &X11Surface, managed: &ManagedWindow) {
     }
 }
 
+/// The screens where the windows changed between two arrangements: a window
+/// that moved, changed state, came or went, or a change in the order they are
+/// drawn in. A window that went from one screen to another touches both.
+fn touched_screens(
+    before: &[(WindowId, WindowGeometry)],
+    after: &[(WindowId, WindowGeometry)],
+) -> Vec<OutputId> {
+    let mut touched = Vec::new();
+    let mut touch = |output: OutputId| {
+        if !touched.contains(&output) {
+            touched.push(output);
+        }
+    };
+    for (id, geometry) in after {
+        match before.iter().find(|(old, _)| old == id) {
+            Some((_, old)) if old == geometry => {}
+            Some((_, old)) => {
+                touch(old.output);
+                touch(geometry.output);
+            }
+            None => touch(geometry.output),
+        }
+    }
+    for (id, geometry) in before {
+        if !after.iter().any(|(new, _)| new == id) {
+            touch(geometry.output);
+        }
+    }
+    // Raised or lowered: the same places, drawn in another order.
+    let order = |list: &[(WindowId, WindowGeometry)], output: OutputId| -> Vec<WindowId> {
+        list.iter()
+            .filter(|(_, geometry)| geometry.output == output)
+            .map(|(id, _)| *id)
+            .collect()
+    };
+    let outputs: Vec<OutputId> = before
+        .iter()
+        .chain(after)
+        .map(|(_, geometry)| geometry.output)
+        .collect();
+    for output in outputs {
+        if order(before, output) != order(after, output) {
+            touch(output);
+        }
+    }
+    touched
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1142,5 +1221,67 @@ mod tests {
             x11_rect(client, (20, 22, 10, 30)),
             Rect::new(1908, 36, 842, 640)
         );
+    }
+
+    const LEFT: OutputId = OutputId(1);
+    const CENTER: OutputId = OutputId(2);
+
+    fn placed(id: u64, output: OutputId, x: i32) -> (WindowId, WindowGeometry) {
+        let frame = Rect::new(x, 100, 800, 600);
+        (
+            WindowId(id),
+            WindowGeometry {
+                id: WindowId(id),
+                output,
+                frame,
+                titlebar: None,
+                client: frame,
+                visible: true,
+                focused: false,
+                floating: true,
+                maximized: false,
+                anchored: false,
+                minimized: false,
+            },
+        )
+    }
+
+    #[test]
+    fn a_window_moved_on_one_screen_touches_that_screen_only() {
+        let before = [placed(1, LEFT, 100), placed(2, CENTER, 100)];
+        let after = [placed(1, LEFT, 140), placed(2, CENTER, 100)];
+
+        assert_eq!(touched_screens(&before, &after), [LEFT]);
+    }
+
+    #[test]
+    fn nothing_changed_touches_no_screen() {
+        let windows = [placed(1, LEFT, 100), placed(2, CENTER, 100)];
+
+        assert!(touched_screens(&windows, &windows).is_empty());
+    }
+
+    #[test]
+    fn a_window_sent_to_another_screen_touches_both() {
+        let before = [placed(1, LEFT, 100)];
+        let after = [placed(1, CENTER, 100)];
+
+        assert_eq!(touched_screens(&before, &after), [LEFT, CENTER]);
+    }
+
+    #[test]
+    fn windows_coming_and_going_touch_their_screens() {
+        let before = [placed(1, LEFT, 100)];
+        let after = [placed(2, CENTER, 100)];
+
+        assert_eq!(touched_screens(&before, &after), [CENTER, LEFT]);
+    }
+
+    #[test]
+    fn a_window_raised_touches_its_screen() {
+        let before = [placed(1, LEFT, 100), placed(2, LEFT, 300)];
+        let after = [placed(2, LEFT, 300), placed(1, LEFT, 100)];
+
+        assert_eq!(touched_screens(&before, &after), [LEFT]);
     }
 }

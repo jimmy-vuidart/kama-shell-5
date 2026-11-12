@@ -12,7 +12,9 @@ use coquille_model::{
 use smithay::backend::egl::EGLDevice;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::{ImportDma, ImportMemWl};
-use smithay::desktop::{LayerSurface, PopupManager};
+use smithay::desktop::{
+    LayerSurface, PopupManager, WindowSurfaceType, find_popup_root_surface, layer_map_for_output,
+};
 use smithay::input::keyboard::XkbConfig;
 use smithay::input::pointer::{CursorImageAttributes, CursorImageStatus};
 use smithay::input::{Seat, SeatState};
@@ -20,16 +22,21 @@ use smithay::output::Output;
 use smithay::reexports::calloop::{LoopHandle, LoopSignal};
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Point};
-use smithay::wayland::compositor::{CompositorClientState, CompositorState, with_states};
+use smithay::wayland::compositor::{
+    CompositorClientState, CompositorState, get_parent, with_states,
+};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufState};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
+use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -91,6 +98,26 @@ pub struct Options {
     pub pace: Pace,
 }
 
+/// Frames asked for since the last were drawn.
+#[derive(Debug, Default)]
+pub struct Redraws {
+    /// On every screen.
+    pub all: bool,
+    /// On these screens.
+    pub screens: Vec<OutputId>,
+}
+
+impl Redraws {
+    pub fn any(&self) -> bool {
+        self.all || !self.screens.is_empty()
+    }
+
+    /// A frame is due on `output`.
+    pub fn on(&self, output: OutputId) -> bool {
+        self.all || self.screens.contains(&output)
+    }
+}
+
 /// A screen as clients see it.
 pub struct ScreenOutput {
     pub id: OutputId,
@@ -112,6 +139,7 @@ pub struct State {
     pub data_device_state: DataDeviceState,
     pub wlr_data_control_state: WlrDataControlState,
     pub ext_data_control_state: ExtDataControlState,
+    pub primary_selection_state: PrimarySelectionState,
     pub dmabuf_state: DmabufState,
     pub popups: PopupManager,
     pub xwayland_shell_state: XWaylandShellState,
@@ -131,6 +159,7 @@ pub struct State {
     _cursor_shape_state: CursorShapeManagerState,
     _pointer_constraints_state: PointerConstraintsState,
     _relative_pointer_state: RelativePointerManagerState,
+    _pointer_gestures_state: PointerGesturesState,
     _viewporter_state: ViewporterState,
     _fractional_scale_state: FractionalScaleManagerState,
 
@@ -201,10 +230,16 @@ pub struct State {
     /// The widths of the columns as written last.
     pub saved_proportions: Proportions,
 
-    /// Something changed: a frame is due.
+    /// Something changed that may show anywhere: a frame is due on every
+    /// screen.
     pub redraw_needed: bool,
-    /// The next frame must be drawn whole, whatever the damage.
+    /// Screens where something changed: a frame is due on them only.
+    pub redraw_on: Vec<OutputId>,
+    /// The next frame must be drawn whole, whatever the damage, on every
+    /// screen.
     pub full_redraw: bool,
+    /// Screens whose next frame must be drawn whole.
+    pub full_redraw_on: Vec<OutputId>,
     pub glass: GlassConfig,
     pub panel_glass: crate::render::scene::PanelGlass,
     /// The liquid glass the panels of the shell asked for, by namespace and
@@ -247,14 +282,22 @@ impl State {
         let shm_state = ShmState::new::<Self>(dh, renderer.shm_formats());
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
-        let wlr_data_control_state = WlrDataControlState::new::<Self, _>(dh, None, |_| true);
-        let ext_data_control_state = ExtDataControlState::new::<Self, _>(dh, None, |_| true);
+        // Selecting text copies it for the middle button, as everywhere else
+        // on Linux; clipboard managers see that selection too.
+        let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
+        let wlr_data_control_state =
+            WlrDataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true);
+        let ext_data_control_state =
+            ExtDataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true);
         let cursor_shape_state = CursorShapeManagerState::new::<Self>(dh);
         // Only XWayland may use it, to pair X11 windows with their surfaces.
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
         // Games: hold the pointer in place, and read how far the mouse went.
         let pointer_constraints_state = PointerConstraintsState::new::<Self>(dh);
         let relative_pointer_state = RelativePointerManagerState::new::<Self>(dh);
+        // Touchpad gestures, for the applications: pinch to zoom, a finger
+        // put down to stop a kinetic scroll.
+        let pointer_gestures_state = PointerGesturesState::new::<Self>(dh);
         // Lets a client stretch a small buffer over its surface: how
         // XWayland shows a game that asked for a lower resolution.
         let viewporter_state = ViewporterState::new::<Self>(dh);
@@ -337,6 +380,7 @@ impl State {
             data_device_state,
             wlr_data_control_state,
             ext_data_control_state,
+            primary_selection_state,
             dmabuf_state,
             popups: PopupManager::default(),
             xwayland_shell_state,
@@ -350,6 +394,7 @@ impl State {
             _cursor_shape_state: cursor_shape_state,
             _pointer_constraints_state: pointer_constraints_state,
             _relative_pointer_state: relative_pointer_state,
+            _pointer_gestures_state: pointer_gestures_state,
             _viewporter_state: viewporter_state,
             _fractional_scale_state: fractional_scale_state,
             seat,
@@ -392,7 +437,9 @@ impl State {
             screenshot_freeze: None,
             swallowed_press: false,
             redraw_needed: true,
+            redraw_on: Vec::new(),
             full_redraw: true,
+            full_redraw_on: Vec::new(),
             glass: options.glass,
             panel_glass: HashMap::new(),
             liquid: HashMap::new(),
@@ -481,6 +528,102 @@ impl State {
         self.redraw_needed = true;
     }
 
+    /// Asks for a frame on one screen: the others, where nothing changed,
+    /// are left alone (a game on one of them keeps its pace).
+    pub fn queue_redraw_on(&mut self, output: OutputId) {
+        if !self.redraw_on.contains(&output) {
+            self.redraw_on.push(output);
+        }
+    }
+
+    /// Asks for a frame on the screens the pointer image may show on when
+    /// the pointer is at `point`: its own, and a neighbour it reaches into.
+    pub fn queue_redraw_near(&mut self, point: Point<f64, Logical>) {
+        let point = ModelPoint::new(point.x.floor() as i32, point.y.floor() as i32);
+        let reach = crate::render::scene::CURSOR_REACH;
+        let near: Vec<OutputId> = self
+            .shell
+            .screens
+            .iter()
+            .filter(|screen| {
+                let rect = screen.rect;
+                Rect::new(
+                    rect.x - reach,
+                    rect.y - reach,
+                    rect.w + 2 * reach,
+                    rect.h + 2 * reach,
+                )
+                .contains(point)
+            })
+            .map(|screen| screen.id)
+            .collect();
+        if near.is_empty() {
+            self.queue_redraw();
+        }
+        for output in near {
+            self.queue_redraw_on(output);
+        }
+    }
+
+    /// Asks for a frame drawn whole on one screen, whatever the damage.
+    pub fn queue_full_redraw_on(&mut self, output: OutputId) {
+        if !self.full_redraw_on.contains(&output) {
+            self.full_redraw_on.push(output);
+        }
+        self.queue_redraw_on(output);
+    }
+
+    /// Takes the frames asked for: every screen, or those named.
+    pub fn take_redraws(&mut self) -> Redraws {
+        Redraws {
+            all: std::mem::take(&mut self.redraw_needed),
+            screens: std::mem::take(&mut self.redraw_on),
+        }
+    }
+
+    /// Takes the screens to draw whole: every screen, or those named.
+    pub fn take_full_redraws(&mut self) -> Redraws {
+        Redraws {
+            all: std::mem::take(&mut self.full_redraw),
+            screens: std::mem::take(&mut self.full_redraw_on),
+        }
+    }
+
+    /// The screen a surface shows on, from the window, menu or panel it
+    /// belongs to. `None` when that is not known for sure (an X11 menu, the
+    /// pointer image, a surface not mapped yet): then every screen is
+    /// redrawn, as it always was.
+    pub fn screen_showing(&self, surface: &WlSurface) -> Option<OutputId> {
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        // A menu shows where the window or panel that opened it is.
+        if let Some(popup) = self.popups.find_popup(&root) {
+            root = find_popup_root_surface(&popup).ok()?;
+            while let Some(parent) = get_parent(&root) {
+                root = parent;
+            }
+        }
+        if let Some(managed) = self.shell.by_surface(&root) {
+            return Some(managed.geometry.output);
+        }
+        self.outputs.iter().find_map(|screen| {
+            layer_map_for_output(&screen.output)
+                .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
+                .map(|_| screen.id)
+        })
+    }
+
+    /// Asks for a frame where a surface shows, or everywhere when that is
+    /// not known.
+    pub fn queue_redraw_for(&mut self, surface: &WlSurface) {
+        match self.screen_showing(surface) {
+            Some(output) => self.queue_redraw_on(output),
+            None => self.queue_redraw(),
+        }
+    }
+
     pub fn pointer_location(&self) -> Point<f64, Logical> {
         self.seat
             .get_pointer()
@@ -502,7 +645,8 @@ impl State {
         }
         self.backend.show_host_cursor(&image);
         self.cursor_status = image;
-        self.queue_redraw();
+        let at = self.pointer_location();
+        self.queue_redraw_near(at);
     }
 
     /// What to draw at the pointer, on a screen of `scale`. Nested, named

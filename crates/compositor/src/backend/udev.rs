@@ -83,6 +83,8 @@ struct Screen {
     pacing: Pacing,
     /// Duration of one refresh.
     frame: Duration,
+    /// When the screen last showed a frame: the grid its refreshes follow.
+    last_vblank: Option<Instant>,
     /// Frames that failed in a row, to keep the log readable.
     failures: u32,
     /// Game mode: the shortcuts this screen may still take.
@@ -110,6 +112,10 @@ pub struct Udev {
     touchpad: TouchpadConfig,
     pointer_devices: Vec<smithay::reexports::input::Device>,
     keyboard_devices: Vec<smithay::reexports::input::Device>,
+    /// The pointer may go on the hardware cursor plane. `COQUILLE_NO_CURSOR_PLANE=1`
+    /// draws it with the rest of the screen, as before, should a driver
+    /// show it wrong.
+    cursor_plane: bool,
 }
 
 /// A plugged screen found while scanning, before it is lit.
@@ -348,8 +354,19 @@ pub fn init(
         touchpad: touchpad.clone(),
         pointer_devices: Vec::new(),
         keyboard_devices: Vec::new(),
+        cursor_plane: cursor_plane_allowed(),
     };
     Ok((udev, outputs))
+}
+
+/// Whether the pointer may go on the hardware cursor plane.
+fn cursor_plane_allowed() -> bool {
+    let refused = std::env::var_os("COQUILLE_NO_CURSOR_PLANE").is_some_and(|value| value != "0");
+    info!(
+        cursor_plane = !refused,
+        "pointer drawn on the hardware cursor plane where the driver takes it"
+    );
+    !refused
 }
 
 /// The GPU the firmware booted on, else the first one of the seat.
@@ -519,6 +536,7 @@ fn light(
         surface,
         pacing: Pacing::Idle,
         frame: Duration::from_secs_f64(1000.0 / f64::from(mode.refresh.max(1))),
+        last_vblank: None,
         failures: 0,
         boost: Boost::new(game.direct_scanout(), game.vrr() && vrr_usable),
         vrr_on: false,
@@ -646,17 +664,29 @@ impl State {
         let Backend::Udev(udev) = &mut self.backend else {
             return;
         };
-        if !udev.active || !std::mem::take(&mut self.redraw_needed) {
+        // While another terminal is shown, what was asked waits for the
+        // return.
+        if !udev.active || !(self.redraw_needed || !self.redraw_on.is_empty()) {
             return;
         }
-        if std::mem::take(&mut self.full_redraw) {
-            for screen in &udev.screens {
+        let redraws = self.take_redraws();
+        let whole = self.take_full_redraws();
+        let Backend::Udev(udev) = &mut self.backend else {
+            return;
+        };
+        for screen in &udev.screens {
+            if whole.on(screen.id) {
                 screen.surface.reset_buffers();
             }
         }
 
+        // Only the screens where something changed: the others, a game's
+        // among them, keep their pace.
         let mut due = Vec::new();
         for (index, screen) in udev.screens.iter_mut().enumerate() {
+            if !redraws.on(screen.id) {
+                continue;
+            }
             match &mut screen.pacing {
                 Pacing::Idle => due.push(index),
                 Pacing::Waiting { redraw } => *redraw = true,
@@ -700,6 +730,15 @@ impl State {
             return;
         };
         let scale = scale.get();
+        // Animations show where they are when the frame reaches the screen,
+        // at its next refresh: their steps stay even, however late in a
+        // refresh this screen is drawn. A refresh rate that follows a game
+        // has no grid.
+        let now = crate::animation::presentation_time(
+            Instant::now(),
+            screen.last_vblank.filter(|_| !screen.vrr_on),
+            screen.frame,
+        );
 
         self.panel_glass
             .retain(|(surface, _), _| surface.is_alive());
@@ -730,7 +769,7 @@ impl State {
                     motions: &mut self.panel_motions,
                     ghosts: &mut self.panel_ghosts,
                     pace: self.pace,
-                    now: Instant::now(),
+                    now,
                 },
             },
         );
@@ -770,14 +809,22 @@ impl State {
             self.theme.backdrop.premultiplied()
         };
         let scanout = screen.boost.scanout(anchored) && self.screenshot_mode.is_none();
-        // Only the primary plane: the pointer is still drawn by the
-        // compositor, so the buffer of the game is shown directly while
-        // nothing else is on its screen.
-        let flags = if scanout {
-            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT
+        // The pointer goes on the cursor plane wherever the driver takes it:
+        // it then moves by a change of plane position, without the screen
+        // being composited again, as under GNOME or Windows. Smithay tests
+        // each assignment and draws the pointer with the rest when the plane
+        // refuses it (a scaled image, a format it does not take).
+        let mut flags = if udev.cursor_plane {
+            FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT
         } else {
             FrameFlags::empty()
         };
+        // Game mode: the primary plane only. With the pointer on its own
+        // plane, the buffer of the game is shown directly even while the
+        // pointer shows over it.
+        if scanout {
+            flags |= FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT;
+        }
         let mut draw = |flags| {
             screen
                 .surface
@@ -866,8 +913,20 @@ impl State {
         screen.pacing = Pacing::Waiting { redraw: failed };
         if !sent {
             // Nothing went to the screen, so nothing will come back from it:
-            // a timer ends this frame instead.
-            let timer = Timer::from_duration(screen.frame);
+            // a timer ends this frame instead, at the refresh the frame would
+            // have reached. A whole period from now, it held back a change
+            // that came in the meantime (the next image of a game) for up to
+            // a refresh more than a frame that was shown. Without a refresh
+            // seen yet, or with a rate that follows a game, a whole period.
+            let wait = match screen.last_vblank.filter(|_| !screen.vrr_on) {
+                Some(last) => {
+                    let now = Instant::now();
+                    crate::animation::presentation_time(now, Some(last), screen.frame)
+                        .saturating_duration_since(now)
+                }
+                None => screen.frame,
+            };
+            let timer = Timer::from_duration(wait);
             let armed = self.loop_handle.insert_source(timer, move |_, _, state| {
                 state.frame_done(crtc);
                 TimeoutAction::Drop
@@ -884,8 +943,11 @@ impl State {
     fn frame_shown(&mut self, crtc: crtc::Handle) {
         if let Backend::Udev(udev) = &mut self.backend {
             let screen = udev.screens.iter_mut().find(|screen| screen.crtc == crtc);
-            if let Some(Err(error)) = screen.map(|screen| screen.surface.frame_submitted()) {
-                debug!(?crtc, %error, "frame not acknowledged");
+            if let Some(screen) = screen {
+                screen.last_vblank = Some(Instant::now());
+                if let Err(error) = screen.surface.frame_submitted() {
+                    debug!(?crtc, %error, "frame not acknowledged");
+                }
             }
         }
         self.frame_done(crtc);
@@ -935,6 +997,7 @@ impl State {
                 udev.active = true;
                 for screen in &mut udev.screens {
                     screen.pacing = Pacing::Idle;
+                    screen.last_vblank = None;
                     // Asked again with the next frame of a game.
                     screen.vrr_on = false;
                 }

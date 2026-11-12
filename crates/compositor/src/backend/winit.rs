@@ -207,7 +207,9 @@ impl State {
     /// Frames are paced by this tick rather than by the host's redraw
     /// requests, which stop coming once a frame brought no change.
     pub fn frame_tick(&mut self) {
-        if std::mem::take(&mut self.redraw_needed) {
+        // One host window shows every simulated screen: a frame asked for
+        // one of them redraws it whole.
+        if self.take_redraws().any() {
             self.render_window();
         }
     }
@@ -232,7 +234,7 @@ impl State {
         let panels = self.panels();
         let wallpapers = self.active_wallpapers();
         let freeze = self.active_freeze();
-        let full_redraw = std::mem::take(&mut self.full_redraw);
+        let full_redraw = self.take_full_redraws().any();
         let Backend::Winit(winit) = &mut self.backend else {
             return;
         };
@@ -395,7 +397,35 @@ impl State {
         }
         self.popups.cleanup();
     }
+
+    /// Tells the windows that show nowhere (a tab behind another, a window
+    /// minimized or under a game) that they may draw, about once a second.
+    ///
+    /// No screen shows them, so no frame of a screen does: without this, a
+    /// client that waits for the signal before drawing (most of those that
+    /// draw with the GPU) stood still, and showed an old image for a moment
+    /// when its tab came back.
+    pub fn send_hidden_frame_callbacks(&mut self) {
+        let time = self.start_time.elapsed();
+        // Shown on no screen, a surface only gets the signal once overdue:
+        // never more than once a period, whatever else sends it.
+        let throttle = Some(HIDDEN_FRAME_PERIOD - Duration::from_millis(5));
+        for managed in &self.shell.windows {
+            if managed.geometry.visible {
+                continue;
+            }
+            let Some(output) = self.output(managed.geometry.output) else {
+                continue;
+            };
+            managed
+                .window
+                .send_frame(output, time, throttle, |_, _| None);
+        }
+    }
 }
+
+/// How often the windows that show nowhere may draw.
+pub const HIDDEN_FRAME_PERIOD: Duration = Duration::from_secs(1);
 
 /// Debug helper: writes the frame just drawn as a PNG.
 fn save_screenshot(

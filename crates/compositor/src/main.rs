@@ -309,6 +309,17 @@ fn main() -> anyhow::Result<()> {
         options,
     )?;
     state.start_ipc();
+    // Windows shown on no screen still draw, slowly: see
+    // `send_hidden_frame_callbacks`.
+    handle
+        .insert_source(
+            Timer::from_duration(crate::backend::winit::HIDDEN_FRAME_PERIOD),
+            |_, _, state| {
+                state.send_hidden_frame_callbacks();
+                TimeoutAction::ToDuration(crate::backend::winit::HIDDEN_FRAME_PERIOD)
+            },
+        )
+        .map_err(|error| anyhow::anyhow!("cannot arm the timer of hidden windows: {error}"))?;
     if !nested || cli.app_theme {
         state.app_theme = app_theme::AppTheme::start();
         if let Some(app_theme) = &state.app_theme {
