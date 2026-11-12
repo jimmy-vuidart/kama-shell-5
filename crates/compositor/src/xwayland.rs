@@ -23,6 +23,10 @@ use smithay::wayland::selection::data_device::{
     clear_data_device_selection, current_data_device_selection_userdata,
     request_data_device_client_selection, set_data_device_selection,
 };
+use smithay::wayland::selection::primary_selection::{
+    clear_primary_selection, current_primary_selection_userdata, request_primary_client_selection,
+    set_primary_selection,
+};
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
 use smithay::xwayland::xwm::{Reorder, ResizeEdge, WmWindowProperty, WmWindowType, XwmId};
 use smithay::xwayland::{X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler};
@@ -538,7 +542,8 @@ impl XwmHandler for State {
             .is_some_and(|window| window.xwm_id() == Some(xwm))
     }
 
-    /// An X11 client pastes what a Wayland client copied.
+    /// An X11 client pastes what a Wayland client copied, or selected (the
+    /// middle button pastes the selection).
     fn send_selection(
         &mut self,
         _xwm: XwmId,
@@ -546,26 +551,48 @@ impl XwmHandler for State {
         mime_type: String,
         fd: OwnedFd,
     ) {
-        if selection != SelectionTarget::Clipboard {
-            return;
-        }
-        if let Err(error) = request_data_device_client_selection(&self.seat, mime_type, fd) {
-            debug!(%error, "cannot hand the clipboard to an X11 client");
+        let handed = match selection {
+            SelectionTarget::Clipboard => {
+                request_data_device_client_selection(&self.seat, mime_type, fd)
+                    .map_err(|error| error.to_string())
+            }
+            SelectionTarget::Primary => request_primary_client_selection(&self.seat, mime_type, fd)
+                .map_err(|error| error.to_string()),
+        };
+        if let Err(error) = handed {
+            debug!(
+                error,
+                ?selection,
+                "cannot hand a selection to an X11 client"
+            );
         }
     }
 
-    /// An X11 client copied something: Wayland clients may paste it.
+    /// An X11 client copied or selected something: Wayland clients may
+    /// paste it.
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
-        if selection == SelectionTarget::Clipboard {
-            set_data_device_selection(&self.display_handle, &self.seat, mime_types, ());
+        match selection {
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&self.display_handle, &self.seat, mime_types, ());
+            }
+            SelectionTarget::Primary => {
+                set_primary_selection(&self.display_handle, &self.seat, mime_types, ());
+            }
         }
     }
 
     fn cleared_selection(&mut self, _xwm: XwmId, selection: SelectionTarget) {
-        if selection == SelectionTarget::Clipboard
-            && current_data_device_selection_userdata(&self.seat).is_some()
-        {
-            clear_data_device_selection(&self.display_handle, &self.seat);
+        match selection {
+            SelectionTarget::Clipboard => {
+                if current_data_device_selection_userdata(&self.seat).is_some() {
+                    clear_data_device_selection(&self.display_handle, &self.seat);
+                }
+            }
+            SelectionTarget::Primary => {
+                if current_primary_selection_userdata(&self.seat).is_some() {
+                    clear_primary_selection(&self.display_handle, &self.seat);
+                }
+            }
         }
     }
 

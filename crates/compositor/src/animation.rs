@@ -133,6 +133,29 @@ impl Tween {
     }
 }
 
+/// When a frame drawn at `now` reaches the screen: at its next refresh,
+/// counted from the last one seen (`last_refresh`), `refresh` apart.
+///
+/// Animations are sampled at that instant rather than at the moment the
+/// frame is drawn: a frame drawn late in a refresh (after another screen,
+/// after a burst of input) still shows the step of its refresh, and motions
+/// keep an even pace. Without a refresh seen yet, it is `now`.
+pub fn presentation_time(
+    now: Instant,
+    last_refresh: Option<Instant>,
+    refresh: Duration,
+) -> Instant {
+    let Some(last) = last_refresh else {
+        return now;
+    };
+    if refresh.is_zero() || now < last {
+        return now;
+    }
+    let phase = (now - last).as_nanos() % refresh.as_nanos();
+    // Below one refresh, so it fits.
+    now + (refresh - Duration::from_nanos(phase as u64))
+}
+
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
@@ -596,6 +619,40 @@ mod tests {
                 "{curve:?} stops at the end"
             );
         }
+    }
+
+    #[test]
+    fn a_frame_drawn_just_after_a_refresh_shows_at_the_next() {
+        let last = Instant::now();
+        let refresh = 10 * MS;
+
+        let shown = presentation_time(last + MS, Some(last), refresh);
+
+        assert_eq!(shown, last + refresh);
+    }
+
+    #[test]
+    fn frames_drawn_at_any_time_of_a_refresh_show_on_its_grid() {
+        let last = Instant::now();
+        let refresh = 10 * MS;
+
+        for drawn in [1, 4, 9] {
+            let shown = presentation_time(last + 20 * MS + drawn * MS, Some(last), refresh);
+            assert_eq!(shown, last + 30 * MS);
+        }
+        assert_eq!(
+            presentation_time(last + 20 * MS, Some(last), refresh),
+            last + 30 * MS,
+            "drawn right on a refresh, it shows at the next"
+        );
+    }
+
+    #[test]
+    fn without_a_refresh_seen_a_frame_shows_now() {
+        let now = Instant::now();
+
+        assert_eq!(presentation_time(now, None, 10 * MS), now);
+        assert_eq!(presentation_time(now, Some(now), Duration::ZERO), now);
     }
 
     #[test]

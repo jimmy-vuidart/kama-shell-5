@@ -1,67 +1,59 @@
-# 01 — Une image vide bloque l'écran pendant une période
+# 01 — Une image vide bloquait l'écran pendant une période
 
 - **Priorité :** haute
-- **Nature :** performance (saccades en jeu)
-- **Zone :** `crates/compositor/src/backend/udev.rs`, `state.rs`, `handlers/compositor.rs`
+- **Nature :** performance (saccades en jeu, ressenti général)
+- **Zone :** `crates/compositor/src/backend/udev.rs`, `state.rs`, `shell.rs`, `handlers/compositor.rs`, `input.rs`
 - **Se vérifie :** sur le matériel seulement
-- **Certitude :** mécanisme lu dans le code ; effet ressenti à confirmer
+- **État :** **fait dans le code, jamais exécuté sur le matériel**
 
-## Constat
+## Ce qui était lu dans le code
 
-Deux choses se combinent.
+1. **Le besoin de redessiner était global.** Chaque commit de n'importe
+   quelle surface, chaque mouvement du pointeur et chaque `apply_arrangement`
+   faisaient dessiner les trois écrans ; `apply_arrangement` les faisait en
+   plus **repeindre en entier** (tampons remis à zéro, flou compris), à chaque
+   mouvement de souris pendant un glisser.
+2. **Une image sans changement mettait l'écran en attente** d'une période
+   entière, sur un minuteur sans lien avec le vblank : un vrai changement
+   arrivé entre-temps (l'image suivante d'un jeu) attendait jusqu'à une
+   période de plus.
 
-1. **Le besoin de redessiner est global.** `State::queue_redraw`
-   (`state.rs:313`) lève un seul drapeau, `redraw_needed`. Il est levé par
-   chaque commit de n'importe quelle surface (`handlers/compositor.rs:108`) et
-   par chaque mouvement du pointeur (`input.rs:624`). `redraw_screens`
-   (`udev.rs:530`) dessine alors **tous** les écrans au repos, pas seulement
-   celui où quelque chose a changé.
-2. **Une image sans changement met l'écran en attente.** Dans `render_screen`,
-   quand le rendu ne produit aucun dégât, rien n'est envoyé à l'écran : un
-   minuteur d'une période entière est armé (`udev.rs:719` à `732`) et l'écran
-   passe en `Pacing::Waiting`. Ce minuteur n'est pas calé sur le vblank. Tant
-   qu'il court, un vrai changement sur cet écran attend.
+## Ce qui a été fait
 
-## Conséquence
+- **Demandes par écran** : `State::queue_redraw_on`, `queue_redraw_for` (un
+  commit ne marque que l'écran où sa fenêtre, son menu ou son panneau se
+  montre ; tous quand on ne sait pas : menu X11, image du pointeur, icône de
+  glisser), `queue_redraw_near` (le pointeur : l'écran quitté, l'écran
+  atteint, et le voisin où son image déborde). `queue_redraw()` reste pour ce
+  qui touche tout (thème, animations).
+- **Repeint complet limité** : `apply_arrangement` compare la géométrie de
+  chaque fenêtre avant et après (`touched_screens`, testé) et ne repeint en
+  entier que les écrans où une fenêtre a bougé, changé d'état, est apparue,
+  disparue ou changé de rang.
+- **Image vide calée sur le vblank** : son minuteur court jusqu'au prochain
+  rafraîchissement estimé à partir du dernier vblank vu
+  (`animation::presentation_time`, testé), et non plus une période entière.
+  Sans vblank vu, ou avec le VRR actif, une période entière comme avant.
+- **Animations régulières** : elles sont échantillonnées à l'instant où
+  l'image atteindra l'écran, plus à celui où elle est dessinée.
 
-Cas réel du projet : une vidéo sur l'écran gauche, un jeu au centre. Chaque
-image de la vidéo lève le drapeau global ; l'écran du jeu, s'il est au repos,
-est rendu pour rien, puis bloqué une période (6,9 ms à 144 Hz). L'image
-suivante du jeu attend la fin du minuteur.
+## À vérifier avec Jimmy
 
-- Avec le VRR : les images du jeu sont retardées de façon irrégulière, ce qui
-  est exactement la saccade que le VRR doit supprimer.
-- Sans le VRR : l'image peut manquer un vblank.
+- Une vidéo à gauche, un jeu au centre : pas de saccade dans le jeu ; avec
+  `RUST_LOG=debug`, l'écran du jeu n'est plus dessiné à chaque image de la
+  vidéo.
+- Glisser une fenêtre flottante sur un écran latéral pendant un jeu : le jeu
+  ne saccade pas.
+- Une animation (ouvrir, réduire, ranger) est fluide sur le 3440×1440.
+- Rien ne reste à l'écran après un changement (fenêtre fermée, onglet changé,
+  colonne élargie) : un reste voudrait dire qu'un écran attendait encore le
+  repeint complet d'avant. Le dire avec l'écran et le geste.
 
-S'y ajoute un coût constant : trois constructions de scène par lot
-d'événements, dont deux pour rien.
+## Reste
 
-## Piste
-
-1. **Un drapeau par écran.** Un commit ne marque que l'écran (ou les écrans)
-   où sa fenêtre est visible ; un panneau, le sien ; le pointeur, l'écran où
-   il était et celui où il arrive. `queue_redraw()` reste pour ce qui touche
-   tout (thème, arrangement).
-2. **Ne plus bloquer après une image vide.** Deux façons :
-   - garder le minuteur pour les « frame callbacks » seulement, et laisser un
-     écran marqué entre-temps se redessiner tout de suite ;
-   - ou viser le prochain vblank estimé à partir de l'horodatage du dernier,
-     comme niri (`queue_estimated_vblank_timer`, `src/backend/tty.rs`).
-
-Le ticket 20 sort la machine `Pacing` en logique pure : à faire avant, pour
-écrire ces règles avec leurs tests.
-
-## Terminé quand
-
-- Un commit sur un écran ne provoque aucun rendu des deux autres (test
-  unitaire sur la logique de cadence).
-- Après une image vide, un changement sur le même écran n'attend pas la fin
-  d'une période (test unitaire).
-- Sur le matériel, avec une vidéo à gauche et un jeu au centre : le journal
-  ne montre plus d'images vides sur l'écran du jeu, et Jimmy ne voit pas de
-  saccade.
+- La machine `Pacing` n'est toujours pas en logique pure (ticket 20).
+- Les animations redessinent encore tous les écrans (ticket 38).
 
 ## Liens
 
-- Dépend de : 20.
-- Sert à : 05 (drapeaux par écran), 24 (horodatage des vblanks).
+- Sert à : 05, 24.

@@ -287,7 +287,7 @@ Fait, **vérifié en imbriqué** (essais scriptés, captures relues) et par test
 Fait mais **jamais exécuté** (backend matériel seulement, relu et compilé) :
 
 - mouvement relatif venant de libinput (deltas accélérés et bruts) et bords collants sur le vrai mouvement : le code est celui qu'exerce `rel`, seule la source des événements diffère ;
-- **affichage direct** : sur un écran ancré seulement, plan principal seulement. L'image du jeu part telle quelle tant que rien d'autre n'est sur son écran (le pointeur reste dessiné par le compositeur : dès qu'il est visible sur le jeu, l'image est composée). Un échec fait redessiner l'image composée et coupe l'affichage direct de cet écran jusqu'à la fin de la session ;
+- **affichage direct** : sur un écran ancré seulement, plan principal seulement. L'image du jeu part telle quelle tant que rien d'autre n'est sur son écran (le pointeur, sur le plan curseur, ne l'empêche plus ; dessiné par le compositeur quand le pilote refuse le plan, il force l'image composée). Un échec fait redessiner l'image composée et coupe l'affichage direct de cet écran jusqu'à la fin de la session ;
 - **VRR** : activé quand un jeu prend l'écran, coupé quand il le quitte, là où le connecteur l'annonce utilisable sans changement de mode (le centre). Un refus du pilote ou une image qui échoue le coupe pour de bon ;
 - **flou et ombres en matériel (verre liquide)** : coût du flou sur les trois écrans réels (notamment le 3440×1440 ultra-large au centre) ; affichage direct toujours obtenu en jeu (`direct scanout: the buffer of the game is shown as it is` dans `session.log`). Une première version perdait des images sur le matériel (`BlitFramebuffer error` dans `session.log`, le 16 octobre) ; corrigée, vérifiée en imbriqué et par le chemin de capture hors écran, pas encore sur les vrais écrans : le journal ne doit plus contenir ni `BlitFramebuffer error` ni `glass: GL error`. `--probe` compile les shaders du verre sans erreur sur la RTX 4070 Ti SUPER ;
 - le journal dit, pour chaque écran allumé, ce qu'il sait faire (`vrr=…`), puis `variable refresh rate switched`, et une fois par jeu `direct scanout: the buffer of the game is shown as it is` ou `direct scanout not possible for this frame: composited`. Pour les raisons détaillées du pilote, lancer depuis un TTY avec `RUST_LOG=info,smithay::backend::drm::compositor=trace` (très bavard : avec `--exit-after`).
@@ -297,9 +297,9 @@ Limites connues :
 - une appli qui dessine sa propre barre peut être glissée par elle (demande de déplacement xdg-shell ou `_NET_WM_MOVERESIZE`), mais ses demandes de redimensionnement sont ignorées : une fenêtre flottante se redimensionne par les bords du shell ;
 - ne jamais appeler `pointer.unset_grab` depuis un gestionnaire de requête client (`move_request`…) : le compositeur se bloque ;
 - une fenêtre X11 sans décoration qui couvre l'écran sans demander le plein écran (`_NET_WM_STATE_FULLSCREEN`) n'est pas reconnue comme un jeu ;
-- pas de sélection primaire (clic du milieu) ni de glisser-déposer entre X11 et Wayland ; pas de `xwayland-keyboard-grab` ;
+- pas de glisser-déposer entre X11 et Wayland (la sélection primaire, coller au clic du milieu, passe dans les deux sens) ; pas de `xwayland-keyboard-grab` ;
 - pas de retour dmabuf « scanout » par surface : l'affichage direct dépend de ce que le jeu alloue de lui-même ;
-- avec le VRR, un pointeur visible qui bouge fait remonter la fréquence (il n'est pas sur un plan matériel) ;
+- avec le VRR, un pointeur visible qui bouge fait remonter la fréquence : sur le plan curseur, chaque déplacement reste une image envoyée à l'écran ;
 - bords collants inopérants en imbriqué avec la vraie souris : l'hôte possède le pointeur, rien ne peut le retenir ;
 
 ### État de la phase 4 (dock)
@@ -420,13 +420,16 @@ Limites connues :
 
 - un écran à une échelle et un autre à une autre : X11 prend la plus grande (les applis X11 sont petites sur l'écran à 100 %) ;
 - capot fermé avec un écran externe : rien n'est fait (il faudrait le branchement à chaud, ticket 03) ; pas de verrouillage avant la veille (ticket 23) ;
-- ni gestes du pavé (balayage à trois doigts), ni touches de volume et de lecture (phase 5, étape 7).
+- pas de gestes du shell au pavé (balayage à trois doigts, ticket 31) : les gestes vont tous à l'appli sous le pointeur (pincer, poser un doigt pour arrêter un défilement inertiel) ; ni touches de volume et de lecture (phase 5, étape 7).
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
 
 - Un seul GPU : celui du démarrage (la NVIDIA). Écrans détectés **au démarrage seulement** (pas de branchement à chaud).
 - Rôles des écrans : `[outputs]` du fichier de configuration, sinon le plus large au centre (un écran seul est le centre). Placés côte à côte selon leur taille logique (à leur échelle), alignés en haut. Le pointeur passe d'un écran à son voisin à la même proportion de la hauteur (`outputs::cross`) : le bas du centre (1440 px) mène au bas d'un écran latéral (1080 px), sans mur. Le chemin n'a jamais été essayé sur les vrais écrans : en imbriqué, ils ont tous la même hauteur.
-- Tout est composé par le GPU, sauf l'écran d'un jeu (affichage direct et VRR, voir l'état de la phase 3). Pas de plan matériel pour le curseur, pas de plans overlay. Synchronisation explicite activée quand le pilote la propose.
+- Tout est composé par le GPU, sauf l'écran d'un jeu (affichage direct et VRR, voir l'état de la phase 3) et le pointeur. Pas de plans overlay. Synchronisation explicite activée quand le pilote la propose.
+- **Pointeur sur le plan curseur** (`ALLOW_CURSOR_PLANE_SCANOUT`), comme sous GNOME ou Windows : il bouge sans que l'écran soit recomposé. Smithay essaie le plan à chaque image et dessine le pointeur avec le reste quand le pilote le refuse (image mise à l'échelle, à 125 % par exemple). `COQUILLE_NO_CURSOR_PLANE=1` revient à l'ancien chemin. **Jamais exécuté** : à vérifier sur la NVIDIA (pointeur net, bonnes couleurs, aucun reste à l'écran en passant d'un écran à l'autre).
+- **Cadence par écran** (`State::queue_redraw_on`, `queue_redraw_for`, `queue_redraw_near`) : un commit ne redessine que l'écran où sa surface se montre (sinon tous, faute de savoir), le pointeur l'écran quitté et l'écran atteint, un changement d'arrangement les écrans dont une fenêtre a changé (`touched_screens`), ceux-là seuls repeints en entier. Une image vide arme son minuteur jusqu'au prochain rafraîchissement estimé, plus une période entière. Les animations sont échantillonnées à l'instant où l'image atteindra l'écran (`animation::presentation_time`), pas à celui où elle est dessinée. **Jamais exécuté sur le matériel.**
+- Les fenêtres affichées nulle part (onglet de derrière, réduite, sous un jeu) reçoivent un « frame callback » par seconde (`send_hidden_frame_callbacks`) : sans lui, un client qui attend ce signal pour dessiner restait figé.
 - Je (Claude) ne peux pas tester ce backend moi-même : la session en cours possède les écrans. Seuls `--probe` et le mode imbriqué sont vérifiables sans l'utilisateur.
 
 ### Références à étudier avant de coder

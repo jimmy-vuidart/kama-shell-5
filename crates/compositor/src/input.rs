@@ -4,14 +4,18 @@ use coquille_model::{
     Insets, Lifted, OutputId, Placement, Point as ModelPoint, Rect, Size, StackId, WindowId,
 };
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GestureBeginEvent,
+    GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
+    InputEvent, InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     PointerMotionEvent, Switch, SwitchState, SwitchToggleEvent,
 };
 use smithay::desktop::{LayerSurface, WindowSurfaceType};
 use smithay::input::keyboard::{FilterResult, Keycode, Keysym};
 use smithay::input::pointer::{
-    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, MotionEvent, RelativeMotionEvent,
+    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
+    GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+    GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+    RelativeMotionEvent,
 };
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
@@ -176,6 +180,23 @@ pub enum ScreenshotMode {
     },
 }
 
+/// A step of a touchpad gesture, as libinput reports it.
+enum TouchpadGesture {
+    SwipeBegin(u32),
+    SwipeUpdate(Point<f64, Logical>),
+    /// Cancelled or not.
+    SwipeEnd(bool),
+    PinchBegin(u32),
+    PinchUpdate {
+        delta: Point<f64, Logical>,
+        scale: f64,
+        rotation: f64,
+    },
+    PinchEnd(bool),
+    HoldBegin(u32),
+    HoldEnd(bool),
+}
+
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
@@ -200,6 +221,37 @@ impl State {
                 self.pointer_button(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => self.on_axis::<I>(event),
+            // Touchpad gestures go to the application under the pointer:
+            // pinching zooms, and a finger put down stops a kinetic scroll.
+            InputEvent::GestureSwipeBegin { event } => {
+                self.touchpad_gesture(TouchpadGesture::SwipeBegin(event.fingers()), event.time())
+            }
+            InputEvent::GestureSwipeUpdate { event } => {
+                self.touchpad_gesture(TouchpadGesture::SwipeUpdate(event.delta()), event.time())
+            }
+            InputEvent::GestureSwipeEnd { event } => {
+                self.touchpad_gesture(TouchpadGesture::SwipeEnd(event.cancelled()), event.time())
+            }
+            InputEvent::GesturePinchBegin { event } => {
+                self.touchpad_gesture(TouchpadGesture::PinchBegin(event.fingers()), event.time())
+            }
+            InputEvent::GesturePinchUpdate { event } => self.touchpad_gesture(
+                TouchpadGesture::PinchUpdate {
+                    delta: event.delta(),
+                    scale: event.scale(),
+                    rotation: event.rotation(),
+                },
+                event.time(),
+            ),
+            InputEvent::GesturePinchEnd { event } => {
+                self.touchpad_gesture(TouchpadGesture::PinchEnd(event.cancelled()), event.time())
+            }
+            InputEvent::GestureHoldBegin { event } => {
+                self.touchpad_gesture(TouchpadGesture::HoldBegin(event.fingers()), event.time())
+            }
+            InputEvent::GestureHoldEnd { event } => {
+                self.touchpad_gesture(TouchpadGesture::HoldEnd(event.cancelled()), event.time())
+            }
             // Closing the lid is logind's business (it suspends the machine
             // when nobody holds it back, and nothing here does). Opened
             // again, every screen is drawn whole: one woken from sleep may
@@ -213,6 +265,84 @@ impl State {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Hands a touchpad gesture to the client under the pointer, unless the
+    /// shell is dragging something.
+    fn touchpad_gesture(&mut self, gesture: TouchpadGesture, time: InputTime) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if self.gesture.is_some() {
+            return;
+        }
+        let serial = SERIAL_COUNTER.next_serial();
+        match gesture {
+            TouchpadGesture::SwipeBegin(fingers) => pointer.gesture_swipe_begin(
+                self,
+                &GestureSwipeBeginEvent {
+                    serial,
+                    time,
+                    fingers,
+                },
+            ),
+            TouchpadGesture::SwipeUpdate(delta) => {
+                pointer.gesture_swipe_update(self, &GestureSwipeUpdateEvent { time, delta });
+            }
+            TouchpadGesture::SwipeEnd(cancelled) => pointer.gesture_swipe_end(
+                self,
+                &GestureSwipeEndEvent {
+                    serial,
+                    time,
+                    cancelled,
+                },
+            ),
+            TouchpadGesture::PinchBegin(fingers) => pointer.gesture_pinch_begin(
+                self,
+                &GesturePinchBeginEvent {
+                    serial,
+                    time,
+                    fingers,
+                },
+            ),
+            TouchpadGesture::PinchUpdate {
+                delta,
+                scale,
+                rotation,
+            } => pointer.gesture_pinch_update(
+                self,
+                &GesturePinchUpdateEvent {
+                    time,
+                    delta,
+                    scale,
+                    rotation,
+                },
+            ),
+            TouchpadGesture::PinchEnd(cancelled) => pointer.gesture_pinch_end(
+                self,
+                &GesturePinchEndEvent {
+                    serial,
+                    time,
+                    cancelled,
+                },
+            ),
+            TouchpadGesture::HoldBegin(fingers) => pointer.gesture_hold_begin(
+                self,
+                &GestureHoldBeginEvent {
+                    serial,
+                    time,
+                    fingers,
+                },
+            ),
+            TouchpadGesture::HoldEnd(cancelled) => pointer.gesture_hold_end(
+                self,
+                &GestureHoldEndEvent {
+                    serial,
+                    time,
+                    cancelled,
+                },
+            ),
         }
     }
 
@@ -717,6 +847,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        let from = pointer.current_location();
         if let Some(ScreenshotMode::DraggingRegion { start, .. }) = self.screenshot_mode {
             self.screenshot_mode = Some(ScreenshotMode::DraggingRegion {
                 start,
@@ -804,8 +935,10 @@ impl State {
         if let Some(screen) = self.pointer_screen() {
             self.shell.desk.note_output_used(screen.id);
         }
-        // The pointer itself may have to be redrawn, and so may a hover.
-        self.queue_redraw();
+        // The pointer itself may have to be redrawn, and so may a hover:
+        // on the screen it left and the one it reached, not elsewhere.
+        self.queue_redraw_near(from);
+        self.queue_redraw_near(location);
     }
 
     /// Lets the gesture in progress react to the pointer moving.
@@ -1333,9 +1466,15 @@ impl State {
                         if let Some(surface) = surface {
                             self.follow_client_size(&surface);
                         }
+                        // No longer being resized: the client is told.
+                        self.apply_arrangement();
                     }
-                    // Its widths are kept once the separation is let go.
-                    Some(Gesture::Splitting { .. }) => self.save_proportions(),
+                    // Its widths are kept once the separation is let go, and
+                    // its windows told they are no longer being resized.
+                    Some(Gesture::Splitting { .. }) => {
+                        self.save_proportions();
+                        self.apply_arrangement();
+                    }
                     Some(Gesture::Pressed { .. } | Gesture::Moving { .. }) | None => {}
                 }
                 for_clients = !std::mem::take(&mut self.swallowed_press);
