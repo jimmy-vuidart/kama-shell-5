@@ -541,7 +541,7 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         } else {
             let chosen = model::chosen(&choices, screen.connector.as_deref());
             let pick = move |choice| Message::Connector(role, choice);
-            picker(choices.clone(), chosen, pick, 180.0, palette)
+            picker(choices.clone(), chosen, pick, 230.0, palette)
         };
         let raw_dock = *app.file.docks_on(&shown).get(role);
         let (dock, dock_detail) = if spatial {
@@ -596,7 +596,7 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             setting(
                 "Connecteur",
                 "La prise sur laquelle cet écran est branché.",
-                Some("Au prochain démarrage"),
+                None,
                 connector,
                 palette,
             ),

@@ -2936,3 +2936,44 @@ fn spatial_game_mode_and_rule_7() {
     assert!(geo(&desk, 2).visible);
     desk.check_invariants().unwrap();
 }
+
+#[test]
+fn set_output_roles_reassigns_roles_and_proportions_keeping_windows() {
+    let mut desk = desk();
+    open_in(&mut desk, 1, "kitty", LEFT, 0);
+    open_in(&mut desk, 2, "firefox", CENTER, 0);
+    let mut proportions = Proportions::default();
+    let mut center_splits = crate::proportions::ScreenProportions::new();
+    center_splits.insert(
+        crate::layout::LayoutKind::TwoColumns,
+        BTreeMap::from([(
+            2,
+            crate::layout::Split::normalized(
+                vec![60, 40],
+                crate::layout::LayoutKind::TwoColumns,
+                2,
+            ),
+        )]),
+    );
+    proportions.set(OutputRole::Center, center_splits);
+
+    desk.set_output_roles(
+        &[
+            (LEFT, OutputRole::Center),
+            (CENTER, OutputRole::Left),
+            (RIGHT, OutputRole::Right),
+        ],
+        &proportions,
+    )
+    .unwrap();
+
+    assert_eq!(desk.screen(LEFT).unwrap().role(), OutputRole::Center);
+    assert_eq!(desk.screen(CENTER).unwrap().role(), OutputRole::Left);
+    assert_eq!(place(&desk, 1), Placement::Slot(slot(LEFT, 0)));
+    assert_eq!(place(&desk, 2), Placement::Slot(slot(CENTER, 0)));
+    assert_eq!(
+        desk.proportions().of(OutputRole::Center),
+        proportions.of(OutputRole::Center)
+    );
+    desk.check_invariants().unwrap();
+}

@@ -214,33 +214,40 @@ impl State {
                 debug!(%error, "cannot set the default X11 cursor");
             }
         }
-        // Games ask X11 which screen is the main one: the center.
-        let center = self
-            .shell
-            .screens
-            .iter()
-            .find(|screen| screen.role == OutputRole::Center)
-            .and_then(|screen| self.output(screen.id));
-        if let Some(center) = center {
-            if let Err(error) = xwm.set_randr_primary_output(Some(center)) {
-                debug!(?error, "cannot name the main screen to X11");
-            }
-            // Smithay ignores the X11 events that answer the request above,
-            // which it tells by their sequence number: every event carries
-            // it until the next request, so one must follow at once or
-            // windows would never be seen.
-            match xwm.get_randr_primary_output() {
-                Ok(name) => debug!(?name, "main screen for X11"),
-                Err(error) => debug!(%error, "cannot read the main screen of X11"),
-            }
-        }
+        self.xwm = Some(xwm);
+        self.update_xwayland_primary();
 
         info!(
             display = ?self.xdisplay.map(display_name),
             scale = scale.get(),
             "XWayland is ready"
         );
-        self.xwm = Some(xwm);
+    }
+
+    /// Tells XWayland which screen is primary (the center one), so games
+    /// opening via Wine/Proton target it.
+    pub fn update_xwayland_primary(&mut self) {
+        let center = self
+            .shell
+            .screens
+            .iter()
+            .find(|screen| screen.role == OutputRole::Center)
+            .and_then(|screen| self.output(screen.id))
+            .cloned();
+        let (Some(xwm), Some(center)) = (self.xwm.as_mut(), center) else {
+            return;
+        };
+        if let Err(error) = xwm.set_randr_primary_output(Some(&center)) {
+            debug!(?error, "cannot name the main screen to X11");
+        }
+        // Smithay ignores the X11 events that answer the request above,
+        // which it tells by their sequence number: every event carries
+        // it until the next request, so one must follow at once or
+        // windows would never be seen.
+        match xwm.get_randr_primary_output() {
+            Ok(name) => debug!(?name, "main screen for X11"),
+            Err(error) => debug!(%error, "cannot read the main screen of X11"),
+        }
     }
 
     /// An X11 window asks to be shown: the model places it.

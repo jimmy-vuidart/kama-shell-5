@@ -2,18 +2,18 @@
 //! settings screen asks for it.
 //!
 //! What takes effect at once: theme, accent, terminal, keyboard layout,
-//! the layout and the scale of each screen, sticky edges, and what game
-//! mode may do on the hardware. The role of each screen and XWayland (the
-//! scale of X11 applications included) are decided when the compositor
-//! starts.
+//! the role, layout and scale of each screen, sticky edges, and what game
+//! mode may do on the hardware. XWayland (the scale of X11 applications
+//! included) is decided when the compositor starts.
 
-use coquille_model::{OutputId, Size};
+use coquille_model::{OutputId, OutputRole, Point as ModelPoint, Rect, Size};
 use smithay::input::keyboard::XkbConfig;
 use smithay::output::Scale as OutputScale;
+use smithay::utils::{Logical, Point};
 use tracing::{info, warn};
 
 use crate::backend::Backend;
-use crate::outputs::origins;
+use crate::outputs::{Connected, RoleConfig, assign_roles, origins};
 use crate::shell::ScreenInfo;
 use crate::state::State;
 use crate::{config, default_terminal, keyboard_layout};
@@ -41,6 +41,7 @@ impl State {
             udev.set_pointers(&config.mouse, &config.touchpad);
         }
         self.pace.set_enabled(config.animations.enabled());
+        self.set_outputs(&config.outputs, &config.scale);
         self.set_layouts(&config.layout);
         if !self.scale_pinned {
             self.set_scales(&config.scale);
@@ -53,6 +54,152 @@ impl State {
         // to learn it.
         self.queue_redraw();
         self.config_changed();
+    }
+
+    /// Reassigns each lit screen's role on the hardware backend when
+    /// `[outputs]` changed, moving outputs, windows, panels and XWayland's
+    /// primary output at once.
+    fn set_outputs(&mut self, roles: &RoleConfig, scales: &config::ScaleConfig) {
+        if matches!(self.backend, Backend::Winit(_)) {
+            return;
+        }
+        let lit: Vec<(OutputId, String, Size)> = self
+            .outputs
+            .iter()
+            .filter_map(|screen| {
+                let mode = screen.output.current_mode()?;
+                Some((
+                    screen.id,
+                    screen.output.name(),
+                    Size::new(mode.size.w, mode.size.h),
+                ))
+            })
+            .collect();
+        let connected: Vec<Connected> = lit
+            .iter()
+            .map(|(_, name, size)| Connected {
+                name: name.clone(),
+                size: *size,
+            })
+            .collect();
+        let assigned = assign_roles(&connected, roles);
+
+        let mut new_roles: Vec<(OutputId, OutputRole, Size)> = Vec::with_capacity(lit.len());
+        let mut changed = false;
+        for ((id, name, pixel_size), role) in lit.iter().zip(assigned) {
+            let current = self.shell.screen(*id);
+            let Some(role) = role.or_else(|| current.map(|s| s.role)) else {
+                continue;
+            };
+            if current.is_some_and(|s| s.role != role) {
+                info!(name, ?role, "screen role changed");
+                changed = true;
+            }
+            new_roles.push((*id, role, *pixel_size));
+        }
+        if !changed {
+            return;
+        }
+
+        let old_origins: Vec<(OutputId, ModelPoint)> = self
+            .shell
+            .screens
+            .iter()
+            .map(|s| (s.id, s.rect.origin()))
+            .collect();
+        let pointer_before = self.pointer_screen().map(|screen| {
+            let loc = self.pointer_location();
+            (
+                screen.id,
+                Point::<f64, Logical>::from((
+                    loc.x - f64::from(screen.rect.x),
+                    loc.y - f64::from(screen.rect.y),
+                )),
+            )
+        });
+
+        let placed: Vec<(OutputRole, Size)> = new_roles
+            .iter()
+            .map(|(id, role, pixel_size)| {
+                let scale = if self.scale_pinned {
+                    self.shell.scale_of(*id)
+                } else {
+                    scales.of(*role)
+                };
+                (*role, scale.logical(*pixel_size))
+            })
+            .collect();
+        let corners = origins(&placed);
+        let screens: Vec<ScreenInfo> = new_roles
+            .iter()
+            .zip(corners)
+            .map(|((id, role, pixel_size), corner)| {
+                let scale = if self.scale_pinned {
+                    self.shell.scale_of(*id)
+                } else {
+                    scales.of(*role)
+                };
+                let size = scale.logical(*pixel_size);
+                if let Some(output) = self.output(*id) {
+                    let output_scale = Some(OutputScale::Fractional(scale.get()));
+                    output.change_current_state(
+                        None,
+                        None,
+                        output_scale,
+                        Some((corner.x, corner.y).into()),
+                    );
+                }
+                ScreenInfo {
+                    id: *id,
+                    role: *role,
+                    rect: Rect::new(corner.x, corner.y, size.w, size.h),
+                    scale,
+                }
+            })
+            .collect();
+
+        self.save_proportions();
+        let proportions = self.saved_proportions.clone();
+        let role_pairs: Vec<(OutputId, OutputRole)> =
+            screens.iter().map(|s| (s.id, s.role)).collect();
+        if let Err(error) = self.shell.desk.set_output_roles(&role_pairs, &proportions) {
+            warn!(%error, "cannot reassign screen roles");
+            return;
+        }
+        let ids: Vec<OutputId> = screens.iter().map(|s| s.id).collect();
+        let moved_outputs: Vec<OutputId> = screens
+            .iter()
+            .filter(|s| {
+                old_origins
+                    .iter()
+                    .find(|(id, _)| *id == s.id)
+                    .is_some_and(|(_, old)| *old != s.rect.origin())
+            })
+            .map(|s| s.id)
+            .collect();
+        self.shell.move_screens(screens);
+        for id in ids {
+            self.arrange_panels(id);
+        }
+        self.apply_arrangement();
+        // A screen that slid along the global desktop kept its windows on the
+        // same physical monitor: do not animate them flying across bezels.
+        for managed in &mut self.shell.windows {
+            if moved_outputs.contains(&managed.geometry.output) {
+                managed.motion = Default::default();
+            }
+        }
+        self.update_xwayland_primary();
+        if let Some((id, local)) = pointer_before {
+            if let Some(screen) = self.shell.screen(id) {
+                let target = Point::<f64, Logical>::from((
+                    f64::from(screen.rect.x) + local.x,
+                    f64::from(screen.rect.y) + local.y,
+                ));
+                self.relocate_pointer(target);
+            }
+        }
+        self.after_rescale();
     }
 
     /// Gives each screen the layout the configuration names; windows move

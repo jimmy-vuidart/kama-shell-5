@@ -301,6 +301,11 @@ impl Screen {
         self.splits = splits;
     }
 
+    pub(crate) fn set_role(&mut self, role: OutputRole, splits: ScreenProportions) {
+        self.info.role = role;
+        self.splits = splits;
+    }
+
     pub(crate) fn set_anchored(&mut self, anchored: Option<WindowId>) {
         self.anchored = anchored;
     }

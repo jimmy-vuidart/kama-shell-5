@@ -93,6 +93,7 @@ const CONTROLS_NAMESPACE: &str = "coquille-controls";
 pub struct BarState {
     pub id: window::Id,
     pub screen: OutputRole,
+    pub output_name: Option<String>,
     pub orientation: Orientation,
     /// What it shows: the same applications on every bar, but "here" is
     /// its own screen.
@@ -219,6 +220,7 @@ pub struct SpatialPopover {
 pub struct SpatialHome {
     pub id: window::Id,
     pub screen: OutputRole,
+    pub output_name: Option<String>,
     pub query: String,
     pub page: usize,
     pub surface: Option<Size>,
@@ -965,12 +967,15 @@ impl Dock {
             // `--output` names the screen of the first dock; a made-up
             // world has no real output to put the others on.
             let named = self.options.output.clone().filter(|_| index == 0);
-            let output = match (named, simulated) {
-                (Some(name), _) => OutputOption::OutputName(name),
-                (None, true) if index == 0 => OutputOption::Active,
+            let (output, output_name) = match (named, simulated) {
+                (Some(name), _) => (OutputOption::OutputName(name.clone()), Some(name)),
+                (None, true) if index == 0 => (OutputOption::Active, None),
                 (None, true) => continue,
                 (None, false) => match self.screen(screen) {
-                    Some(known) => OutputOption::OutputName(known.name.clone()),
+                    Some(known) => (
+                        OutputOption::OutputName(known.name.clone()),
+                        Some(known.name.clone()),
+                    ),
                     // Not known yet: the state of the compositor will tell.
                     None => continue,
                 },
@@ -1033,6 +1038,7 @@ impl Dock {
             self.bars.push(BarState {
                 id,
                 screen,
+                output_name,
                 orientation,
                 entries,
                 size,
@@ -1059,7 +1065,7 @@ impl Dock {
             return Task::batch(gone.into_iter().map(|home| window::close(home.id)));
         }
         let simulated = !self.options.is_real(Backend::Compositor);
-        let wanted: Vec<(OutputRole, OutputOption)> = if simulated {
+        let wanted: Vec<(OutputRole, Option<String>, OutputOption)> = if simulated {
             // In `--mock`, a single active output exists.
             let screen = self.bars.first().map_or(OutputRole::Left, |bar| bar.screen);
             let output = self
@@ -1067,26 +1073,39 @@ impl Dock {
                 .output
                 .clone()
                 .map_or(OutputOption::Active, OutputOption::OutputName);
-            vec![(screen, output)]
+            vec![(screen, self.options.output.clone(), output)]
         } else {
             self.snapshot
                 .screens
                 .iter()
-                .map(|screen| (screen.role, OutputOption::OutputName(screen.name.clone())))
+                .map(|screen| {
+                    (
+                        screen.role,
+                        Some(screen.name.clone()),
+                        OutputOption::OutputName(screen.name.clone()),
+                    )
+                })
                 .collect()
         };
-        let wanted_roles: Vec<OutputRole> = wanted.iter().map(|(role, _)| *role).collect();
         let (kept, gone): (Vec<SpatialHome>, Vec<SpatialHome>) =
             std::mem::take(&mut self.spatial_homes)
                 .into_iter()
-                .partition(|home| wanted_roles.contains(&home.screen));
+                .partition(|home| {
+                    wanted
+                        .iter()
+                        .any(|(role, name, _)| *role == home.screen && *name == home.output_name)
+                });
         self.spatial_homes = kept;
         let mut tasks: Vec<Task<Message>> = gone
             .into_iter()
             .map(|home| window::close(home.id))
             .collect();
-        for (role, output) in wanted {
-            if self.spatial_homes.iter().any(|home| home.screen == role) {
+        for (role, output_name, output) in wanted {
+            if self
+                .spatial_homes
+                .iter()
+                .any(|home| home.screen == role && home.output_name == output_name)
+            {
                 continue;
             }
             let (id, task) = Message::layershell_open(NewLayerShellSettings {
@@ -1104,6 +1123,7 @@ impl Dock {
             self.spatial_homes.push(SpatialHome {
                 id,
                 screen: role,
+                output_name,
                 query: String::new(),
                 page: 0,
                 surface: None,
@@ -1513,10 +1533,17 @@ impl Dock {
     /// A bar whose screen lost its dock, or whose dock now lies the other
     /// way, goes; `show_bars` opens the ones that are missing.
     fn drop_stale_bars(&mut self) -> Task<Message> {
+        let simulated = !self.options.is_real(Backend::Compositor);
         let docks = self.docks();
-        let (kept, gone): (Vec<BarState>, Vec<BarState>) = std::mem::take(&mut self.bars)
-            .into_iter()
-            .partition(|bar| docks.contains(&(bar.screen, bar.orientation)));
+        let (kept, gone): (Vec<BarState>, Vec<BarState>) =
+            std::mem::take(&mut self.bars).into_iter().partition(|bar| {
+                let same_output = simulated
+                    || self.options.output.is_some()
+                    || self
+                        .screen(bar.screen)
+                        .is_some_and(|s| bar.output_name.as_deref() == Some(s.name.as_str()));
+                docks.contains(&(bar.screen, bar.orientation)) && same_output
+            });
         self.bars = kept;
         if gone.is_empty() {
             return Task::none();

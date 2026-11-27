@@ -290,17 +290,42 @@ pub fn terminals(installed: impl Fn(&str) -> bool, configured: Option<&str>) -> 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenCard {
     pub role: OutputRole,
-    /// The connector the screen is on, or will be at the next start.
+    /// The connector the screen is on, or will be.
     pub connector: Option<String>,
-    /// In pixels, when the compositor says.
+    /// In pixels, when known for `connector` (or the simulated screen).
     pub size: Option<(i32, i32)>,
     /// What the compositor draws it at.
     pub scale: Option<Scale>,
+    /// Whether `connector` is currently plugged in (`true` when simulated
+    /// or outside coquille).
+    pub plugged: bool,
+    /// When `connector` is unplugged while another screen currently holds
+    /// `role`, that live screen's name and pixel size.
+    pub actual: Option<(String, (i32, i32))>,
+}
+
+fn pixel_size(screen: &coquille_ipc::Screen) -> (i32, i32) {
+    // Older compositors only said the logical size.
+    if screen.pixel_width > 0 && screen.pixel_height > 0 {
+        (screen.pixel_width, screen.pixel_height)
+    } else {
+        (screen.width, screen.height)
+    }
 }
 
 impl ScreenCard {
     /// `HDMI-A-1 · 1920 × 1080`, and its scale when it is not 100 %.
     pub fn detail(&self) -> String {
+        if !self.plugged {
+            if let Some(connector) = &self.connector {
+                return match &self.actual {
+                    Some((actual, (width, height))) => format!(
+                        "{connector} · non branché (actuellement {actual} · {width} × {height})"
+                    ),
+                    None => format!("{connector} · non branché"),
+                };
+            }
+        }
         let scale = self.scale.filter(|scale| *scale != Scale::ONE);
         let size = self.size.map(|(width, height)| match scale {
             Some(scale) => format!("{width} × {height} · {}", scale.label()),
@@ -316,28 +341,40 @@ impl ScreenCard {
 }
 
 /// The three screens: their connectors as the file names them, else as the
-/// compositor found them, and their sizes.
+/// compositor found them, and the pixel size of each connector.
 pub fn screens(settings: &Settings, snapshot: Option<&Snapshot>) -> PerScreen<ScreenCard> {
+    let real_snapshot = snapshot.filter(|snapshot| !snapshot.simulated);
     let card = |role: OutputRole| {
-        let live = snapshot.and_then(|snapshot| snapshot.screens.iter().find(|s| s.role == role));
-        // Made-up screens have made-up names: only the file names connectors.
-        let real = live.filter(|_| snapshot.is_some_and(|snapshot| !snapshot.simulated));
-        ScreenCard {
-            role,
-            connector: settings
-                .outputs
-                .get(role)
-                .clone()
-                .or_else(|| real.map(|screen| screen.name.clone())),
-            size: live.map(|screen| {
-                // Older compositors only said the logical size.
-                if screen.pixel_width > 0 && screen.pixel_height > 0 {
-                    (screen.pixel_width, screen.pixel_height)
-                } else {
-                    (screen.width, screen.height)
-                }
-            }),
-            scale: live.map(|screen| screen.scale),
+        let live_role =
+            snapshot.and_then(|snapshot| snapshot.screens.iter().find(|s| s.role == role));
+        let configured = settings.outputs.get(role).clone();
+        if let Some(real) = real_snapshot {
+            let connector = configured.or_else(|| live_role.map(|screen| screen.name.clone()));
+            let by_name = connector
+                .as_deref()
+                .and_then(|name| real.screens.iter().find(|screen| screen.name == name));
+            let plugged = connector.is_none() || by_name.is_some();
+            let actual = (!plugged)
+                .then(|| live_role.map(|screen| (screen.name.clone(), pixel_size(screen))))
+                .flatten();
+            ScreenCard {
+                role,
+                connector,
+                size: by_name.map(pixel_size),
+                scale: live_role.map(|screen| screen.scale),
+                plugged,
+                actual,
+            }
+        } else {
+            // Made-up screens have made-up names: only the file names connectors.
+            ScreenCard {
+                role,
+                connector: configured,
+                size: live_role.map(pixel_size),
+                scale: live_role.map(|screen| screen.scale),
+                plugged: true,
+                actual: None,
+            }
         }
     };
     PerScreen {
@@ -357,17 +394,41 @@ pub fn connectors(cards: &PerScreen<ScreenCard>) -> PerScreen<Option<String>> {
 }
 
 /// The connectors a screen can be given: the ones of the screens plugged
-/// in, and the ones the file names.
+/// in (with their resolution), then any configured ones that are unplugged.
 pub fn connector_choices(settings: &Settings, snapshot: Option<&Snapshot>) -> Vec<Choice> {
-    let real = snapshot.filter(|snapshot| !snapshot.simulated);
-    let plugged = real.into_iter().flat_map(|snapshot| &snapshot.screens);
-    let mut names: Vec<String> = plugged.map(|screen| screen.name.clone()).collect();
-    for role in PerScreen::<()>::ROLES {
-        names.extend(settings.outputs.get(role).clone());
+    if let Some(real) = snapshot.filter(|snapshot| !snapshot.simulated) {
+        let mut plugged: Vec<&coquille_ipc::Screen> = real.screens.iter().collect();
+        plugged.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut choices: Vec<Choice> = plugged
+            .iter()
+            .map(|screen| {
+                let (width, height) = pixel_size(screen);
+                Choice::new(
+                    &screen.name,
+                    format!("{} · {width} × {height}", screen.name),
+                )
+            })
+            .collect();
+        let mut extra: Vec<String> = PerScreen::<()>::ROLES
+            .into_iter()
+            .filter_map(|role| settings.outputs.get(role).clone())
+            .filter(|name| !plugged.iter().any(|screen| screen.name == *name))
+            .collect();
+        extra.sort();
+        extra.dedup();
+        for name in extra {
+            choices.push(Choice::new(&name, format!("{name} · non branché")));
+        }
+        choices
+    } else {
+        let mut names: Vec<String> = PerScreen::<()>::ROLES
+            .into_iter()
+            .filter_map(|role| settings.outputs.get(role).clone())
+            .collect();
+        names.sort();
+        names.dedup();
+        names.iter().map(|name| Choice::new(name, name)).collect()
     }
-    names.sort();
-    names.dedup();
-    names.iter().map(|name| Choice::new(name, name)).collect()
 }
 
 /// The size of each screen on the drawing of the page, `width` wide in all
@@ -387,7 +448,11 @@ pub fn drawing(
             OutputRole::Center => (3440, 1440),
             OutputRole::Left | OutputRole::Right => (1920, 1080),
         };
-        let (w, h) = card.size.filter(|(w, h)| *w > 0 && *h > 0).unwrap_or(usual);
+        let (w, h) = card
+            .size
+            .or_else(|| card.actual.as_ref().map(|(_, size)| *size))
+            .filter(|(w, h)| *w > 0 && *h > 0)
+            .unwrap_or(usual);
         (w as f32, h as f32)
     };
     let sizes = [size(&cards.left), size(&cards.center), size(&cards.right)];
@@ -749,17 +814,67 @@ mod tests {
 
     #[test]
     fn screens_are_named_by_the_file_then_by_the_compositor() {
-        let settings = Settings::parse("[outputs]\nleft = \"DP-1\"\n");
+        let settings = Settings::parse("[outputs]\nleft = \"DP-2\"\n");
 
         let cards = screens(&settings, Some(&snapshot(false)));
 
-        assert_eq!(cards.left.detail(), "DP-1 · 1920 × 1080");
+        // DP-2 is 3440x1440 in snapshot: size follows the connector, not the old role.
+        assert_eq!(cards.left.detail(), "DP-2 · 3440 × 1440");
         assert_eq!(cards.center.detail(), "DP-2 · 3440 × 1440");
-        let names = labels(&connector_choices(&settings, Some(&snapshot(false))))
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        assert_eq!(names, ["DP-1", "DP-2", "HDMI-A-1"]);
+        assert_eq!(cards.right.detail(), "DP-1 · 1920 × 1080");
+        let choices = connector_choices(&settings, Some(&snapshot(false)));
+        let values: Vec<_> = choices.iter().filter_map(|c| c.value.as_deref()).collect();
+        assert_eq!(values, ["DP-1", "DP-2", "HDMI-A-1"]);
+        assert_eq!(
+            labels(&choices),
+            [
+                "DP-1 · 1920 × 1080",
+                "DP-2 · 3440 × 1440",
+                "HDMI-A-1 · 1920 × 1080",
+            ]
+        );
+    }
+
+    #[test]
+    fn unplugged_configured_connector_is_flagged_with_live_fallback() {
+        let settings = Settings::parse("[outputs]\nleft = \"DP-3\"\nright = \"HDMI-A-9\"\n");
+        let mut snap = snapshot(false);
+        snap.screens[0].name = "DP-3".into();
+        snap.screens[0].width = 3440;
+        snap.screens[0].height = 1440;
+        snap.screens[0].pixel_width = 3440;
+        snap.screens[0].pixel_height = 1440;
+        snap.screens[1].name = "DP-2".into();
+        snap.screens[1].width = 1920;
+        snap.screens[1].height = 1080;
+        snap.screens[1].pixel_width = 1920;
+        snap.screens[1].pixel_height = 1080;
+
+        let cards = screens(&settings, Some(&snap));
+        assert_eq!(cards.left.detail(), "DP-3 · 3440 × 1440");
+        assert_eq!(cards.center.detail(), "DP-2 · 1920 × 1080");
+        assert!(!cards.right.plugged);
+        assert_eq!(
+            cards.right.detail(),
+            "HDMI-A-9 · non branché (actuellement DP-1 · 1920 × 1080)"
+        );
+        let choices = connector_choices(&settings, Some(&snap));
+        assert_eq!(
+            labels(&choices),
+            [
+                "DP-1 · 1920 × 1080",
+                "DP-2 · 1920 × 1080",
+                "DP-3 · 3440 × 1440",
+                "HDMI-A-9 · non branché",
+            ]
+        );
+
+        // Assigning DP-3 to Center updates the drawing proportions immediately.
+        let swapped = Settings::parse("[outputs]\nleft = \"DP-2\"\ncenter = \"DP-3\"\n");
+        let swapped_cards = screens(&swapped, Some(&snap));
+        let drawn = drawing(&swapped_cards, &PerScreen::<()>::ROLES, 364.0);
+        assert_eq!(drawn.left, (96.0, 54.0));
+        assert_eq!(drawn.center, (172.0, 72.0));
     }
 
     #[test]

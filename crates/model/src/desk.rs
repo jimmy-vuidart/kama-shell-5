@@ -714,6 +714,29 @@ impl Desk {
         Ok(())
     }
 
+    /// Reassigns each output's role and column proportions (for instance when
+    /// `[outputs]` is reloaded at runtime). Keeps every window on its output.
+    pub fn set_output_roles(
+        &mut self,
+        roles: &[(OutputId, OutputRole)],
+        proportions: &Proportions,
+    ) -> Result<(), ModelError> {
+        for &(output, _) in roles {
+            let _ = self.screen_index(output)?;
+        }
+        for &(output, role) in roles {
+            let index = self.screen_index(output)?;
+            self.screens[index].set_role(role, proportions.of(role));
+        }
+        if self.last_side.is_some_and(|id| {
+            self.screen(id)
+                .is_some_and(|screen| !screen.role().is_side())
+        }) {
+            self.last_side = None;
+        }
+        Ok(())
+    }
+
     /// A panel of the shell takes (or gives back) room along the edges of an
     /// output: slots and floating windows keep out of it.
     pub fn set_reserved(&mut self, output: OutputId, reserved: Insets) -> Result<(), ModelError> {

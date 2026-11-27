@@ -40,7 +40,7 @@ Sans `--config`, les trois programmes lisent et écrivent le vrai fichier.
 |---|---|---|
 | Apparence | thème clair ou sombre, couleur d'accent (celle du thème, huit pastilles, ou `#rrggbb` saisi) | aussitôt |
 | Fond d'écran | définition du fond « verre » des écrans 16:9 (automatique, 1080p, 4K), mode d'affichage, image personnalisée (rétablir le fond par défaut) | aussitôt |
-| Écrans et dock | connecteur de chaque écran | **au prochain démarrage** |
+| Écrans et dock | connecteur de chaque écran | aussitôt |
 | | disposition de chaque écran : plein écran, 2 colonnes, 3 colonnes, maître / esclave | aussitôt |
 | | dock de chaque écran : à gauche, à droite, en bas, aucun (un écran seul a le sien tant que le fichier ne dit rien) | aussitôt |
 | | mise à l'échelle de chaque écran, de 100 % à 300 % par pas de 25 % | aussitôt (applis X11 : **au prochain démarrage**) |
@@ -89,4 +89,3 @@ L'écriture est faite par la crate `coquille-config`, comme pour le dock :
 - Les dispositions du clavier portent leur nom anglais, celui de XKB.
 - La disposition donnée à coquille par `--keyboard-layout` l'emporte sur le
   fichier.
-- Le rôle des écrans ne change pas en cours de session.

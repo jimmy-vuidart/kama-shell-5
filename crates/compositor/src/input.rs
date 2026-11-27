@@ -700,6 +700,16 @@ impl State {
         }
     }
 
+    /// Moves the pointer to `location`, clamped inside the screens, after
+    /// screens changed position or role.
+    pub fn relocate_pointer(&mut self, location: Point<f64, Logical>) {
+        let rects: Vec<Rect> = self.shell.screens.iter().map(|s| s.rect).collect();
+        let (x, y) = crate::outputs::constrain((location.x, location.y), &rects);
+        self.last_absolute = None;
+        self.pointer_moved((x, y).into(), InputTime::now());
+        self.refresh_constraint();
+    }
+
     /// Looks again at what is under the pointer, after windows moved without
     /// it moving.
     pub fn refresh_pointer_focus(&mut self) {
