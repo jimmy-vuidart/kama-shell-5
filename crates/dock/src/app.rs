@@ -2052,25 +2052,20 @@ impl Dock {
         let spatial = self.is_spatial();
         for bar in &self.bars {
             if spatial {
-                let side = match bar.orientation {
-                    Orientation::Vertical(side) => side,
-                    Orientation::Horizontal => Side::Left,
-                };
-                glass.insert(
-                    (BAR_NAMESPACE, bar.screen),
-                    ui::spatial::bar::glass_shapes(side, bar.size.0, bar.size.1.max(1080)),
-                );
-            } else {
-                let pinned = bar.pinned();
-                let shape = metrics.glass_shape(
-                    bar.orientation,
-                    bar.size,
-                    (pinned, bar.entries.len() - pinned),
-                    self.tray.len(),
-                    bar.unfold,
-                );
-                glass.insert((BAR_NAMESPACE, bar.screen), vec![shape]);
+                // Edge-to-edge spatial sidebars use Dual Kawase frosted glass
+                // (`Mask::Alpha` via `palette.glass`) with a single inner rim,
+                // avoiding the 4-sided specular border of floating liquid glass.
+                continue;
             }
+            let pinned = bar.pinned();
+            let shape = metrics.glass_shape(
+                bar.orientation,
+                bar.size,
+                (pinned, bar.entries.len() - pinned),
+                self.tray.len(),
+                bar.unfold,
+            );
+            glass.insert((BAR_NAMESPACE, bar.screen), vec![shape]);
         }
         if let Some(toasts) = &self.toasts {
             let (thickness, radius) = metrics.thickness(toasts.orientation);

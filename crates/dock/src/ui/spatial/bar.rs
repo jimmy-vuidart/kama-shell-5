@@ -1,7 +1,6 @@
 //! Permanent full-height 56 px Liquid Glass vertical sidebar for spatial mode.
 
 use chrono::{DateTime, Datelike, Local, Timelike, Weekday};
-use coquille_ipc::GlassShape;
 use coquille_model::OutputRole;
 use iced::alignment::{Horizontal, Vertical};
 use iced::border::Radius;
@@ -62,17 +61,6 @@ fn side_of(orientation: Orientation) -> Side {
 /// Interactive input region of the sidebar surface (strictly 56 px wide).
 pub fn input_region(side: Side, surface_width: u32, height: u32) -> (i32, i32, i32, i32) {
     (bar_x(side, surface_width), 0, WIDTH as i32, height as i32)
-}
-
-/// Liquid glass region covering the full-height 56 px sidebar.
-pub fn glass_shapes(side: Side, surface_width: u32, height: u32) -> Vec<GlassShape> {
-    vec![GlassShape {
-        x: bar_x(side, surface_width),
-        y: 0,
-        width: WIDTH as i32,
-        height: height as i32,
-        radius: 0,
-    }]
 }
 
 /// Logical rectangle `(x, y, width, height)` of taskbar item `index` inside
@@ -171,7 +159,7 @@ pub fn view<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<
     let bar_bg = container(bar_content)
         .width(WIDTH as f32)
         .height(Length::Fill)
-        .style(move |_| style::fill(palette.glass_clear, 0.0));
+        .style(move |_| style::fill(palette.glass, 0.0));
 
     let rim_align = match side {
         Side::Left => Horizontal::Right,
@@ -179,7 +167,7 @@ pub fn view<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<
     };
     let inner_rim = container(
         container(space().width(1).height(Length::Fill))
-            .style(move |_| style::fill(palette.rim_bright, 0.0)),
+            .style(move |_| style::fill(palette.rim, 0.0)),
     )
     .width(WIDTH as f32)
     .height(Length::Fill)
@@ -778,30 +766,6 @@ mod tests {
         assert_eq!(
             input_region(Side::Right, SURFACE_WIDTH, 1440),
             (240, 0, 56, 1440)
-        );
-    }
-
-    #[test]
-    fn glass_shapes_cover_full_height_sidebar_with_zero_radius() {
-        assert_eq!(
-            glass_shapes(Side::Left, SURFACE_WIDTH, 1080),
-            vec![GlassShape {
-                x: 0,
-                y: 0,
-                width: 56,
-                height: 1080,
-                radius: 0,
-            }]
-        );
-        assert_eq!(
-            glass_shapes(Side::Right, SURFACE_WIDTH, 1080),
-            vec![GlassShape {
-                x: 240,
-                y: 0,
-                width: 56,
-                height: 1080,
-                radius: 0,
-            }]
         );
     }
 
