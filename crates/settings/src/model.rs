@@ -20,11 +20,12 @@ pub enum Page {
     Game,
     Mouse,
     Shortcuts,
+    ExternalServices,
     System,
 }
 
 impl Page {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Screens,
@@ -32,6 +33,7 @@ impl Page {
         Self::Game,
         Self::Mouse,
         Self::Shortcuts,
+        Self::ExternalServices,
         Self::System,
     ];
 
@@ -44,6 +46,7 @@ impl Page {
             Self::Game => "Mode jeu",
             Self::Mouse => "Souris et pavé",
             Self::Shortcuts => "Raccourcis clavier",
+            Self::ExternalServices => "Services externes",
             Self::System => "Système",
         }
     }
@@ -65,6 +68,9 @@ impl Page {
                  tactile."
             }
             Self::Shortcuts => "Les raccourcis clavier et gestes du shell, en lecture seule.",
+            Self::ExternalServices => {
+                "Les clés d'accès aux services externes utilisés par le bureau."
+            }
             Self::System => "Le clavier, le terminal et les applications X11.",
         }
     }

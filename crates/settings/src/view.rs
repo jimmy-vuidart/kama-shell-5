@@ -82,6 +82,7 @@ fn page_button<'a>(page: Page, current: bool, palette: Palette) -> Element<'a, M
         Page::Game => Glyph::Gamepad,
         Page::Mouse => Glyph::Mouse,
         Page::Shortcuts => Glyph::Keyboard,
+        Page::ExternalServices => Glyph::Network,
         Page::System => Glyph::Sliders,
     };
     let (color, font) = if current {
@@ -136,6 +137,7 @@ fn page<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         Page::Game => game(app, palette),
         Page::Mouse => mouse(app, palette),
         Page::Shortcuts => shortcuts(palette),
+        Page::ExternalServices => external_services(app, palette),
         Page::System => system(app, palette),
     };
     let content = content.push(settings);
@@ -655,16 +657,45 @@ fn api_token_control<'a>(
     control.into()
 }
 
-fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
-    let snapshot = app.snapshot.as_ref();
-    let cards = model::screens(&app.file, snapshot);
-    let choices = model::connector_choices(&app.file, snapshot);
-    let simulated = snapshot.is_some_and(|snapshot| snapshot.simulated);
-    let shown = model::shown_roles(snapshot);
-    let mode = app.file.shell_mode();
-    let spatial = mode == ShellMode::Spatial;
+#[allow(clippy::too_many_arguments)]
+fn service_token_section<'a>(
+    title: &'static str,
+    detail: &'static str,
+    placeholder: &'a str,
+    input: &'a str,
+    saved: &'a str,
+    visible: bool,
+    on_input: impl Fn(String) -> Message + 'a,
+    on_submit: Message,
+    on_toggle_visible: Message,
+    clear_change: Change,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let control = api_token_control(
+        placeholder,
+        input,
+        saved,
+        visible,
+        on_input,
+        on_submit,
+        on_toggle_visible,
+        clear_change,
+        palette,
+    );
+    section(
+        title,
+        card(
+            vec![setting("Clé API", detail, None, control, palette)],
+            palette,
+        ),
+        palette,
+    )
+}
 
-    let token_control = api_token_control(
+fn external_services<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
+    let home_card = service_token_section(
+        "Kama-Home",
+        "Clé d'accès pour la carte « Vie quotidienne » (Entrée pour valider).",
         "kama_…",
         &app.tasks_token_input,
         app.file.tasks_token.as_deref().unwrap_or(""),
@@ -675,22 +706,9 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         Change::TasksToken(None),
         palette,
     );
-    let spatial_card = section(
-        "Mode spatial",
-        card(
-            vec![setting(
-                "Token API (liste de tâches)",
-                "Clé d'accès pour la carte « Vie quotidienne » (Entrée pour valider).",
-                None,
-                token_control,
-                palette,
-            )],
-            palette,
-        ),
-        palette,
-    );
-
-    let foundry_control = api_token_control(
+    let foundry_card = service_token_section(
+        "Kama-Foundry",
+        "Clé d'accès pour la carte « Tâches des projets » (Entrée pour valider).",
         "kma_…",
         &app.foundry_token_input,
         app.file.foundry_token.as_deref().unwrap_or(""),
@@ -701,27 +719,20 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         Change::FoundryToken(None),
         palette,
     );
-    let foundry_card = section(
-        "Kama-Foundry",
-        card(
-            vec![setting(
-                "Clé API",
-                "Clé d'accès pour la carte « Tâches des projets » (Entrée pour valider).",
-                None,
-                foundry_control,
-                palette,
-            )],
-            palette,
-        ),
-        palette,
-    );
+    column![home_card, foundry_card].spacing(18).into()
+}
 
-    let mut content: Column<'_, Message> = column![
-        spatial_card,
-        foundry_card,
-        drawing(app, &cards, &shown, palette)
-    ]
-    .spacing(18);
+fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
+    let snapshot = app.snapshot.as_ref();
+    let cards = model::screens(&app.file, snapshot);
+    let choices = model::connector_choices(&app.file, snapshot);
+    let simulated = snapshot.is_some_and(|snapshot| snapshot.simulated);
+    let shown = model::shown_roles(snapshot);
+    let mode = app.file.shell_mode();
+    let spatial = mode == ShellMode::Spatial;
+
+    let mut content: Column<'_, Message> =
+        column![drawing(app, &cards, &shown, palette)].spacing(18);
     for &role in &shown {
         let screen = cards.get(role);
         let connector: Element<'a, Message> = if simulated {
