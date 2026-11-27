@@ -15,6 +15,21 @@ pub struct DailyTask {
     pub title: String,
     pub meta: String,
     pub done: bool,
+    /// Remote tasks are read-only while only `GET` is available.
+    pub read_only: bool,
+}
+
+/// Loading state of the « Vie quotidienne » tasks card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DailyTasksStatus {
+    /// No API token configured in `[spatial] tasks_token`.
+    MissingToken,
+    /// Initial fetch in flight.
+    Loading,
+    /// Loaded from the API (or mock defaults).
+    Ready,
+    /// Last fetch failed with a short French explanation.
+    Error(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +99,7 @@ impl GameNotes {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetsState {
     pub daily_tasks: Vec<DailyTask>,
+    pub daily_tasks_status: DailyTasksStatus,
     pub project_tasks: Vec<ProjectTask>,
     pub calendar_events: Vec<CalendarEvent>,
     pub game_notes: GameNotes,
@@ -98,26 +114,31 @@ impl WidgetsState {
                     title: "Faire les courses (légumes, café)".into(),
                     meta: "Avant 18 h".into(),
                     done: false,
+                    read_only: false,
                 },
                 DailyTask {
                     id: "daily_2".into(),
                     title: "Sortir les poubelles jaunes".into(),
                     meta: "Ce soir".into(),
                     done: false,
+                    read_only: false,
                 },
                 DailyTask {
                     id: "daily_3".into(),
                     title: "Appeler le dentiste pour décembre".into(),
                     meta: "Matin".into(),
                     done: true,
+                    read_only: false,
                 },
                 DailyTask {
                     id: "daily_4".into(),
                     title: "Arroser les plantes du bureau".into(),
                     meta: "Fait".into(),
                     done: true,
+                    read_only: false,
                 },
             ],
+            daily_tasks_status: DailyTasksStatus::Ready,
             project_tasks: vec![
                 ProjectTask {
                     id: "proj_1".into(),
@@ -193,7 +214,9 @@ impl WidgetsState {
     }
 
     pub fn toggle_daily_task(&mut self, id: &str) {
-        if let Some(task) = self.daily_tasks.iter_mut().find(|task| task.id == id) {
+        if let Some(task) = self.daily_tasks.iter_mut().find(|task| task.id == id)
+            && !task.read_only
+        {
             task.done = !task.done;
         }
     }

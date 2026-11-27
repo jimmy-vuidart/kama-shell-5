@@ -10,6 +10,7 @@ pub mod installed;
 pub mod mock;
 pub mod notify;
 pub mod services;
+pub mod tasks;
 pub mod tray;
 pub mod xembed;
 

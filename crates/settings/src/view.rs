@@ -527,8 +527,94 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         palette,
     );
 
-    let mut content: Column<'_, Message> =
-        column![mode_card, drawing(app, &cards, &shown, palette)].spacing(18);
+    let saved_token = app.file.tasks_token.as_deref().unwrap_or("");
+    let token_dirty = app.tasks_token_input.trim() != saved_token;
+    let token_field = text_input("kama_…", &app.tasks_token_input)
+        .on_input(Message::TasksTokenChanged)
+        .on_submit(Message::TasksTokenSubmit)
+        .secure(!app.tasks_token_visible)
+        .size(13)
+        .font(style::MEDIUM)
+        .width(220)
+        .padding(Padding::from([7.0, 10.0]))
+        .style(move |_, status| {
+            let line = match status {
+                text_input::Status::Focused { .. } => palette.accent,
+                _ => palette.rim,
+            };
+            text_input::Style {
+                background: palette.card.into(),
+                border: Border {
+                    color: line,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                icon: palette.muted,
+                placeholder: palette.muted,
+                value: palette.text,
+                selection: style::alpha(palette.accent, 0.35),
+            }
+        });
+    let reveal_btn = button(
+        text(if app.tasks_token_visible {
+            "Masquer"
+        } else {
+            "Afficher"
+        })
+        .size(12)
+        .font(style::MEDIUM)
+        .color(palette.text),
+    )
+    .padding(Padding::from([6.0, 10.0]))
+    .on_press(Message::TasksTokenToggleVisible)
+    .style(style::tinted(palette.card, palette.hover, 6.0));
+    let mut token_control = row![token_field, reveal_btn]
+        .spacing(6)
+        .align_y(Alignment::Center);
+    if token_dirty {
+        let save_btn = button(
+            text("Enregistrer")
+                .size(12)
+                .font(style::MEDIUM)
+                .color(palette.on_accent()),
+        )
+        .padding(Padding::from([6.0, 12.0]))
+        .on_press(Message::TasksTokenSubmit)
+        .style(style::tinted(palette.accent, palette.accent, 6.0));
+        token_control = token_control.push(save_btn);
+    } else if !saved_token.is_empty() {
+        let clear_btn = button(
+            text("Effacer")
+                .size(12)
+                .font(style::MEDIUM)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([6.0, 10.0]))
+        .on_press(Message::Change(Change::TasksToken(None)))
+        .style(style::tinted(palette.card, palette.hover, 6.0));
+        token_control = token_control.push(clear_btn);
+    }
+    let spatial_card = section(
+        "Mode spatial",
+        card(
+            vec![setting(
+                "Token API (liste de tâches)",
+                "Clé d'accès pour la carte « Vie quotidienne » (Entrée pour valider).",
+                None,
+                token_control,
+                palette,
+            )],
+            palette,
+        ),
+        palette,
+    );
+
+    let mut content: Column<'_, Message> = column![
+        mode_card,
+        spatial_card,
+        drawing(app, &cards, &shown, palette)
+    ]
+    .spacing(18);
     for &role in &shown {
         let screen = cards.get(role);
         let connector: Element<'a, Message> = if simulated {

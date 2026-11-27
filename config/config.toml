@@ -172,3 +172,7 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # blur = true
 # strength = 3
 
+# Mode spatial : identifiants des widgets du lanceur spatial.
+# [spatial]
+# tasks_token = "kama_..."
+

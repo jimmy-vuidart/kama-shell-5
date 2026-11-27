@@ -53,6 +53,10 @@ pub enum Message {
     AudioVisibility(String, bool),
     AudioNickChanged(String, String),
     AudioNickSubmit(String),
+    /// Spatial tasks API token.
+    TasksTokenChanged(String),
+    TasksTokenSubmit,
+    TasksTokenToggleVisible,
 }
 
 pub struct App {
@@ -83,6 +87,10 @@ pub struct App {
     pub audio_sinks: Vec<model::AudioDeviceCard>,
     /// The draft nickname for each audio sink by name.
     pub audio_nick_inputs: HashMap<String, String>,
+    /// Draft API token for the spatial launcher's tasks widget.
+    pub tasks_token_input: String,
+    /// Whether the API token field is shown in clear text.
+    pub tasks_token_visible: bool,
 }
 
 impl App {
@@ -105,6 +113,8 @@ impl App {
             dock_icon_size: model::dock_icon_size_on_slider(file.dock_icon_size()),
             audio_sinks,
             audio_nick_inputs,
+            tasks_token_input: file.tasks_token.clone().unwrap_or_default(),
+            tasks_token_visible: false,
             file,
             error: None,
             snapshot: None,
@@ -163,6 +173,9 @@ impl App {
             }
         }
         self.audio_sinks = audio_sinks;
+        if file.tasks_token != self.file.tasks_token {
+            self.tasks_token_input = file.tasks_token.clone().unwrap_or_default();
+        }
         self.file = file;
     }
 
@@ -259,6 +272,17 @@ impl App {
                     Some(text.trim().to_owned())
                 };
                 self.change(Change::AudioNick { device, nick });
+            }
+            Message::TasksTokenChanged(text) => {
+                self.tasks_token_input = text;
+            }
+            Message::TasksTokenSubmit => {
+                let trimmed = self.tasks_token_input.trim();
+                let token = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+                self.change(Change::TasksToken(token));
+            }
+            Message::TasksTokenToggleVisible => {
+                self.tasks_token_visible = !self.tasks_token_visible;
             }
         }
         Task::none()

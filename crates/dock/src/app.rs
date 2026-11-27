@@ -22,6 +22,7 @@ use tracing::{debug, info, warn};
 
 use crate::backend::{
     self, Audio, Backend, Request, SessionAction, Switch, compositor, mock, services,
+    tasks::{self, TasksError},
 };
 use crate::config::{self, Config};
 use crate::model::bar::{self, Click, Entry, MenuAction};
@@ -34,7 +35,7 @@ use crate::model::notify::{
     ToastSurfacePlan, toast_geometry, toast_surface_plan, toasts_that_fit,
 };
 use crate::model::tray::TrayItem;
-use crate::model::widgets::{GameNotes, WidgetsState};
+use crate::model::widgets::{DailyTask, DailyTasksStatus, GameNotes, WidgetsState};
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
@@ -364,6 +365,10 @@ pub enum Message {
     GameNoteCancel,
     /// Launch a game card from the spatial launcher.
     SpatialLaunchGame(String),
+    /// Refresh daily tasks from the remote API.
+    RefreshDailyTasks,
+    /// Result of fetching daily tasks from the remote API.
+    DailyTasksLoaded(u64, Result<Vec<DailyTask>, TasksError>),
 }
 
 /// An audio output sink choice displayed in the launcher selector.
@@ -439,6 +444,9 @@ pub struct Dock {
     pub calendar_page: usize,
     pub spatial_popover: Option<SpatialPopover>,
     pub spatial_homes: Vec<SpatialHome>,
+    pub tasks_fetching: bool,
+    tasks_fetch_seq: u64,
+    last_tasks_fetch: Option<Instant>,
     ticks: u64,
 }
 
@@ -451,7 +459,15 @@ impl Dock {
         let playtimes = steam::load_playtimes();
         let config = read_config(&options.config, &catalog, &games);
         let game_notes = GameNotes::load(&options.state_dir);
-        let widgets = WidgetsState::mock_default(game_notes);
+        let mut widgets = WidgetsState::mock_default(game_notes);
+        if options.is_real(Backend::Compositor) {
+            widgets.daily_tasks.clear();
+            widgets.daily_tasks_status = if config.tasks_token.is_some() {
+                DailyTasksStatus::Loading
+            } else {
+                DailyTasksStatus::MissingToken
+            };
+        }
         let apps = drawer_apps(&catalog);
         let theme = config.theme.unwrap_or_default();
         let icon_style = icons::style(theme, config.accent.as_deref().unwrap_or_default());
@@ -534,6 +550,9 @@ impl Dock {
             calendar_page: 0,
             spatial_popover: None,
             spatial_homes: Vec::new(),
+            tasks_fetching: false,
+            tasks_fetch_seq: 0,
+            last_tasks_fetch: None,
             ticks: 0,
         };
         let mut tasks = vec![
@@ -541,6 +560,9 @@ impl Dock {
             dock.show_bars(),
             dock.sync_spatial_homes(),
         ];
+        if dock.is_spatial() && dock.config.tasks_token.is_some() {
+            tasks.push(dock.fetch_daily_tasks());
+        }
         if dock.options.drawer || dock.options.mixer {
             tasks.push(Task::done(Message::Launcher(None)));
         }
@@ -1475,6 +1497,7 @@ impl Dock {
             return Task::none();
         }
         info!("configuration read again");
+        let token_changed = config.tasks_token != self.config.tasks_token;
         self.config = config;
         let mut tasks = vec![self.close_menu()];
         tasks.push(self.drop_stale_bars());
@@ -1482,7 +1505,66 @@ impl Dock {
         self.rebuild_entries();
         tasks.push(self.fit_bars());
         tasks.push(self.sync_toasts());
+        if token_changed {
+            tasks.push(self.reset_daily_tasks_for_config());
+        }
         Task::batch(tasks)
+    }
+
+    fn reset_daily_tasks_for_config(&mut self) -> Task<Message> {
+        self.tasks_fetch_seq += 1;
+        self.tasks_fetching = false;
+        self.last_tasks_fetch = None;
+        if !self.options.is_real(Backend::Compositor) && self.config.tasks_token.is_none() {
+            return Task::none();
+        }
+        self.widgets.daily_tasks.clear();
+        if self.config.tasks_token.is_some() {
+            self.widgets.daily_tasks_status = DailyTasksStatus::Loading;
+            if self.is_spatial() {
+                return self.fetch_daily_tasks();
+            }
+        } else {
+            self.widgets.daily_tasks_status = DailyTasksStatus::MissingToken;
+        }
+        Task::none()
+    }
+
+    fn fetch_daily_tasks_if_due(&mut self, interval: Duration) -> Task<Message> {
+        if !self.is_spatial() || self.config.tasks_token.is_none() || self.tasks_fetching {
+            return Task::none();
+        }
+        let due = self
+            .last_tasks_fetch
+            .is_none_or(|last| last.elapsed() >= interval);
+        if due {
+            self.fetch_daily_tasks()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn fetch_daily_tasks(&mut self) -> Task<Message> {
+        let Some(token) = self.config.tasks_token.clone() else {
+            self.widgets.daily_tasks_status = DailyTasksStatus::MissingToken;
+            return Task::none();
+        };
+        self.tasks_fetch_seq += 1;
+        let seq = self.tasks_fetch_seq;
+        self.tasks_fetching = true;
+        self.last_tasks_fetch = Some(Instant::now());
+        if self.widgets.daily_tasks.is_empty() {
+            self.widgets.daily_tasks_status = DailyTasksStatus::Loading;
+        }
+        Task::perform(
+            async move {
+                match tokio::task::spawn_blocking(move || tasks::fetch(&token)).await {
+                    Ok(result) => result,
+                    Err(error) => Err(TasksError::Failed(error.to_string())),
+                }
+            },
+            move |result| Message::DailyTasksLoaded(seq, result),
+        )
     }
 
     /// Something was installed or removed: the applications and the games
@@ -1636,7 +1718,8 @@ impl Dock {
                 && !held(screen)
             {
                 let focus = operation::focus(ui::spatial::launcher::search_id(Some(screen)));
-                return close_popover.chain(focus);
+                let refresh = self.fetch_daily_tasks_if_due(Duration::from_secs(10));
+                return Task::batch([close_popover, focus, refresh]);
             }
             let orientation = self
                 .bar_on(screen)
@@ -1701,11 +1784,13 @@ impl Dock {
         }
         // The control center shows the notices: no toast over it.
         let toasts = self.sync_toasts();
+        let refresh = self.fetch_daily_tasks_if_due(Duration::from_secs(10));
         close_popover
             .chain(gone)
             .chain(self.close_menu())
             .chain(task)
             .chain(toasts)
+            .chain(refresh)
     }
 
     /// The size of the screen of the launcher: what its surface says, and
@@ -2165,7 +2250,7 @@ impl Dock {
                 if !self.options.is_real(Backend::Audio) {
                     self.levels = mock::levels(&self.audio, self.ticks).into_iter().collect();
                 }
-                Task::none()
+                self.fetch_daily_tasks_if_due(Duration::from_secs(60))
             }
             Message::Frame(now) => {
                 self.moment = now;
@@ -3245,6 +3330,30 @@ impl Dock {
                 }
                 let close_pop = self.close_spatial_popover();
                 close_pop.chain(self.update(Message::CloseDrawer))
+            }
+            Message::RefreshDailyTasks => self.fetch_daily_tasks(),
+            Message::DailyTasksLoaded(seq, result) => {
+                if seq != self.tasks_fetch_seq {
+                    return Task::none();
+                }
+                self.tasks_fetching = false;
+                match result {
+                    Ok(items) => {
+                        self.widgets.daily_tasks = items;
+                        self.widgets.daily_tasks_status = DailyTasksStatus::Ready;
+                    }
+                    Err(error) => {
+                        warn!(?error, "failed to load daily tasks");
+                        if matches!(error, TasksError::Unauthorized)
+                            || self.widgets.daily_tasks.is_empty()
+                        {
+                            self.widgets.daily_tasks.clear();
+                            self.widgets.daily_tasks_status =
+                                DailyTasksStatus::Error(error.user_message().to_owned());
+                        }
+                    }
+                }
+                Task::none()
             }
             // The messages added for the layer shell are handled by it.
             _ => Task::none(),

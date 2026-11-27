@@ -4,13 +4,14 @@
 
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    Column, Row, button, column, container, image, mouse_area, row, space, stack, text, text_input,
+    Column, Row, button, column, container, image, mouse_area, row, scrollable, space, stack, text,
+    text_input,
 };
 use iced::{Alignment, Border, Color, ContentFit, Element, Length, Padding};
 
 use crate::app::{Dock, Message};
 use crate::model::widgets::{
-    CalendarEvent, DailyTask, ProjectTask, StartedGame, day_label, range_label,
+    CalendarEvent, DailyTask, DailyTasksStatus, ProjectTask, StartedGame, day_label, range_label,
 };
 use crate::ui::icons::{self, Glyph};
 use crate::ui::style::{self, Palette};
@@ -119,22 +120,86 @@ fn glass_card<'a>(
         .into()
 }
 
-/// « Vie quotidienne » interactive checklist card.
+/// « Vie quotidienne » tasks checklist card.
 pub fn daily_tasks_card<'a>(
     dock: &'a Dock,
     fill_height: bool,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let rem = dock.widgets.remaining_daily_tasks();
-    let meta = remaining_label(rem);
-    let items: Vec<Element<'a, Message>> = dock
-        .widgets
-        .daily_tasks
-        .iter()
-        .map(|task| daily_task_row(task, palette))
-        .collect();
-    let body = Column::with_children(items).spacing(4).into();
-    glass_card("VIE QUOTIDIENNE", meta, None, body, fill_height, palette)
+    let status = &dock.widgets.daily_tasks_status;
+    let tasks = &dock.widgets.daily_tasks;
+    let meta = match status {
+        DailyTasksStatus::MissingToken => "Non configuré".to_owned(),
+        DailyTasksStatus::Loading if tasks.is_empty() => "Chargement…".to_owned(),
+        DailyTasksStatus::Error(_) if tasks.is_empty() => "Erreur".to_owned(),
+        _ => remaining_label(dock.widgets.remaining_daily_tasks()),
+    };
+
+    let refresh = dock.config.tasks_token.as_ref().map(|_| {
+        let color = if dock.tasks_fetching {
+            style::alpha(palette.muted, 0.5)
+        } else {
+            palette.muted
+        };
+        let btn = button(container(icons::glyph(Glyph::Restart, 12.0, color)).center(Length::Fill))
+            .width(22)
+            .height(22)
+            .padding(0)
+            .style(style::flat(palette.hover, 7.0));
+        if dock.tasks_fetching {
+            btn.into()
+        } else {
+            btn.on_press(Message::RefreshDailyTasks).into()
+        }
+    });
+
+    let body: Element<'a, Message> = match status {
+        DailyTasksStatus::MissingToken if tasks.is_empty() => container(
+            text("Configurez votre token d'API dans Paramètres → Écrans et dock.")
+                .size(12.5)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([8.0, 2.0]))
+        .into(),
+        DailyTasksStatus::Loading if tasks.is_empty() => container(
+            text("Chargement des tâches…")
+                .size(12.5)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([8.0, 2.0]))
+        .into(),
+        DailyTasksStatus::Error(err) if tasks.is_empty() => {
+            container(text(err).size(12.5).color(palette.muted))
+                .padding(Padding::from([8.0, 2.0]))
+                .into()
+        }
+        _ if tasks.is_empty() => container(
+            text("Aucune tâche pour le moment.")
+                .size(12.5)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([8.0, 2.0]))
+        .into(),
+        _ => {
+            let items: Vec<Element<'a, Message>> = tasks
+                .iter()
+                .map(|task| daily_task_row(task, palette))
+                .collect();
+            let list = Column::with_children(items).spacing(4);
+            if fill_height {
+                scrollable(list)
+                    .height(Length::Fill)
+                    .direction(scrollable::Direction::Vertical(
+                        scrollable::Scrollbar::new().width(4).scroller_width(4),
+                    ))
+                    .into()
+            } else {
+                list.into()
+            }
+        }
+    };
+
+    glass_card("VIE QUOTIDIENNE", meta, refresh, body, fill_height, palette)
 }
 
 fn remaining_label(remaining: usize) -> String {
@@ -172,18 +237,31 @@ fn daily_task_row<'a>(task: &'a DailyTask, palette: Palette) -> Element<'a, Mess
         .size(13)
         .font(style::MEDIUM)
         .color(title_color);
-    let meta = text(&task.meta).size(11.5).color(palette.muted);
-
-    let line = row![checkbox, title, space().width(Length::Fill), meta]
+    let mut line = row![checkbox, title, space().width(Length::Fill)]
         .spacing(10)
         .align_y(Alignment::Center);
+    if !task.meta.is_empty() {
+        let meta_color = if !done && task.meta == "Prioritaire" {
+            palette.accent
+        } else {
+            palette.muted
+        };
+        line = line.push(text(&task.meta).size(11.5).color(meta_color));
+    }
 
-    button(line)
-        .width(Length::Fill)
-        .padding(Padding::from([8.0, 10.0]))
-        .on_press(Message::DailyTaskToggle(task.id.clone()))
-        .style(style::flat(palette.hover, 12.0))
-        .into()
+    if task.read_only {
+        container(line)
+            .width(Length::Fill)
+            .padding(Padding::from([8.0, 10.0]))
+            .into()
+    } else {
+        button(line)
+            .width(Length::Fill)
+            .padding(Padding::from([8.0, 10.0]))
+            .on_press(Message::DailyTaskToggle(task.id.clone()))
+            .style(style::flat(palette.hover, 12.0))
+            .into()
+    }
 }
 
 /// « Tâches des projets » simulated project tickets card.

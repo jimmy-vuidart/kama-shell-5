@@ -43,6 +43,8 @@ pub struct Config {
     pub animations: bool,
     /// Desktop mode: classic columns + floating dock, or spatial maximized + vertical sidebar.
     pub mode: ShellMode,
+    /// API token for the spatial launcher's daily tasks widget (`[spatial] tasks_token`).
+    pub tasks_token: Option<String>,
 }
 
 impl Config {
@@ -144,6 +146,7 @@ pub fn parse(text: &str) -> Config {
         audio_nicks,
         animations: settings.animations(),
         mode: settings.shell_mode(),
+        tasks_token: settings.tasks_token,
     }
 }
 
