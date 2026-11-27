@@ -2,16 +2,19 @@
 
 use coquille_ipc::Window;
 use coquille_model::OutputRole;
+use iced::mouse;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    Column, Row, button, column, container, mouse_area, row, scrollable, space, text, text_input,
+    Column, Row, button, column, container, mouse_area, row, space, text, text_input,
 };
 use iced::{Alignment, Border, Color, Element, Length, Padding, Size, window};
 
 use super::cards;
 use crate::app::{Dock, Message};
+use crate::model::drawer;
 use crate::model::spatial::{
-    MAX_APPS_WIDTH, MAX_CONTENT_WIDTH, SEARCH_MAX_WIDTH, SpatialLayout, filter_apps,
+    APP_ROW_GAP, APP_TILE_HEIGHT, MAX_APPS_WIDTH, MAX_CONTENT_WIDTH, SEARCH_MAX_WIDTH,
+    SpatialLayout, filter_apps,
 };
 use crate::ui::icons::{self, Glyph};
 use crate::ui::style::{self, Palette};
@@ -69,27 +72,28 @@ fn app_presence(
 }
 
 /// Renders the spatial launcher: centered search bar, 2-column Liquid Glass
-/// dashboard, and GNOME-style floating application grid.
+/// dashboard, and paginated GNOME-style floating application grid (no scroll).
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     dock: &'a Dock,
     surface_id: window::Id,
     screen: OutputRole,
     query: &'a str,
+    page: usize,
     surface_size: Option<Size>,
     mode: LauncherMode,
     palette: Palette,
 ) -> Element<'a, Message> {
+    let fallback_screen = dock.snapshot.screens.iter().find(|s| s.role == screen);
     let usable_width = surface_size
         .map(|size| size.width)
-        .or_else(|| {
-            dock.snapshot
-                .screens
-                .iter()
-                .find(|s| s.role == screen)
-                .map(|s| s.width as f32)
-        })
+        .or_else(|| fallback_screen.map(|s| s.width as f32))
         .unwrap_or(1920.0);
-    let layout = SpatialLayout::for_width(usable_width);
+    let usable_height = surface_size
+        .map(|size| size.height)
+        .or_else(|| fallback_screen.map(|s| s.height as f32))
+        .unwrap_or(1080.0);
+    let layout = SpatialLayout::for_size(usable_width, usable_height);
     let target = match mode {
         LauncherMode::Overlay => None,
         LauncherMode::Home => Some(screen),
@@ -97,52 +101,31 @@ pub fn view<'a>(
 
     let search = search_bar(query, target, palette);
     let dashboard = dashboard_section(dock, &layout, palette);
-    let apps_grid = apps_section(dock, surface_id, screen, query, layout.app_columns, palette);
+    let apps_grid = apps_section(
+        dock, surface_id, screen, target, query, page, &layout, palette,
+    );
 
     let content = column![search, dashboard, apps_grid]
-        .spacing(24)
+        .spacing(18)
         .width(Length::Fill)
         .align_x(Alignment::Center);
 
-    let scroll = scrollable(container(content).width(Length::Fill).padding(Padding {
-        top: 28.0,
-        right: layout.padding_x,
-        bottom: 28.0,
-        left: layout.padding_x,
-    }))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .direction(scrollable::Direction::Vertical(
-        scrollable::Scrollbar::new()
-            .width(4)
-            .scroller_width(4)
-            .margin(3),
-    ))
-    .style(move |theme, status| {
-        let mut s = scrollable::default(theme, status);
-        let alpha = match status {
-            scrollable::Status::Active { .. } => 0.14,
-            scrollable::Status::Hovered { .. } => 0.28,
-            scrollable::Status::Dragged { .. } => 0.42,
-        };
-        s.vertical_rail.background = None;
-        s.vertical_rail.border = Border::default();
-        s.vertical_rail.scroller = scrollable::Scroller {
-            background: style::alpha(palette.text, alpha).into(),
-            border: Border {
-                radius: 2.0.into(),
-                ..Border::default()
-            },
-        };
-        s
-    });
+    let body = container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding {
+            top: 20.0,
+            right: layout.padding_x,
+            bottom: 18.0,
+            left: layout.padding_x,
+        });
 
     let backdrop = match mode {
         LauncherMode::Home => Color::TRANSPARENT,
         LauncherMode::Overlay => style::alpha(palette.glass, palette.glass.a.max(0.55)),
     };
 
-    container(scroll)
+    container(body)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_| style::fill(backdrop, 0.0))
@@ -232,48 +215,150 @@ fn dashboard_section<'a>(
         .into()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apps_section<'a>(
     dock: &'a Dock,
     surface_id: window::Id,
     screen: OutputRole,
+    target: Option<OutputRole>,
     query: &'a str,
-    columns: usize,
+    page: usize,
+    layout: &SpatialLayout,
     palette: Palette,
 ) -> Element<'a, Message> {
     let filtered = filter_apps(&dock.apps, query);
-    if filtered.is_empty() {
-        return container(
+    let count = filtered.len();
+    let page_size = layout.page_size();
+    let pages = drawer::page_count(count, page_size);
+    let current_page = page.min(pages - 1);
+
+    let summary = if query.trim().is_empty() {
+        drawer::summary(count, current_page, page_size)
+    } else if count == 0 {
+        "Aucun résultat".to_owned()
+    } else if count == 1 {
+        "1 résultat".to_owned()
+    } else {
+        format!("{count} résultats · page {} sur {pages}", current_page + 1)
+    };
+
+    let arrow = |glyph: Glyph, forward: bool, enabled: bool| {
+        let color = if enabled {
+            palette.text
+        } else {
+            style::alpha(palette.muted, 0.45)
+        };
+        let btn = button(container(icons::glyph(glyph, 14.0, color)).center(Length::Fill))
+            .width(28)
+            .height(28)
+            .padding(0)
+            .style(style::flat(palette.hover, 8.0));
+        if enabled {
+            btn.on_press(Message::SpatialTurnPage(target, forward))
+        } else {
+            btn
+        }
+    };
+
+    let mut pager: Row<'_, Message> =
+        row![arrow(Glyph::ChevronLeft, false, current_page > 0)].spacing(4);
+    for number in drawer::page_buttons(current_page, pages) {
+        let active = number == current_page;
+        let color = if active {
+            palette.on_accent()
+        } else {
+            palette.text
+        };
+        let idle = if active {
+            palette.accent
+        } else {
+            Color::TRANSPARENT
+        };
+        let hover = if active {
+            palette.accent
+        } else {
+            palette.hover
+        };
+        let label = text((number + 1).to_string())
+            .size(12.5)
+            .font(style::SEMIBOLD)
+            .color(color);
+        pager = pager.push(
+            button(container(label).center(Length::Fill))
+                .width(28)
+                .height(28)
+                .padding(0)
+                .on_press(Message::SpatialPage(target, number))
+                .style(style::tinted(idle, hover, 8.0)),
+        );
+    }
+    pager = pager.push(arrow(Glyph::ChevronRight, true, current_page + 1 < pages));
+
+    let title = text("APPLICATIONS")
+        .size(11.5)
+        .font(style::SEMIBOLD)
+        .color(palette.muted);
+    let meta = text(summary).size(11.5).color(palette.muted);
+    let header = row![
+        title,
+        meta,
+        space().width(Length::Fill),
+        container(pager)
+            .padding(Padding::from([2.0, 4.0]))
+            .style(move |_| style::outlined(palette.glass, palette.rim, 12.0)),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+
+    let grid_height = layout.app_rows as f32 * APP_TILE_HEIGHT
+        + layout.app_rows.saturating_sub(1) as f32 * APP_ROW_GAP;
+
+    let body: Element<'a, Message> = if filtered.is_empty() {
+        container(
             text("Aucune application ne correspond à cette recherche.")
                 .size(14)
                 .color(palette.muted),
         )
         .width(Length::Fill)
-        .max_width(MAX_APPS_WIDTH)
-        .padding(Padding::from([24.0, 0.0]))
+        .height(grid_height)
         .center_x(Length::Fill)
-        .into();
-    }
+        .center_y(grid_height)
+        .into()
+    } else {
+        let visible = drawer::page(&filtered, current_page, page_size);
+        let cells: Vec<Element<'a, Message>> = visible
+            .iter()
+            .map(|app| app_tile(dock, surface_id, screen, &app.id, palette))
+            .collect();
 
-    let cells: Vec<Element<'a, Message>> = filtered
-        .into_iter()
-        .map(|app| app_tile(dock, surface_id, screen, &app.id, palette))
-        .collect();
-
-    let mut rows: Column<'_, Message> = column![].spacing(14);
-    let cols = columns.max(1);
-    let mut iter = cells.into_iter().peekable();
-    while iter.peek().is_some() {
-        let mut line: Row<'_, Message> = row![].spacing(10);
-        for _ in 0..cols {
-            line = line.push(match iter.next() {
-                Some(cell) => cell,
-                None => space().width(Length::FillPortion(1)).into(),
-            });
+        let mut rows: Column<'_, Message> = column![].spacing(APP_ROW_GAP);
+        let cols = layout.app_columns.max(1);
+        let mut iter = cells.into_iter().peekable();
+        while iter.peek().is_some() {
+            let mut line: Row<'_, Message> = row![].spacing(10);
+            for _ in 0..cols {
+                line = line.push(match iter.next() {
+                    Some(cell) => cell,
+                    None => space().width(Length::FillPortion(1)).into(),
+                });
+            }
+            rows = rows.push(line);
         }
-        rows = rows.push(line);
-    }
 
-    container(rows)
+        let area = container(rows).width(Length::Fill).height(grid_height);
+        mouse_area(area)
+            .on_scroll(move |delta| {
+                let forward = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => {
+                        y < 0.0
+                    }
+                };
+                Message::SpatialTurnPage(target, forward)
+            })
+            .into()
+    };
+
+    container(column![header, body].spacing(10))
         .width(Length::Fill)
         .max_width(MAX_APPS_WIDTH)
         .into()
@@ -324,14 +409,15 @@ fn app_tile<'a>(
     };
 
     let tile_content = column![icon, label, dot]
-        .spacing(6)
+        .spacing(5)
         .align_x(Alignment::Center)
         .width(Length::Fill);
 
     let key = identity.key.clone();
     let launch_btn = button(tile_content)
         .width(Length::Fill)
-        .padding(Padding::from([10.0, 6.0]))
+        .height(APP_TILE_HEIGHT)
+        .padding(Padding::from([8.0, 6.0]))
         .on_press(Message::SpatialLaunchApp(screen, key.clone()))
         .style(style::flat(palette.hover, 16.0));
 

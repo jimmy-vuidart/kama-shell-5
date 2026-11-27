@@ -311,7 +311,7 @@ fn window_elements(
     let ring = ctx.metrics.ring_width;
 
     let decorated = !geometry.anchored;
-    let radius = if decorated {
+    let radius = if decorated && !geometry.maximized {
         ctx.metrics.corner_radius
     } else {
         0
@@ -353,11 +353,12 @@ fn window_elements(
     let lit = lit * alpha;
     if decorated && lit > 0.0 {
         let outline = grown(look.rect(frame), ring);
+        let ring_radius = if radius > 0 { scaled(radius) + ring } else { 0 };
         let shape = Shape {
             outline,
             area: outline,
             color: theme.accent,
-            radii: [scaled(radius) + ring; 4],
+            radii: [ring_radius; 4],
             border: ring,
         };
         windows.push(SceneElement::Shape(chrome.ring.get(view).element(

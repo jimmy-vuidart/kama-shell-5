@@ -474,7 +474,7 @@ impl Shell {
     ) {
         self.refresh_capsules(painter, theme, capsule_hover);
         let spatial = self.desk.is_spatial();
-        let corner_radius = self.desk.metrics().corner_radius;
+        let default_corner_radius = self.desk.metrics().corner_radius;
         let scales: Vec<(OutputId, Scale)> = self
             .screens
             .iter()
@@ -484,6 +484,11 @@ impl Shell {
             let geometry = managed.geometry;
             let Some(bar) = geometry.titlebar.filter(|_| geometry.visible) else {
                 continue;
+            };
+            let corner_radius = if geometry.maximized {
+                0
+            } else {
+                default_corner_radius
             };
             let name = managed.name.clone();
             let subtitle = if managed.title == name {

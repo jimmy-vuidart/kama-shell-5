@@ -29,6 +29,7 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const COLLECTION_LABEL: &str = "org.freedesktop.Secret.Collection.Label";
 const ITEM_LABEL: &str = "org.freedesktop.Secret.Item.Label";
 const ITEM_ATTRIBUTES: &str = "org.freedesktop.Secret.Item.Attributes";
+const ITEM_TYPE: &str = "org.freedesktop.Secret.Item.Type";
 /// The size of the secret the portal makes for an application.
 const PORTAL_SECRET: usize = 64;
 
@@ -635,8 +636,15 @@ impl CollectionObject {
         #[zbus(connection)] connection: &Connection,
     ) -> Result<(OwnedObjectPath, OwnedObjectPath), SecretError> {
         let label: String = property(&properties, ITEM_LABEL).unwrap_or_default();
-        let attributes: HashMap<String, String> =
+        let mut attributes: HashMap<String, String> =
             property(&properties, ITEM_ATTRIBUTES).unwrap_or_default();
+        if let Some(item_type) = property::<String>(&properties, ITEM_TYPE)
+            && !item_type.is_empty()
+        {
+            attributes
+                .entry(crate::store::SCHEMA_ATTRIBUTE.to_owned())
+                .or_insert(item_type);
+        }
         let stored = self.shared.with(|keeper| {
             let name = self.name(&keeper.keyring)?;
             let (secret, content_type) = keeper.open(&secret)?;
@@ -820,6 +828,19 @@ impl ItemObject {
             let schema = item.attributes.get(crate::store::SCHEMA_ATTRIBUTE);
             schema.cloned().unwrap_or_default()
         })
+    }
+
+    #[zbus(property)]
+    async fn set_type(&self, item_type: String) -> fdo::Result<()> {
+        self.change(|item| {
+            if item_type.is_empty() {
+                item.attributes.remove(crate::store::SCHEMA_ATTRIBUTE);
+            } else {
+                item.attributes
+                    .insert(crate::store::SCHEMA_ATTRIBUTE.to_owned(), item_type);
+            }
+        })
+        .map_err(|error| fdo::Error::Failed(error.to_string()))
     }
 
     #[zbus(property)]

@@ -220,6 +220,7 @@ pub struct SpatialHome {
     pub id: window::Id,
     pub screen: OutputRole,
     pub query: String,
+    pub page: usize,
     pub surface: Option<Size>,
 }
 
@@ -339,6 +340,10 @@ pub enum Message {
     SpatialQuery(Option<OutputRole>, String),
     /// Submit search (Enter) in spatial launcher.
     SpatialSubmit(Option<OutputRole>),
+    /// Jump to a specific application page in the spatial launcher.
+    SpatialPage(Option<OutputRole>, usize),
+    /// Turn the application grid page forward (`true`) or backward (`false`) in the spatial launcher.
+    SpatialTurnPage(Option<OutputRole>, bool),
     /// Launch or teleport an application from the spatial launcher grid onto a screen.
     SpatialLaunchApp(OutputRole, String),
     /// Open context menu for an app tile from the spatial launcher grid.
@@ -1094,11 +1099,25 @@ impl Dock {
                 id,
                 screen: role,
                 query: String::new(),
+                page: 0,
                 surface: None,
             });
             tasks.push(task);
         }
         Task::batch(tasks)
+    }
+
+    fn spatial_page_size(&self, screen: OutputRole, surface: Option<Size>) -> usize {
+        let fallback = self.snapshot.screens.iter().find(|s| s.role == screen);
+        let width = surface
+            .map(|size| size.width)
+            .or_else(|| fallback.map(|s| s.width as f32))
+            .unwrap_or(1920.0);
+        let height = surface
+            .map(|size| size.height)
+            .or_else(|| fallback.map(|s| s.height as f32))
+            .unwrap_or(1080.0);
+        crate::model::spatial::SpatialLayout::for_size(width, height).page_size()
     }
 
     fn close_spatial_popover(&mut self) -> Task<Message> {
@@ -2955,6 +2974,7 @@ impl Dock {
                     None => {
                         if let Some(drawer) = &mut self.drawer {
                             drawer.query = query;
+                            drawer.page = 0;
                         }
                     }
                     Some(screen) => {
@@ -2964,6 +2984,81 @@ impl Dock {
                             .find(|home| home.screen == screen)
                         {
                             home.query = query;
+                            home.page = 0;
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::SpatialPage(target, page) => {
+                let (screen, query, surface) = match target {
+                    None => match &self.drawer {
+                        Some(drawer) => (drawer.screen, drawer.query.as_str(), drawer.surface),
+                        None => return Task::none(),
+                    },
+                    Some(screen) => {
+                        match self.spatial_homes.iter().find(|home| home.screen == screen) {
+                            Some(home) => (screen, home.query.as_str(), home.surface),
+                            None => return Task::none(),
+                        }
+                    }
+                };
+                let count = crate::model::spatial::filter_apps(&self.apps, query).len();
+                let size = self.spatial_page_size(screen, surface);
+                let pages = drawer::page_count(count, size);
+                let clamped = page.min(pages - 1);
+                match target {
+                    None => {
+                        if let Some(drawer) = &mut self.drawer {
+                            drawer.page = clamped;
+                        }
+                    }
+                    Some(screen) => {
+                        if let Some(home) = self
+                            .spatial_homes
+                            .iter_mut()
+                            .find(|home| home.screen == screen)
+                        {
+                            home.page = clamped;
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::SpatialTurnPage(target, forward) => {
+                let (screen, query, current, surface) = match target {
+                    None => match &self.drawer {
+                        Some(drawer) => (
+                            drawer.screen,
+                            drawer.query.as_str(),
+                            drawer.page,
+                            drawer.surface,
+                        ),
+                        None => return Task::none(),
+                    },
+                    Some(screen) => {
+                        match self.spatial_homes.iter().find(|home| home.screen == screen) {
+                            Some(home) => (screen, home.query.as_str(), home.page, home.surface),
+                            None => return Task::none(),
+                        }
+                    }
+                };
+                let count = crate::model::spatial::filter_apps(&self.apps, query).len();
+                let size = self.spatial_page_size(screen, surface);
+                let next = drawer::turn_page(current, count, size, forward);
+                match target {
+                    None => {
+                        if let Some(drawer) = &mut self.drawer {
+                            drawer.page = next;
+                        }
+                    }
+                    Some(screen) => {
+                        if let Some(home) = self
+                            .spatial_homes
+                            .iter_mut()
+                            .find(|home| home.screen == screen)
+                        {
+                            home.page = next;
                         }
                     }
                 }
@@ -2992,6 +3087,7 @@ impl Dock {
                     None => {
                         if let Some(drawer) = &mut self.drawer {
                             drawer.query.clear();
+                            drawer.page = 0;
                         }
                     }
                     Some(screen) => {
@@ -3001,6 +3097,7 @@ impl Dock {
                             .find(|home| home.screen == screen)
                         {
                             home.query.clear();
+                            home.page = 0;
                         }
                     }
                 }
@@ -3268,6 +3365,12 @@ impl Dock {
         let step = match named {
             Named::Escape if open.confirm.is_some() => return self.update(Message::Confirm(false)),
             Named::Escape => return self.update(Message::CloseDrawer),
+            Named::PageDown if self.is_spatial() => {
+                return self.update(Message::SpatialTurnPage(None, true));
+            }
+            Named::PageUp if self.is_spatial() => {
+                return self.update(Message::SpatialTurnPage(None, false));
+            }
             Named::PageDown => return self.update(Message::TurnPage(true)),
             Named::PageUp => return self.update(Message::TurnPage(false)),
             Named::ArrowLeft => Step::Left,
@@ -3393,6 +3496,7 @@ impl Dock {
                 home.id,
                 home.screen,
                 &home.query,
+                home.page,
                 home.surface,
                 ui::spatial::launcher::LauncherMode::Home,
                 palette,
@@ -3406,6 +3510,7 @@ impl Dock {
                     drawer.id,
                     drawer.screen,
                     &drawer.query,
+                    drawer.page,
                     drawer.surface,
                     ui::spatial::launcher::LauncherMode::Overlay,
                     palette,

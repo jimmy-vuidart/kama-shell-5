@@ -10,21 +10,38 @@ pub const SIDEBAR_WIDTH: u32 = 56;
 pub const MAX_CONTENT_WIDTH: f32 = 1440.0;
 pub const MAX_APPS_WIDTH: f32 = 1140.0;
 pub const SEARCH_MAX_WIDTH: f32 = 460.0;
+/// Fixed height of one application tile in the spatial launcher grid.
+pub const APP_TILE_HEIGHT: f32 = 104.0;
+/// Vertical gap between application grid rows.
+pub const APP_ROW_GAP: f32 = 10.0;
 
-/// Responsive column counts and horizontal padding for the spatial launcher.
+/// Responsive column/row counts and horizontal padding for the spatial launcher.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialLayout {
     pub two_columns: bool,
     pub game_columns: usize,
     pub calendar_columns: usize,
     pub app_columns: usize,
+    pub app_rows: usize,
     pub padding_x: f32,
 }
 
 impl SpatialLayout {
     pub fn for_width(usable_width: f32) -> Self {
+        Self::for_size(usable_width, 1080.0)
+    }
+
+    pub fn for_size(usable_width: f32, usable_height: f32) -> Self {
+        let two_columns = usable_width >= 1080.0;
+        let overhead = if two_columns { 668.0 } else { 980.0 };
+        let avail = (usable_height - overhead).max(0.0);
+        let rows = if avail >= APP_TILE_HEIGHT {
+            1 + ((avail - APP_TILE_HEIGHT) / (APP_TILE_HEIGHT + APP_ROW_GAP)).floor() as usize
+        } else {
+            1
+        };
         Self {
-            two_columns: usable_width >= 1080.0,
+            two_columns,
             game_columns: if usable_width >= 720.0 { 3 } else { 1 },
             calendar_columns: if usable_width >= 720.0 { 2 } else { 1 },
             app_columns: if usable_width >= 1120.0 {
@@ -34,8 +51,14 @@ impl SpatialLayout {
             } else {
                 4
             },
+            app_rows: rows.clamp(1, 5),
             padding_x: if usable_width >= 1200.0 { 40.0 } else { 20.0 },
         }
+    }
+
+    /// Number of application tiles displayed on a single page.
+    pub fn page_size(&self) -> usize {
+        self.app_columns.max(1) * self.app_rows.max(1)
     }
 }
 
@@ -128,6 +151,11 @@ mod tests {
         assert_eq!(narrow.calendar_columns, 1);
         assert_eq!(narrow.app_columns, 4);
         assert_eq!(narrow.padding_x, 20.0);
+
+        assert_eq!(SpatialLayout::for_size(1600.0, 900.0).app_rows, 2);
+        assert_eq!(SpatialLayout::for_size(1920.0, 1080.0).app_rows, 3);
+        assert_eq!(SpatialLayout::for_size(3440.0, 1440.0).app_rows, 5);
+        assert_eq!(SpatialLayout::for_size(1280.0, 720.0).app_rows, 1);
     }
 
     #[test]
