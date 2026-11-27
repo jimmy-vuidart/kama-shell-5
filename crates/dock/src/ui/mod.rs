@@ -1,6 +1,7 @@
 //! What the dock draws.
 
 pub mod bar;
+pub mod controls;
 pub mod drawer;
 pub mod grip;
 pub mod icons;
