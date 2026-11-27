@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use coquille_config::{
-    Array, Change, DockPlace, PerScreen, Settings, Value, apply, docks_for, with_value,
+    Array, Change, DockPlace, PerScreen, Settings, ShellMode, Value, apply, docks_for,
+    effective_dock_place, with_value,
 };
 pub use coquille_config::{default_path, update};
 use coquille_ipc::ThemeName;
@@ -40,6 +41,8 @@ pub struct Config {
     pub audio_nicks: BTreeMap<String, String>,
     /// Whether the dock moves (`[animations] enabled`), as the compositor.
     pub animations: bool,
+    /// Desktop mode: classic columns + floating dock, or spatial maximized + vertical sidebar.
+    pub mode: ShellMode,
 }
 
 impl Config {
@@ -65,7 +68,8 @@ impl Config {
             .into_iter()
             .filter(|role| present.is_empty() || present.contains(role))
             .filter_map(|role| {
-                let orientation = match places.get(role) {
+                let place = effective_dock_place(*places.get(role), self.mode);
+                let orientation = match place {
                     DockPlace::Vertical => Orientation::Vertical(Side::Left),
                     DockPlace::VerticalRight => Orientation::Vertical(Side::Right),
                     DockPlace::Horizontal => Orientation::Horizontal,
@@ -131,6 +135,7 @@ pub fn parse(text: &str) -> Config {
         audio_hidden,
         audio_nicks,
         animations: settings.animations(),
+        mode: settings.shell_mode(),
     }
 }
 

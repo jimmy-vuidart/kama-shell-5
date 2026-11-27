@@ -57,6 +57,10 @@ struct Cli {
     /// capturer en route).
     #[arg(long, value_name = "FOIS", default_value_t = 1.0)]
     animation_slowdown: f32,
+
+    /// Force le mode spatial (barre verticale 56 px et lanceur spatial).
+    #[arg(long)]
+    spatial: bool,
 }
 
 fn state_dir() -> PathBuf {
@@ -100,6 +104,7 @@ fn main() -> iced_layershell::Result {
         drawer: cli.drawer,
         mixer: cli.mixer,
         slowdown: cli.animation_slowdown,
+        spatial: cli.spatial,
     };
 
     let fonts = ui::style::FIGTREE

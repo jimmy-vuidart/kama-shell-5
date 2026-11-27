@@ -560,11 +560,12 @@ mod tests {
 
     #[test]
     fn what_the_settings_screen_writes_is_accepted() {
-        use coquille_config::{Change, DockPlace, PerScreen, apply};
+        use coquille_config::{Change, DockPlace, PerScreen, ShellMode as ConfigShellMode, apply};
         use coquille_ipc::ThemeName;
 
         let changes = [
             Change::Theme(ThemeName::Dark),
+            Change::ShellMode(ConfigShellMode::Spatial),
             Change::Accent(Some("#ff8800".into())),
             Change::Terminal(Some("foot".into())),
             Change::Xwayland(false),
@@ -617,6 +618,7 @@ mod tests {
         let config = parse(&text).unwrap();
 
         assert_eq!(config.theme, Some(ThemeKind::Dark));
+        assert!(config.is_spatial());
         assert_eq!(config.accent(), Some(Rgba::rgb(0xff_88_00)));
         assert_eq!(config.terminal.as_deref(), Some("foot"));
         assert_eq!(config.xwayland, Some(false));

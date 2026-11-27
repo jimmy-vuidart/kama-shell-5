@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
+use coquille_config::ShellMode;
 use coquille_ipc::{Command, Event, GlassShape, ScreenshotTarget, Snapshot, ThemeName};
 use coquille_model::OutputRole;
 use iced::widget::operation;
@@ -33,6 +34,7 @@ use crate::model::notify::{
     ToastSurfacePlan, toast_geometry, toast_surface_plan, toasts_that_fit,
 };
 use crate::model::tray::TrayItem;
+use crate::model::widgets::{GameNotes, WidgetsState};
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
@@ -61,6 +63,8 @@ pub struct Options {
     pub mixer: bool,
     /// How many times slower the dock moves.
     pub slowdown: f32,
+    /// Force spatial mode regardless of config file.
+    pub spatial: bool,
 }
 
 impl Options {
@@ -188,6 +192,38 @@ impl Drawer {
     }
 }
 
+/// Which decoupled popover is open beside the spatial sidebar.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpatialPopoverKind {
+    Notifications,
+    Controls,
+}
+
+/// The decoupled notifications or control-center popover of spatial mode.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpatialPopover {
+    pub id: window::Id,
+    pub screen: OutputRole,
+    pub side: Side,
+    pub kind: SpatialPopoverKind,
+    pub mixer: bool,
+    pub confirm: Option<SessionAction>,
+    pub screenshot_prompt: bool,
+    pub note: Option<String>,
+}
+
+/// Permanent spatial home surface (`Layer::Bottom`) on an output.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpatialHome {
+    pub id: window::Id,
+    pub screen: OutputRole,
+    pub query: String,
+    pub surface: Option<Size>,
+}
+
 /// Overlay of the toasts on screen, in the bottom corner on one bar's side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToastSurface {
@@ -296,6 +332,30 @@ pub enum Message {
     ExpireToasts,
     /// « Tout effacer » in the control center.
     ClearNotices,
+    /// Toggle the decoupled spatial notifications or control-center popover.
+    SpatialPopoverToggle(OutputRole, SpatialPopoverKind),
+    /// Close the spatial popover.
+    CloseSpatialPopover,
+    /// Update search query in spatial launcher (`None` = overlay, `Some` = bottom home).
+    SpatialQuery(Option<OutputRole>, String),
+    /// Submit search (Enter) in spatial launcher.
+    SpatialSubmit(Option<OutputRole>),
+    /// Launch or teleport an application from the spatial launcher grid onto a screen.
+    SpatialLaunchApp(OutputRole, String),
+    /// Open context menu for an app tile from the spatial launcher grid.
+    SpatialAppMenu(window::Id, OutputRole, String),
+    /// Toggle a « Vie quotidienne » task in the spatial launcher.
+    DailyTaskToggle(String),
+    /// Start inline editing of a game's personal comment.
+    GameNoteEdit(String, String),
+    /// Update draft text while editing a game's personal comment.
+    GameNoteDraft(String),
+    /// Commit and persist the edited game comment.
+    GameNoteSave,
+    /// Cancel inline editing of a game comment.
+    GameNoteCancel,
+    /// Launch a game card from the spatial launcher.
+    SpatialLaunchGame(String),
 }
 
 /// An audio output sink choice displayed in the launcher selector.
@@ -361,6 +421,17 @@ pub struct Dock {
     pub do_not_disturb: bool,
     pub night_light: bool,
     pub notify: NotifyState,
+    #[allow(dead_code)]
+    pub playtimes: HashMap<u64, u32>,
+    #[allow(dead_code)]
+    pub widgets: WidgetsState,
+    /// Inline game note editor: `(game_key, draft_text)`.
+    #[allow(dead_code)]
+    pub editing_game: Option<(String, String)>,
+    #[allow(dead_code)]
+    pub spatial_popover: Option<SpatialPopover>,
+    #[allow(dead_code)]
+    pub spatial_homes: Vec<SpatialHome>,
     ticks: u64,
 }
 
@@ -370,7 +441,10 @@ impl Dock {
         let installed = backend::installed::fingerprint();
         let catalog = Catalog::load();
         let games = steam::load();
+        let playtimes = steam::load_playtimes();
         let config = read_config(&options.config, &catalog, &games);
+        let game_notes = GameNotes::load(&options.state_dir);
+        let widgets = WidgetsState::mock_default(game_notes);
         let apps = drawer_apps(&catalog);
         let theme = config.theme.unwrap_or_default();
         let icon_style = icons::style(theme, config.accent.as_deref().unwrap_or_default());
@@ -445,6 +519,11 @@ impl Dock {
             do_not_disturb: false,
             night_light: false,
             notify: NotifyState::new(),
+            playtimes,
+            widgets,
+            editing_game: None,
+            spatial_popover: None,
+            spatial_homes: Vec::new(),
             ticks: 0,
         };
         let mut tasks = vec![dock.load_icons(), dock.show_bars()];
@@ -523,6 +602,55 @@ impl Dock {
     /// The bar of a screen, when it has one.
     pub fn bar_on(&self, screen: OutputRole) -> Option<&BarState> {
         self.bars.iter().find(|bar| bar.screen == screen)
+    }
+
+    /// Whether the dock is running in spatial mode.
+    #[allow(dead_code)]
+    pub fn is_spatial(&self) -> bool {
+        self.options.spatial || self.config.mode == ShellMode::Spatial || self.snapshot.spatial
+    }
+
+    /// Whether any screen is currently held by a fullscreen game.
+    #[allow(dead_code)]
+    pub fn any_anchored(&self) -> bool {
+        self.snapshot.screens.iter().any(|screen| screen.anchored)
+    }
+
+    /// Visible unread notification count for an application entry (0 when DND/game).
+    #[allow(dead_code)]
+    pub fn spatial_unread_for(&self, entry: &Entry) -> usize {
+        let count = self
+            .notify
+            .unread_for_app(&entry.identity.names, self.any_anchored());
+        if count > 0 || self.notify.effective_dnd(self.any_anchored()) {
+            return count;
+        }
+        // Fallback to simulated unread badges in `--mock` mode.
+        self.unread
+            .iter()
+            .find(|(key, _)| key == &entry.identity.key)
+            .map_or(0, |(_, n)| *n as usize)
+    }
+
+    /// Total visible unread notification count for the bottom pill badge.
+    #[allow(dead_code)]
+    pub fn spatial_visible_unread(&self) -> usize {
+        let count = self.notify.visible_unread_count(self.any_anchored());
+        if count > 0 || self.notify.effective_dnd(self.any_anchored()) {
+            return count;
+        }
+        self.unread.iter().map(|(_, n)| *n as usize).sum()
+    }
+
+    /// Whether the spatial launcher is currently shown on `screen` (either as
+    /// overlay or because no non-minimized window is visible on `screen`).
+    #[allow(dead_code)]
+    pub fn spatial_launcher_visible_on(&self, screen: OutputRole) -> bool {
+        let overlay = self
+            .drawer
+            .as_ref()
+            .is_some_and(|drawer| drawer.screen == screen);
+        overlay || !crate::model::spatial::screen_has_visible_window(&self.snapshot.windows, screen)
     }
 
     /// Whether the launcher covers bar `id`, drawing it again over itself.
@@ -925,6 +1053,23 @@ impl Dock {
                 }
             }
             Command::Close { window } => windows.retain(|known| known.id != window),
+            Command::MoveToScreen { window, screen } => {
+                if let Some(index) = windows.iter().position(|known| known.id == window) {
+                    let mut moved = windows.remove(index);
+                    moved.screen = screen;
+                    moved.minimized = false;
+                    windows.insert(0, moved);
+                    for (rank, known) in windows.iter_mut().enumerate() {
+                        known.active = rank == 0;
+                    }
+                }
+            }
+            Command::Minimize { window } => {
+                if let Some(known) = windows.iter_mut().find(|known| known.id == window) {
+                    known.minimized = true;
+                    known.active = false;
+                }
+            }
             Command::Forget { app } => self.snapshot.habits.retain(|habit| habit.app != app),
             Command::SetTheme { theme } => self.snapshot.theme = theme,
             Command::OpenOn { .. }
