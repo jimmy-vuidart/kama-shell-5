@@ -485,7 +485,7 @@ impl Shell {
             let Some(bar) = geometry.titlebar.filter(|_| geometry.visible) else {
                 continue;
             };
-            let corner_radius = if geometry.maximized {
+            let corner_radius = if spatial && geometry.maximized {
                 0
             } else {
                 default_corner_radius

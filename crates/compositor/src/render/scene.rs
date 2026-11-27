@@ -272,6 +272,7 @@ struct WindowCtx<'a> {
     theme: &'a Theme,
     glass: &'a GlassConfig,
     metrics: Metrics,
+    spatial: bool,
     view: Rect,
     scale: f64,
     output_size: Size<i32, Physical>,
@@ -311,7 +312,7 @@ fn window_elements(
     let ring = ctx.metrics.ring_width;
 
     let decorated = !geometry.anchored;
-    let radius = if decorated && !geometry.maximized {
+    let radius = if decorated && !(ctx.spatial && geometry.maximized) {
         ctx.metrics.corner_radius
     } else {
         0
@@ -1103,6 +1104,7 @@ pub fn build(
         theme,
         glass,
         metrics,
+        spatial: shell.desk.is_spatial(),
         view,
         scale,
         output_size,
