@@ -6,6 +6,7 @@ pub mod audio;
 pub mod backlight;
 pub mod battery;
 pub mod compositor;
+pub mod foundry;
 pub mod installed;
 pub mod mock;
 pub mod notify;

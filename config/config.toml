@@ -175,4 +175,5 @@ favorites = ["firefox", "discord", "kitty", "code", "obsidian"]
 # Mode spatial : identifiants des widgets du lanceur spatial.
 # [spatial]
 # tasks_token = "kama_..."
+# foundry_token = "kma_..."
 

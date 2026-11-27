@@ -21,7 +21,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, info, warn};
 
 use crate::backend::{
-    self, Audio, Backend, Request, SessionAction, Switch, compositor, mock, services,
+    self, Audio, Backend, Request, SessionAction, Switch, compositor,
+    foundry::{self, FoundryError},
+    mock, services,
     tasks::{self, TasksError},
 };
 use crate::config::{self, Config};
@@ -35,7 +37,9 @@ use crate::model::notify::{
     ToastSurfacePlan, toast_geometry, toast_surface_plan, toasts_that_fit,
 };
 use crate::model::tray::TrayItem;
-use crate::model::widgets::{DailyTask, DailyTasksStatus, GameNotes, WidgetsState};
+use crate::model::widgets::{
+    DailyTask, DailyTasksStatus, GameNotes, ProjectTask, ProjectTasksStatus, WidgetsState,
+};
 use crate::model::{Identity, Orientation, Side, identify};
 use crate::steam::{self, Game};
 use crate::ui;
@@ -369,6 +373,12 @@ pub enum Message {
     RefreshDailyTasks,
     /// Result of fetching daily tasks from the remote API.
     DailyTasksLoaded(u64, Result<Vec<DailyTask>, TasksError>),
+    /// Refresh project tickets from Kama-Foundry.
+    RefreshProjectTasks,
+    /// Result of fetching project tickets from Kama-Foundry.
+    ProjectTasksLoaded(u64, Result<Vec<ProjectTask>, FoundryError>),
+    /// Open a Kama-Foundry ticket URL in the default browser.
+    OpenProjectTask(String),
 }
 
 /// An audio output sink choice displayed in the launcher selector.
@@ -447,6 +457,9 @@ pub struct Dock {
     pub tasks_fetching: bool,
     tasks_fetch_seq: u64,
     last_tasks_fetch: Option<Instant>,
+    pub foundry_fetching: bool,
+    foundry_fetch_seq: u64,
+    last_foundry_fetch: Option<Instant>,
     ticks: u64,
 }
 
@@ -466,6 +479,12 @@ impl Dock {
                 DailyTasksStatus::Loading
             } else {
                 DailyTasksStatus::MissingToken
+            };
+            widgets.project_tasks.clear();
+            widgets.project_tasks_status = if config.foundry_token.is_some() {
+                ProjectTasksStatus::Loading
+            } else {
+                ProjectTasksStatus::MissingToken
             };
         }
         let apps = drawer_apps(&catalog);
@@ -553,6 +572,9 @@ impl Dock {
             tasks_fetching: false,
             tasks_fetch_seq: 0,
             last_tasks_fetch: None,
+            foundry_fetching: false,
+            foundry_fetch_seq: 0,
+            last_foundry_fetch: None,
             ticks: 0,
         };
         let mut tasks = vec![
@@ -562,6 +584,9 @@ impl Dock {
         ];
         if dock.is_spatial() && dock.config.tasks_token.is_some() {
             tasks.push(dock.fetch_daily_tasks());
+        }
+        if dock.is_spatial() && dock.config.foundry_token.is_some() {
+            tasks.push(dock.fetch_project_tasks());
         }
         if dock.options.drawer || dock.options.mixer {
             tasks.push(Task::done(Message::Launcher(None)));
@@ -1514,6 +1539,7 @@ impl Dock {
         }
         info!("configuration read again");
         let token_changed = config.tasks_token != self.config.tasks_token;
+        let foundry_changed = config.foundry_token != self.config.foundry_token;
         self.config = config;
         let mut tasks = vec![self.close_menu()];
         tasks.push(self.drop_stale_bars());
@@ -1523,6 +1549,9 @@ impl Dock {
         tasks.push(self.sync_toasts());
         if token_changed {
             tasks.push(self.reset_daily_tasks_for_config());
+        }
+        if foundry_changed {
+            tasks.push(self.reset_project_tasks_for_config());
         }
         Task::batch(tasks)
     }
@@ -1581,6 +1610,69 @@ impl Dock {
             },
             move |result| Message::DailyTasksLoaded(seq, result),
         )
+    }
+
+    fn reset_project_tasks_for_config(&mut self) -> Task<Message> {
+        self.foundry_fetch_seq += 1;
+        self.foundry_fetching = false;
+        self.last_foundry_fetch = None;
+        if !self.options.is_real(Backend::Compositor) && self.config.foundry_token.is_none() {
+            return Task::none();
+        }
+        self.widgets.project_tasks.clear();
+        if self.config.foundry_token.is_some() {
+            self.widgets.project_tasks_status = ProjectTasksStatus::Loading;
+            if self.is_spatial() {
+                return self.fetch_project_tasks();
+            }
+        } else {
+            self.widgets.project_tasks_status = ProjectTasksStatus::MissingToken;
+        }
+        Task::none()
+    }
+
+    fn fetch_project_tasks_if_due(&mut self, interval: Duration) -> Task<Message> {
+        if !self.is_spatial() || self.config.foundry_token.is_none() || self.foundry_fetching {
+            return Task::none();
+        }
+        let due = self
+            .last_foundry_fetch
+            .is_none_or(|last| last.elapsed() >= interval);
+        if due {
+            self.fetch_project_tasks()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn fetch_project_tasks(&mut self) -> Task<Message> {
+        let Some(token) = self.config.foundry_token.clone() else {
+            self.widgets.project_tasks_status = ProjectTasksStatus::MissingToken;
+            return Task::none();
+        };
+        self.foundry_fetch_seq += 1;
+        let seq = self.foundry_fetch_seq;
+        self.foundry_fetching = true;
+        self.last_foundry_fetch = Some(Instant::now());
+        if self.widgets.project_tasks.is_empty() {
+            self.widgets.project_tasks_status = ProjectTasksStatus::Loading;
+        }
+        Task::perform(
+            async move {
+                match tokio::task::spawn_blocking(move || foundry::fetch(&token)).await {
+                    Ok(result) => result,
+                    Err(error) => Err(FoundryError::Failed(error.to_string())),
+                }
+            },
+            move |result| Message::ProjectTasksLoaded(seq, result),
+        )
+    }
+
+    fn fetch_spatial_widgets_if_due(&mut self, interval: Duration) -> Task<Message> {
+        Task::batch([
+            self.fetch_daily_tasks_if_due(interval),
+            self.fetch_project_tasks_if_due(interval),
+        ])
     }
 
     /// Something was installed or removed: the applications and the games
@@ -1734,7 +1826,7 @@ impl Dock {
                 && !held(screen)
             {
                 let focus = operation::focus(ui::spatial::launcher::search_id(Some(screen)));
-                let refresh = self.fetch_daily_tasks_if_due(Duration::from_secs(10));
+                let refresh = self.fetch_spatial_widgets_if_due(Duration::from_secs(10));
                 return Task::batch([close_popover, focus, refresh]);
             }
             let orientation = self
@@ -1800,7 +1892,7 @@ impl Dock {
         }
         // The control center shows the notices: no toast over it.
         let toasts = self.sync_toasts();
-        let refresh = self.fetch_daily_tasks_if_due(Duration::from_secs(10));
+        let refresh = self.fetch_spatial_widgets_if_due(Duration::from_secs(10));
         close_popover
             .chain(gone)
             .chain(self.close_menu())
@@ -2266,7 +2358,7 @@ impl Dock {
                 if !self.options.is_real(Backend::Audio) {
                     self.levels = mock::levels(&self.audio, self.ticks).into_iter().collect();
                 }
-                self.fetch_daily_tasks_if_due(Duration::from_secs(60))
+                self.fetch_spatial_widgets_if_due(Duration::from_secs(60))
             }
             Message::Frame(now) => {
                 self.moment = now;
@@ -3371,6 +3463,37 @@ impl Dock {
                     }
                 }
                 Task::none()
+            }
+            Message::RefreshProjectTasks => self.fetch_project_tasks(),
+            Message::ProjectTasksLoaded(seq, result) => {
+                if seq != self.foundry_fetch_seq {
+                    return Task::none();
+                }
+                self.foundry_fetching = false;
+                match result {
+                    Ok(items) => {
+                        self.widgets.project_tasks = items;
+                        self.widgets.project_tasks_status = ProjectTasksStatus::Ready;
+                    }
+                    Err(error) => {
+                        warn!(?error, "failed to load Kama-Foundry tickets");
+                        if matches!(error, FoundryError::Unauthorized)
+                            || self.widgets.project_tasks.is_empty()
+                        {
+                            self.widgets.project_tasks.clear();
+                            self.widgets.project_tasks_status =
+                                ProjectTasksStatus::Error(error.user_message().to_owned());
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::OpenProjectTask(url) => {
+                if let Err(error) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+                    warn!(%url, %error, "failed to open Kama-Foundry ticket URL");
+                }
+                let close_pop = self.close_spatial_popover();
+                close_pop.chain(self.update(Message::CloseDrawer))
             }
             // The messages added for the layer shell are handled by it.
             _ => Task::none(),

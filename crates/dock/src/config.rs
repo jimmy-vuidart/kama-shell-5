@@ -45,6 +45,8 @@ pub struct Config {
     pub mode: ShellMode,
     /// API token for the spatial launcher's daily tasks widget (`[spatial] tasks_token`).
     pub tasks_token: Option<String>,
+    /// API token for Kama-Foundry project tickets (`[spatial] foundry_token`).
+    pub foundry_token: Option<String>,
 }
 
 impl Config {
@@ -147,6 +149,7 @@ pub fn parse(text: &str) -> Config {
         animations: settings.animations(),
         mode: settings.shell_mode(),
         tasks_token: settings.tasks_token,
+        foundry_token: settings.foundry_token,
     }
 }
 

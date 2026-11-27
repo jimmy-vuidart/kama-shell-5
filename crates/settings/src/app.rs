@@ -57,6 +57,10 @@ pub enum Message {
     TasksTokenChanged(String),
     TasksTokenSubmit,
     TasksTokenToggleVisible,
+    /// Kama-Foundry API token.
+    FoundryTokenChanged(String),
+    FoundryTokenSubmit,
+    FoundryTokenToggleVisible,
 }
 
 pub struct App {
@@ -91,6 +95,10 @@ pub struct App {
     pub tasks_token_input: String,
     /// Whether the API token field is shown in clear text.
     pub tasks_token_visible: bool,
+    /// Draft API token for the spatial launcher's Kama-Foundry widget.
+    pub foundry_token_input: String,
+    /// Whether the Kama-Foundry API token field is shown in clear text.
+    pub foundry_token_visible: bool,
 }
 
 impl App {
@@ -115,6 +123,8 @@ impl App {
             audio_nick_inputs,
             tasks_token_input: file.tasks_token.clone().unwrap_or_default(),
             tasks_token_visible: false,
+            foundry_token_input: file.foundry_token.clone().unwrap_or_default(),
+            foundry_token_visible: false,
             file,
             error: None,
             snapshot: None,
@@ -175,6 +185,9 @@ impl App {
         self.audio_sinks = audio_sinks;
         if file.tasks_token != self.file.tasks_token {
             self.tasks_token_input = file.tasks_token.clone().unwrap_or_default();
+        }
+        if file.foundry_token != self.file.foundry_token {
+            self.foundry_token_input = file.foundry_token.clone().unwrap_or_default();
         }
         self.file = file;
     }
@@ -283,6 +296,17 @@ impl App {
             }
             Message::TasksTokenToggleVisible => {
                 self.tasks_token_visible = !self.tasks_token_visible;
+            }
+            Message::FoundryTokenChanged(text) => {
+                self.foundry_token_input = text;
+            }
+            Message::FoundryTokenSubmit => {
+                let trimmed = self.foundry_token_input.trim();
+                let token = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+                self.change(Change::FoundryToken(token));
+            }
+            Message::FoundryTokenToggleVisible => {
+                self.foundry_token_visible = !self.foundry_token_visible;
             }
         }
         Task::none()

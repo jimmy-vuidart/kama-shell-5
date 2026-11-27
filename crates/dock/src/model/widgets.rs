@@ -32,12 +32,86 @@ pub enum DailyTasksStatus {
     Error(String),
 }
 
+/// Loading state of the « Tâches des projets » card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectTasksStatus {
+    /// No API key configured in `[spatial] foundry_token`.
+    MissingToken,
+    /// Initial fetch in flight.
+    Loading,
+    /// Loaded from Kama-Foundry (or mock defaults).
+    Ready,
+    /// Last fetch failed with a short French explanation.
+    Error(String),
+}
+
+/// Ticket status in Kama-Foundry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectStatus {
+    WaitingHuman,
+    Failed,
+    InProgress,
+    Review,
+    Queued,
+    Todo,
+    Backlog,
+    Done,
+    Other(String),
+}
+
+impl ProjectStatus {
+    pub fn from_api(value: &str) -> Self {
+        match value {
+            "waiting_human" => Self::WaitingHuman,
+            "failed" => Self::Failed,
+            "in_progress" => Self::InProgress,
+            "review" => Self::Review,
+            "queued" => Self::Queued,
+            "todo" => Self::Todo,
+            "backlog" => Self::Backlog,
+            "done" => Self::Done,
+            other => Self::Other(other.to_owned()),
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        match self {
+            Self::WaitingHuman => "Attente",
+            Self::Failed => "Échec",
+            Self::InProgress => "En cours",
+            Self::Review => "Revue",
+            Self::Queued => "En file",
+            Self::Todo => "À faire",
+            Self::Backlog => "Backlog",
+            Self::Done => "Terminé",
+            Self::Other(label) => label.as_str(),
+        }
+    }
+
+    /// Priority order for the dashboard card (attention-needing items first).
+    pub fn sort_rank(&self) -> u8 {
+        match self {
+            Self::WaitingHuman => 0,
+            Self::Failed => 1,
+            Self::InProgress => 2,
+            Self::Review => 3,
+            Self::Queued => 4,
+            Self::Todo => 5,
+            Self::Backlog => 6,
+            Self::Other(_) => 7,
+            Self::Done => 8,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectTask {
     pub id: String,
     pub project: String,
     pub title: String,
-    pub status: String,
+    pub status: ProjectStatus,
+    pub assigned_agent: Option<String>,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +175,7 @@ pub struct WidgetsState {
     pub daily_tasks: Vec<DailyTask>,
     pub daily_tasks_status: DailyTasksStatus,
     pub project_tasks: Vec<ProjectTask>,
+    pub project_tasks_status: ProjectTasksStatus,
     pub calendar_events: Vec<CalendarEvent>,
     pub game_notes: GameNotes,
 }
@@ -144,27 +219,36 @@ impl WidgetsState {
                     id: "proj_1".into(),
                     project: "coquille".into(),
                     title: "Finaliser le mode spatial du dock".into(),
-                    status: "En cours".into(),
+                    status: ProjectStatus::InProgress,
+                    assigned_agent: Some("antigravity".into()),
+                    url: None,
                 },
                 ProjectTask {
                     id: "proj_2".into(),
                     project: "coquille".into(),
                     title: "Tester le flou Dual Kawase sur portable Intel".into(),
-                    status: "À faire".into(),
+                    status: ProjectStatus::Todo,
+                    assigned_agent: None,
+                    url: None,
                 },
                 ProjectTask {
                     id: "proj_3".into(),
                     project: "atelier".into(),
                     title: "Mettre à jour les dépendances Rust".into(),
-                    status: "Revue".into(),
+                    status: ProjectStatus::Review,
+                    assigned_agent: Some("claude".into()),
+                    url: None,
                 },
                 ProjectTask {
                     id: "proj_4".into(),
                     project: "notes".into(),
                     title: "Rédiger le bilan de la semaine".into(),
-                    status: "À faire".into(),
+                    status: ProjectStatus::Backlog,
+                    assigned_agent: None,
+                    url: None,
                 },
             ],
+            project_tasks_status: ProjectTasksStatus::Ready,
             calendar_events: vec![
                 CalendarEvent {
                     id: "cal_1".into(),

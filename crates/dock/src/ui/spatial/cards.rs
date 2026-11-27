@@ -11,7 +11,8 @@ use iced::{Alignment, Border, Color, ContentFit, Element, Length, Padding};
 
 use crate::app::{Dock, Message};
 use crate::model::widgets::{
-    CalendarEvent, DailyTask, DailyTasksStatus, ProjectTask, StartedGame, day_label, range_label,
+    CalendarEvent, DailyTask, DailyTasksStatus, ProjectStatus, ProjectTask, ProjectTasksStatus,
+    StartedGame, day_label, range_label,
 };
 use crate::ui::icons::{self, Glyph};
 use crate::ui::style::{self, Palette};
@@ -264,31 +265,116 @@ fn daily_task_row<'a>(task: &'a DailyTask, palette: Palette) -> Element<'a, Mess
     }
 }
 
-/// « Tâches des projets » simulated project tickets card.
+/// « Tâches des projets » Kama-Foundry project tickets card.
 pub fn project_tasks_card<'a>(
     dock: &'a Dock,
     fill_height: bool,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let items: Vec<Element<'a, Message>> = dock
-        .widgets
-        .project_tasks
-        .iter()
-        .map(|task| project_task_row(task, palette))
-        .collect();
-    let body = Column::with_children(items).spacing(6).into();
+    let status = &dock.widgets.project_tasks_status;
+    let tasks = &dock.widgets.project_tasks;
+    let meta = match status {
+        ProjectTasksStatus::MissingToken => "Non configuré".to_owned(),
+        ProjectTasksStatus::Loading if tasks.is_empty() => "Chargement…".to_owned(),
+        ProjectTasksStatus::Error(_) if tasks.is_empty() => "Erreur".to_owned(),
+        _ => tickets_count_label(tasks.len()),
+    };
+
+    let refresh = dock.config.foundry_token.as_ref().map(|_| {
+        let color = if dock.foundry_fetching {
+            style::alpha(palette.muted, 0.5)
+        } else {
+            palette.muted
+        };
+        let btn = button(container(icons::glyph(Glyph::Restart, 12.0, color)).center(Length::Fill))
+            .width(22)
+            .height(22)
+            .padding(0)
+            .style(style::flat(palette.hover, 7.0));
+        if dock.foundry_fetching {
+            btn.into()
+        } else {
+            btn.on_press(Message::RefreshProjectTasks).into()
+        }
+    });
+
+    let body: Element<'a, Message> = match status {
+        ProjectTasksStatus::MissingToken if tasks.is_empty() => container(
+            text("Configurez votre clé API Kama-Foundry dans Paramètres → Écrans et dock.")
+                .size(12.5)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([8.0, 2.0]))
+        .into(),
+        ProjectTasksStatus::Loading if tasks.is_empty() => container(
+            text("Chargement des tickets…")
+                .size(12.5)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([8.0, 2.0]))
+        .into(),
+        ProjectTasksStatus::Error(err) if tasks.is_empty() => {
+            container(text(err).size(12.5).color(palette.muted))
+                .padding(Padding::from([8.0, 2.0]))
+                .into()
+        }
+        _ if tasks.is_empty() => container(
+            text("Aucun ticket actif pour le moment.")
+                .size(12.5)
+                .color(palette.muted),
+        )
+        .padding(Padding::from([8.0, 2.0]))
+        .into(),
+        _ => {
+            let items: Vec<Element<'a, Message>> = tasks
+                .iter()
+                .map(|task| project_task_row(task, palette))
+                .collect();
+            let list = Column::with_children(items).spacing(6);
+            if fill_height {
+                scrollable(list)
+                    .height(Length::Fill)
+                    .direction(scrollable::Direction::Vertical(
+                        scrollable::Scrollbar::new().width(4).scroller_width(4),
+                    ))
+                    .into()
+            } else {
+                list.into()
+            }
+        }
+    };
+
     glass_card(
         "TÂCHES DES PROJETS",
-        "Données simulées".to_owned(),
-        None,
+        meta,
+        refresh,
         body,
         fill_height,
         palette,
     )
 }
 
+fn tickets_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 ticket".to_owned()
+    } else {
+        format!("{count} tickets")
+    }
+}
+
+fn project_status_color(status: &ProjectStatus, palette: Palette) -> Color {
+    match status {
+        ProjectStatus::WaitingHuman => Color::from_rgb8(230, 148, 42),
+        ProjectStatus::Failed => style::DANGER,
+        ProjectStatus::InProgress => palette.accent,
+        ProjectStatus::Review => Color::from_rgb8(61, 166, 112),
+        ProjectStatus::Queued | ProjectStatus::Todo | ProjectStatus::Backlog => palette.muted,
+        ProjectStatus::Done | ProjectStatus::Other(_) => palette.muted,
+    }
+}
+
 fn project_task_row<'a>(task: &'a ProjectTask, palette: Palette) -> Element<'a, Message> {
-    let top = row![
+    let mut top = row![
         text(&task.id)
             .size(11.5)
             .font(style::SEMIBOLD)
@@ -297,6 +383,10 @@ fn project_task_row<'a>(task: &'a ProjectTask, palette: Palette) -> Element<'a, 
         text(&task.project).size(11.5).color(palette.muted),
     ]
     .align_y(Alignment::Center);
+    if let Some(agent) = &task.assigned_agent {
+        top = top.push(text(" · ").size(11.5).color(palette.muted));
+        top = top.push(text(agent).size(11.5).color(palette.muted));
+    }
 
     let title = text(&task.title)
         .size(12.5)
@@ -305,20 +395,45 @@ fn project_task_row<'a>(task: &'a ProjectTask, palette: Palette) -> Element<'a, 
 
     let left = column![top, title].spacing(2).width(Length::Fill);
 
+    let badge_color = project_status_color(&task.status, palette);
     let pill = container(
-        text(&task.status)
+        text(task.status.label())
             .size(11)
             .font(style::SEMIBOLD)
-            .color(palette.accent),
+            .color(badge_color),
     )
     .padding(Padding::from([3.0, 9.0]))
-    .style(move |_| style::fill(style::alpha(palette.accent, 0.16), 999.0));
+    .style(move |_| style::fill(style::alpha(badge_color, 0.16), 999.0));
 
-    container(row![left, pill].spacing(10).align_y(Alignment::Center))
-        .width(Length::Fill)
-        .padding(Padding::from([7.0, 12.0]))
-        .style(move |_| style::outlined(palette.card, palette.separator, 12.0))
-        .into()
+    let content = row![left, pill].spacing(10).align_y(Alignment::Center);
+    if let Some(url) = &task.url {
+        button(content)
+            .width(Length::Fill)
+            .padding(Padding::from([7.0, 12.0]))
+            .on_press(Message::OpenProjectTask(url.clone()))
+            .style(move |_, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => palette.hover,
+                    _ => palette.card,
+                };
+                button::Style {
+                    background: Some(bg.into()),
+                    border: Border {
+                        color: palette.separator,
+                        width: 1.0,
+                        radius: 12.0.into(),
+                    },
+                    ..button::Style::default()
+                }
+            })
+            .into()
+    } else {
+        container(content)
+            .width(Length::Fill)
+            .padding(Padding::from([7.0, 12.0]))
+            .style(move |_| style::outlined(palette.card, palette.separator, 12.0))
+            .into()
+    }
 }
 
 /// « Jeux » started games card with compact Steam cover banners and inline editable notes.

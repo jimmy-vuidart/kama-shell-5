@@ -335,6 +335,8 @@ pub struct Settings {
     pub audio_nicks: BTreeMap<String, String>,
     /// API token for the spatial launcher's daily tasks card (`[spatial] tasks_token`).
     pub tasks_token: Option<String>,
+    /// API token for Kama-Foundry project tickets (`[spatial] foundry_token`).
+    pub foundry_token: Option<String>,
 }
 
 impl Settings {
@@ -440,6 +442,7 @@ impl Settings {
             audio_hidden,
             audio_nicks,
             tasks_token: name_of(&["spatial", "tasks_token"]),
+            foundry_token: name_of(&["spatial", "foundry_token"]),
         }
     }
 
@@ -624,6 +627,7 @@ pub enum Change {
         visible: bool,
     },
     TasksToken(Option<String>),
+    FoundryToken(Option<String>),
 }
 
 /// The file with a change made. `None` when the file is not valid TOML: it
@@ -747,13 +751,18 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
                 with_value(text, &["audio", "hidden"], Value::Array(array))
             }
         }
-        Change::TasksToken(token) => {
+        Change::TasksToken(token) | Change::FoundryToken(token) => {
+            let key = match change {
+                Change::TasksToken(_) => "tasks_token",
+                Change::FoundryToken(_) => "foundry_token",
+                _ => unreachable!(),
+            };
             let token = token
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned);
-            text_or_nothing(text, &["spatial", "tasks_token"], &token)
+            text_or_nothing(text, &["spatial", key], &token)
         }
     }
 }
@@ -976,6 +985,7 @@ mod tests {
             audio_hidden: vec!["alsa_output.hdmi".into()],
             audio_nicks: BTreeMap::from([("alsa_output.headphones".into(), "Mon Casque".into())]),
             tasks_token: None,
+            foundry_token: None,
         };
         assert_eq!(Settings::parse(&text), expected);
         // The favorites of the dock, which no change is about, are still there.
@@ -1424,5 +1434,30 @@ mod tests {
 
         let removed = apply(&updated, &Change::TasksToken(None)).unwrap();
         assert_eq!(Settings::parse(&removed).tasks_token, None);
+    }
+
+    #[test]
+    fn foundry_token_roundtrips_and_clears_when_empty() {
+        let parsed = Settings::parse("[spatial]\nfoundry_token = \"kma_abc\"\n");
+        assert_eq!(parsed.foundry_token.as_deref(), Some("kma_abc"));
+
+        let empty = Settings::parse("[spatial]\nfoundry_token = \"\"\n");
+        assert_eq!(empty.foundry_token, None);
+
+        let updated = apply(
+            "[outputs]\ncenter = \"DP-2\"\n",
+            &Change::FoundryToken(Some("  kma_123  ".into())),
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::parse(&updated).foundry_token.as_deref(),
+            Some("kma_123")
+        );
+
+        let cleared = apply(&updated, &Change::FoundryToken(Some("   ".into()))).unwrap();
+        assert_eq!(Settings::parse(&cleared).foundry_token, None);
+
+        let removed = apply(&updated, &Change::FoundryToken(None)).unwrap();
+        assert_eq!(Settings::parse(&removed).foundry_token, None);
     }
 }
