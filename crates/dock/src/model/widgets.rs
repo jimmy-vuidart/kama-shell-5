@@ -212,7 +212,7 @@ impl WidgetsState {
         now_secs: i64,
         use_mock_fallback: bool,
     ) -> Vec<StartedGame> {
-        const MAX_GAMES: usize = 6;
+        const MAX_GAMES: usize = 24;
         if steam_games.is_empty() {
             if !use_mock_fallback {
                 return Vec::new();

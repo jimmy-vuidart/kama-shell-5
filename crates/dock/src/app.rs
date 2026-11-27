@@ -346,6 +346,8 @@ pub enum Message {
     SpatialPage(Option<OutputRole>, usize),
     /// Turn the application grid page forward (`true`) or backward (`false`) in the spatial launcher.
     SpatialTurnPage(Option<OutputRole>, bool),
+    /// Show a page of the « Jeux » or « Agenda » card of the spatial launcher.
+    SpatialCardPage(crate::ui::spatial::cards::CardKind, usize),
     /// Launch or teleport an application from the spatial launcher grid onto a screen.
     SpatialLaunchApp(OutputRole, String),
     /// Open context menu for an app tile from the spatial launcher grid.
@@ -431,6 +433,10 @@ pub struct Dock {
     pub widgets: WidgetsState,
     /// Inline game note editor: `(game_key, draft_text)`.
     pub editing_game: Option<(String, String)>,
+    /// Current page of the spatial « Jeux » card.
+    pub games_page: usize,
+    /// Current page of the spatial « Agenda » card.
+    pub calendar_page: usize,
     pub spatial_popover: Option<SpatialPopover>,
     pub spatial_homes: Vec<SpatialHome>,
     ticks: u64,
@@ -524,6 +530,8 @@ impl Dock {
             playtimes,
             widgets,
             editing_game: None,
+            games_page: 0,
+            calendar_page: 0,
             spatial_popover: None,
             spatial_homes: Vec::new(),
             ticks: 0,
@@ -3051,6 +3059,14 @@ impl Dock {
                         }
                     }
                 }
+                Task::none()
+            }
+            Message::SpatialCardPage(card, page) => {
+                match card {
+                    crate::ui::spatial::cards::CardKind::Games => self.games_page = page,
+                    crate::ui::spatial::cards::CardKind::Calendar => self.calendar_page = page,
+                }
+                self.editing_game = None;
                 Task::none()
             }
             Message::SpatialTurnPage(target, forward) => {

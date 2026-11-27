@@ -19,9 +19,73 @@ use crate::ui::style::{self, Palette};
 /// when `Message::GameNoteEdit` is handled.
 pub const GAME_NOTE_INPUT: &str = "spatial-game-note";
 
+/// Rows of tiles a paginated card shows on one page.
+const GAMES_ROWS: usize = 2;
+const CALENDAR_ROWS: usize = 3;
+
+/// The paginated cards of the spatial launcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardKind {
+    Games,
+    Calendar,
+}
+
+/// Compact pager (‹ page/total ›), or nothing when a single page holds everything.
+fn card_pager<'a>(
+    card: CardKind,
+    page: usize,
+    pages: usize,
+    palette: Palette,
+) -> Option<Element<'a, Message>> {
+    if pages <= 1 {
+        return None;
+    }
+    let arrow = |glyph: Glyph, target: Option<usize>| {
+        let enabled = target.is_some();
+        let color = if enabled {
+            palette.text
+        } else {
+            style::alpha(palette.muted, 0.45)
+        };
+        let btn = button(container(icons::glyph(glyph, 12.0, color)).center(Length::Fill))
+            .width(22)
+            .height(22)
+            .padding(0)
+            .style(style::flat(palette.hover, 7.0));
+        match target {
+            Some(page) => btn.on_press(Message::SpatialCardPage(card, page)),
+            None => btn,
+        }
+    };
+    let label = text(format!("{} / {pages}", page + 1))
+        .size(11.5)
+        .font(style::MEDIUM)
+        .color(palette.muted);
+    Some(
+        row![
+            arrow(Glyph::ChevronLeft, page.checked_sub(1)),
+            label,
+            arrow(Glyph::ChevronRight, (page + 1 < pages).then_some(page + 1)),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into(),
+    )
+}
+
+/// Items of `page` (clamped), with the clamped page and the page count.
+fn paginate<T>(items: Vec<T>, page: usize, size: usize) -> (Vec<T>, usize, usize) {
+    let size = size.max(1);
+    let pages = items.len().div_ceil(size).max(1);
+    let page = page.min(pages - 1);
+    let visible = items.into_iter().skip(page * size).take(size).collect();
+    (visible, page, pages)
+}
+
 fn glass_card<'a>(
     title: &'a str,
     meta: String,
+    pager: Option<Element<'a, Message>>,
     body: Element<'a, Message>,
     fill_height: bool,
     palette: Palette,
@@ -36,9 +100,12 @@ fn glass_card<'a>(
         .size(11.5)
         .font(style::MEDIUM)
         .color(palette.muted);
-    let header = row![dot, title_label, space().width(Length::Fill), meta_label]
+    let mut header = row![dot, title_label, space().width(Length::Fill), meta_label]
         .spacing(8)
         .align_y(Alignment::Center);
+    if let Some(pager) = pager {
+        header = header.push(pager);
+    }
 
     container(column![header, body].spacing(10))
         .width(Length::Fill)
@@ -67,7 +134,7 @@ pub fn daily_tasks_card<'a>(
         .map(|task| daily_task_row(task, palette))
         .collect();
     let body = Column::with_children(items).spacing(4).into();
-    glass_card("VIE QUOTIDIENNE", meta, body, fill_height, palette)
+    glass_card("VIE QUOTIDIENNE", meta, None, body, fill_height, palette)
 }
 
 fn remaining_label(remaining: usize) -> String {
@@ -135,6 +202,7 @@ pub fn project_tasks_card<'a>(
     glass_card(
         "TÂCHES DES PROJETS",
         "Données simulées".to_owned(),
+        None,
         body,
         fill_height,
         palette,
@@ -185,14 +253,17 @@ pub fn games_card<'a>(
     let games =
         dock.widgets
             .started_games(&dock.games, &dock.playtimes, dock.now.timestamp(), true);
+    let columns = columns.max(1);
+    let (games, page, pages) = paginate(games, dock.games_page, columns * GAMES_ROWS);
     let cells: Vec<Element<'a, Message>> = games
         .into_iter()
         .map(|game| game_tile(dock, game, palette))
         .collect();
-    let body = grid(cells, columns.max(1), 8.0);
+    let body = grid(cells, columns, 8.0);
     glass_card(
         "JEUX",
         "Clic sur le commentaire pour éditer".to_owned(),
+        card_pager(CardKind::Games, page, pages, palette),
         body,
         fill_height,
         palette,
@@ -387,14 +458,16 @@ pub fn calendar_card<'a>(
 ) -> Element<'a, Message> {
     let today = dock.now.date_naive();
     let meta = range_label(today);
-    let cells: Vec<Element<'a, Message>> = dock
-        .widgets
-        .calendar_events
-        .iter()
+    let columns = columns.max(1);
+    let events: Vec<&CalendarEvent> = dock.widgets.calendar_events.iter().collect();
+    let (events, page, pages) = paginate(events, dock.calendar_page, columns * CALENDAR_ROWS);
+    let cells: Vec<Element<'a, Message>> = events
+        .into_iter()
         .map(|ev| calendar_event_tile(ev, today, palette))
         .collect();
-    let body = grid(cells, columns.max(1), 8.0);
-    glass_card("AGENDA · 7 JOURS", meta, body, fill_height, palette)
+    let body = grid(cells, columns, 8.0);
+    let pager = card_pager(CardKind::Calendar, page, pages, palette);
+    glass_card("AGENDA · 7 JOURS", meta, pager, body, fill_height, palette)
 }
 
 fn calendar_event_tile<'a>(
@@ -460,6 +533,15 @@ fn grid<'a>(cells: Vec<Element<'a, Message>>, columns: usize, gap: f32) -> Eleme
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paginate_clamps_and_slices() {
+        let items: Vec<u32> = (0..7).collect();
+        assert_eq!(paginate(items.clone(), 0, 3), (vec![0, 1, 2], 0, 3));
+        assert_eq!(paginate(items.clone(), 2, 3), (vec![6], 2, 3));
+        assert_eq!(paginate(items, 9, 3), (vec![6], 2, 3));
+        assert_eq!(paginate(Vec::<u32>::new(), 4, 3), (vec![], 0, 1));
+    }
 
     #[test]
     fn remaining_label_formats_singular_and_plural() {
