@@ -51,6 +51,7 @@ pub enum Glyph {
     Speakers,
     Edit,
     Warning,
+    ExternalLink,
 }
 
 impl Glyph {
@@ -150,6 +151,9 @@ impl Glyph {
             Self::Warning => {
                 r#"<path d="M10.3 3.9 2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17" r=".8" fill="black" stroke="none"/>"#
             }
+            Self::ExternalLink => {
+                r#"<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>"#
+            }
         }
     }
 
@@ -218,6 +222,7 @@ mod tests {
             Glyph::Speakers,
             Glyph::Edit,
             Glyph::Warning,
+            Glyph::ExternalLink,
         ];
         for glyph in glyphs {
             let shapes = glyph.shapes();

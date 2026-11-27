@@ -10,6 +10,9 @@ use serde::Deserialize;
 
 use crate::model::widgets::{ProjectStatus, ProjectTask};
 
+/// Web platform URL for Kama-Foundry.
+pub const PLATFORM_URL: &str = "https://foundry.vuidart.com";
+
 /// Base URL of the Kama-Foundry v1 API.
 pub const API_BASE: &str = "https://foundry.vuidart.com/api/v1";
 

@@ -9,6 +9,9 @@ use serde::Deserialize;
 
 use crate::model::widgets::DailyTask;
 
+/// Web platform URL for the « Vie quotidienne » service.
+pub const PLATFORM_URL: &str = "https://home.vuidart.com";
+
 /// Endpoint returning the user's daily tasks.
 pub const TASKS_ENDPOINT: &str = "https://home.vuidart.com/api/kama/public/tasks";
 

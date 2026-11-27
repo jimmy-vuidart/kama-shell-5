@@ -379,6 +379,8 @@ pub enum Message {
     ProjectTasksLoaded(u64, Result<Vec<ProjectTask>, FoundryError>),
     /// Open a Kama-Foundry ticket URL in the default browser.
     OpenProjectTask(String),
+    /// Open an external URL in the default browser.
+    OpenExternalUrl(String),
 }
 
 /// An audio output sink choice displayed in the launcher selector.
@@ -3484,9 +3486,9 @@ impl Dock {
                 }
                 Task::none()
             }
-            Message::OpenProjectTask(url) => {
+            Message::OpenProjectTask(url) | Message::OpenExternalUrl(url) => {
                 if let Err(error) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                    warn!(%url, %error, "failed to open Kama-Foundry ticket URL");
+                    warn!(%url, %error, "failed to open URL");
                 }
                 let close_pop = self.close_spatial_popover();
                 close_pop.chain(self.update(Message::CloseDrawer))

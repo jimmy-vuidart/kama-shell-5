@@ -87,31 +87,46 @@ fn paginate<T>(items: Vec<T>, page: usize, size: usize) -> (Vec<T>, usize, usize
 /// Subtle orange tint for the fetch-error warning triangle in card headers.
 const WARNING_COLOR: Color = Color::from_rgba(0.95, 0.58, 0.16, 0.85);
 
-/// Combines an optional fetch-error warning triangle and a refresh button for
-/// the top-right corner of a service card.
+/// Compact 22×22 external-link button opening a service platform in the browser.
+fn external_link_button<'a>(url: &'static str, palette: Palette) -> Element<'a, Message> {
+    button(container(icons::glyph(Glyph::ExternalLink, 12.0, palette.muted)).center(Length::Fill))
+        .width(22)
+        .height(22)
+        .padding(0)
+        .style(style::flat(palette.hover, 7.0))
+        .on_press(Message::OpenExternalUrl(url.to_owned()))
+        .into()
+}
+
+/// Combines an optional fetch-error warning triangle, an optional refresh button,
+/// and an external-link button for the top-right corner of a service card.
 fn card_header_actions<'a>(
     warning: bool,
     refresh: Option<Element<'a, Message>>,
+    external_url: &'static str,
+    palette: Palette,
 ) -> Option<Element<'a, Message>> {
-    let warning_badge: Option<Element<'a, Message>> = warning.then(|| {
-        container(icons::glyph(Glyph::Warning, 13.0, WARNING_COLOR))
-            .width(20)
-            .height(22)
-            .center_x(20)
-            .center_y(22)
-            .into()
-    });
-    match (warning_badge, refresh) {
-        (None, None) => None,
-        (Some(badge), None) => Some(badge),
-        (None, Some(btn)) => Some(btn),
-        (Some(badge), Some(btn)) => Some(
-            row![badge, btn]
-                .spacing(4)
-                .align_y(Alignment::Center)
+    let mut items: Vec<Element<'a, Message>> = Vec::new();
+    if warning {
+        items.push(
+            container(icons::glyph(Glyph::Warning, 13.0, WARNING_COLOR))
+                .width(20)
+                .height(22)
+                .center_x(20)
+                .center_y(22)
                 .into(),
-        ),
+        );
     }
+    if let Some(btn) = refresh {
+        items.push(btn);
+    }
+    items.push(external_link_button(external_url, palette));
+    Some(
+        Row::with_children(items)
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into(),
+    )
 }
 
 fn glass_card<'a>(
@@ -230,7 +245,12 @@ pub fn daily_tasks_card<'a>(
         }
     };
 
-    let actions = card_header_actions(matches!(status, DailyTasksStatus::Error(_)), refresh);
+    let actions = card_header_actions(
+        matches!(status, DailyTasksStatus::Error(_)),
+        refresh,
+        crate::backend::tasks::PLATFORM_URL,
+        palette,
+    );
     glass_card("VIE QUOTIDIENNE", meta, actions, body, fill_height, palette)
 }
 
@@ -375,7 +395,12 @@ pub fn project_tasks_card<'a>(
         }
     };
 
-    let actions = card_header_actions(matches!(status, ProjectTasksStatus::Error(_)), refresh);
+    let actions = card_header_actions(
+        matches!(status, ProjectTasksStatus::Error(_)),
+        refresh,
+        crate::backend::foundry::PLATFORM_URL,
+        palette,
+    );
     glass_card(
         "TÂCHES DES PROJETS",
         meta,
