@@ -2,6 +2,7 @@
 //! « Vie quotidienne », « Tâches des projets », « Jeux » (with inline editable notes),
 //! and « Agenda · 7 jours ».
 
+use iced::widget::text::Wrapping;
 use iced::widget::{
     Column, Row, button, column, container, image, mouse_area, row, space, stack, text, text_input,
 };
@@ -22,6 +23,7 @@ fn glass_card<'a>(
     title: &'a str,
     meta: String,
     body: Element<'a, Message>,
+    fill_height: bool,
     palette: Palette,
 ) -> Element<'a, Message> {
     let dot =
@@ -38,15 +40,24 @@ fn glass_card<'a>(
         .spacing(8)
         .align_y(Alignment::Center);
 
-    container(column![header, body].spacing(12))
+    container(column![header, body].spacing(10))
         .width(Length::Fill)
-        .padding(Padding::from([18.0, 20.0]))
+        .height(if fill_height {
+            Length::Fill
+        } else {
+            Length::Shrink
+        })
+        .padding(Padding::from([14.0, 18.0]))
         .style(move |_| style::outlined(palette.glass, palette.rim, 20.0))
         .into()
 }
 
 /// « Vie quotidienne » interactive checklist card.
-pub fn daily_tasks_card<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+pub fn daily_tasks_card<'a>(
+    dock: &'a Dock,
+    fill_height: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
     let rem = dock.widgets.remaining_daily_tasks();
     let meta = remaining_label(rem);
     let items: Vec<Element<'a, Message>> = dock
@@ -56,7 +67,7 @@ pub fn daily_tasks_card<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Mes
         .map(|task| daily_task_row(task, palette))
         .collect();
     let body = Column::with_children(items).spacing(4).into();
-    glass_card("VIE QUOTIDIENNE", meta, body, palette)
+    glass_card("VIE QUOTIDIENNE", meta, body, fill_height, palette)
 }
 
 fn remaining_label(remaining: usize) -> String {
@@ -109,18 +120,23 @@ fn daily_task_row<'a>(task: &'a DailyTask, palette: Palette) -> Element<'a, Mess
 }
 
 /// « Tâches des projets » simulated project tickets card.
-pub fn project_tasks_card<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+pub fn project_tasks_card<'a>(
+    dock: &'a Dock,
+    fill_height: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
     let items: Vec<Element<'a, Message>> = dock
         .widgets
         .project_tasks
         .iter()
         .map(|task| project_task_row(task, palette))
         .collect();
-    let body = Column::with_children(items).spacing(8).into();
+    let body = Column::with_children(items).spacing(6).into();
     glass_card(
         "TÂCHES DES PROJETS",
         "Données simulées".to_owned(),
         body,
+        fill_height,
         palette,
     )
 }
@@ -137,11 +153,11 @@ fn project_task_row<'a>(task: &'a ProjectTask, palette: Palette) -> Element<'a, 
     .align_y(Alignment::Center);
 
     let title = text(&task.title)
-        .size(13)
+        .size(12.5)
         .font(style::SEMIBOLD)
         .color(palette.text);
 
-    let left = column![top, title].spacing(3).width(Length::Fill);
+    let left = column![top, title].spacing(2).width(Length::Fill);
 
     let pill = container(
         text(&task.status)
@@ -154,13 +170,18 @@ fn project_task_row<'a>(task: &'a ProjectTask, palette: Palette) -> Element<'a, 
 
     container(row![left, pill].spacing(10).align_y(Alignment::Center))
         .width(Length::Fill)
-        .padding(Padding::from([10.0, 12.0]))
-        .style(move |_| style::outlined(palette.card, palette.separator, 13.0))
+        .padding(Padding::from([7.0, 12.0]))
+        .style(move |_| style::outlined(palette.card, palette.separator, 12.0))
         .into()
 }
 
-/// « Jeux » started games card with Steam cover art and inline editable notes.
-pub fn games_card<'a>(dock: &'a Dock, columns: usize, palette: Palette) -> Element<'a, Message> {
+/// « Jeux » started games card with compact Steam cover banners and inline editable notes.
+pub fn games_card<'a>(
+    dock: &'a Dock,
+    columns: usize,
+    fill_height: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
     let games =
         dock.widgets
             .started_games(&dock.games, &dock.playtimes, dock.now.timestamp(), true);
@@ -168,11 +189,12 @@ pub fn games_card<'a>(dock: &'a Dock, columns: usize, palette: Palette) -> Eleme
         .into_iter()
         .map(|game| game_tile(dock, game, palette))
         .collect();
-    let body = grid(cells, columns.max(1), 12.0);
+    let body = grid(cells, columns.max(1), 8.0);
     glass_card(
         "JEUX",
         "Clic sur le commentaire pour éditer".to_owned(),
         body,
+        fill_height,
         palette,
     )
 }
@@ -184,16 +206,16 @@ fn game_tile<'a>(dock: &'a Dock, game: StartedGame, palette: Palette) -> Element
             .width(Length::Fill)
             .height(Length::Fill)
             .content_fit(ContentFit::Cover)
-            .border_radius(16)
+            .border_radius(12)
             .into(),
         None => container(space().width(Length::Fill).height(Length::Fill))
-            .style(move |_| style::fill(fallback_bg, 16.0))
+            .style(move |_| style::fill(fallback_bg, 12.0))
             .into(),
     };
 
     let bottom_scrim = container(
-        container(space().width(Length::Fill).height(88))
-            .style(move |_| style::fill(Color::from_rgba(0.06, 0.05, 0.12, 0.58), 0.0)),
+        container(space().width(Length::Fill).height(54))
+            .style(move |_| style::fill(Color::from_rgba(0.06, 0.05, 0.12, 0.62), 0.0)),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -201,40 +223,41 @@ fn game_tile<'a>(dock: &'a Dock, game: StartedGame, palette: Palette) -> Element
 
     let meta_pill = container(
         text(game.meta_pill)
-            .size(11)
+            .size(10)
             .font(style::SEMIBOLD)
             .color(Color::WHITE),
     )
-    .padding(Padding::from([3.0, 9.0]))
-    .style(|_| style::fill(Color::from_rgba(0.06, 0.05, 0.12, 0.55), 999.0));
+    .padding(Padding::from([2.0, 7.0]))
+    .style(|_| style::fill(Color::from_rgba(0.06, 0.05, 0.12, 0.58), 999.0));
 
-    let play_badge = container(icons::glyph(Glyph::Play, 11.0, Color::WHITE))
-        .center_x(28)
-        .center_y(28)
-        .style(|_| style::fill(Color::from_rgba(0.06, 0.05, 0.12, 0.55), 14.0));
+    let play_badge = container(icons::glyph(Glyph::Play, 9.5, Color::WHITE))
+        .center_x(22)
+        .center_y(22)
+        .style(|_| style::fill(Color::from_rgba(0.06, 0.05, 0.12, 0.58), 11.0));
 
     let top_row =
         row![meta_pill, space().width(Length::Fill), play_badge].align_y(Alignment::Center);
 
     let title = container(
         text(game.title)
-            .size(14)
+            .size(12.5)
             .font(style::BOLD)
-            .color(Color::WHITE),
+            .color(Color::WHITE)
+            .wrapping(Wrapping::None),
     )
     .width(Length::Fill)
-    .max_height(38)
+    .max_height(17)
     .clip(true);
 
     let launch_zone = mouse_area(
-        container(column![top_row, space().height(Length::Fill), title].spacing(4))
+        container(column![top_row, space().height(Length::Fill), title].spacing(2))
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(Padding {
-                top: 12.0,
-                right: 12.0,
-                bottom: 4.0,
-                left: 12.0,
+                top: 7.0,
+                right: 8.0,
+                bottom: 2.0,
+                left: 8.0,
             }),
     )
     .on_press(Message::SpatialLaunchGame(game.key.clone()));
@@ -247,13 +270,13 @@ fn game_tile<'a>(dock: &'a Dock, game: StartedGame, palette: Palette) -> Element
 
     container(stack![background, bottom_scrim, foreground])
         .width(Length::FillPortion(1))
-        .height(152)
+        .height(88)
         .clip(true)
         .style(move |_| container::Style {
             border: Border {
                 color: palette.rim,
                 width: 1.0,
-                radius: 16.0.into(),
+                radius: 12.0.into(),
             },
             ..container::Style::default()
         })
@@ -321,21 +344,26 @@ fn game_note_zone<'a>(
         } else {
             Color::from_rgba(1.0, 1.0, 1.0, 0.92)
         };
-        let note_text = container(text(label).size(11.5).color(label_color))
-            .width(Length::Fill)
-            .max_height(18)
-            .clip(true);
-        let edit_icon = icons::glyph(Glyph::Edit, 12.0, Color::from_rgba(1.0, 1.0, 1.0, 0.78));
+        let note_text = container(
+            text(label)
+                .size(10.5)
+                .color(label_color)
+                .wrapping(Wrapping::None),
+        )
+        .width(Length::Fill)
+        .max_height(15)
+        .clip(true);
+        let edit_icon = icons::glyph(Glyph::Edit, 10.5, Color::from_rgba(1.0, 1.0, 1.0, 0.78));
 
         button(
             row![note_text, edit_icon]
-                .spacing(6)
+                .spacing(5)
                 .align_y(Alignment::Center),
         )
         .width(Length::Fill)
-        .padding(Padding::from([4.0, 6.0]))
+        .padding(Padding::from([2.0, 5.0]))
         .on_press(Message::GameNoteEdit(key.to_owned(), note))
-        .style(style::flat(Color::from_rgba(1.0, 1.0, 1.0, 0.16), 8.0))
+        .style(style::flat(Color::from_rgba(1.0, 1.0, 1.0, 0.16), 6.0))
         .into()
     };
 
@@ -343,15 +371,20 @@ fn game_note_zone<'a>(
         .width(Length::Fill)
         .padding(Padding {
             top: 0.0,
-            right: 8.0,
-            bottom: 8.0,
-            left: 8.0,
+            right: 6.0,
+            bottom: 5.0,
+            left: 6.0,
         })
         .into()
 }
 
 /// « Agenda · 7 jours » upcoming events card.
-pub fn calendar_card<'a>(dock: &'a Dock, columns: usize, palette: Palette) -> Element<'a, Message> {
+pub fn calendar_card<'a>(
+    dock: &'a Dock,
+    columns: usize,
+    fill_height: bool,
+    palette: Palette,
+) -> Element<'a, Message> {
     let today = dock.now.date_naive();
     let meta = range_label(today);
     let cells: Vec<Element<'a, Message>> = dock
@@ -361,7 +394,7 @@ pub fn calendar_card<'a>(dock: &'a Dock, columns: usize, palette: Palette) -> El
         .map(|ev| calendar_event_tile(ev, today, palette))
         .collect();
     let body = grid(cells, columns.max(1), 8.0);
-    glass_card("AGENDA · 7 JOURS", meta, body, palette)
+    glass_card("AGENDA · 7 JOURS", meta, body, fill_height, palette)
 }
 
 fn calendar_event_tile<'a>(

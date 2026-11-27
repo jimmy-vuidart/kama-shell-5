@@ -202,8 +202,8 @@ impl WidgetsState {
         self.daily_tasks.iter().filter(|task| !task.done).count()
     }
 
-    /// Returns up to 3 started games from Steam (preferring recently played),
-    /// or the 3 prototype mock games when `steam_games` is empty and
+    /// Returns up to 6 started games from Steam (preferring recently played),
+    /// or the 6 prototype mock games when `steam_games` is empty and
     /// `use_mock_fallback` is `true`.
     pub fn started_games(
         &self,
@@ -212,6 +212,7 @@ impl WidgetsState {
         now_secs: i64,
         use_mock_fallback: bool,
     ) -> Vec<StartedGame> {
+        const MAX_GAMES: usize = 6;
         if steam_games.is_empty() {
             if !use_mock_fallback {
                 return Vec::new();
@@ -222,11 +223,11 @@ impl WidgetsState {
         let mut selected: Vec<&Game> = steam_games
             .iter()
             .filter(|game| game.last_played > 0)
-            .take(3)
+            .take(MAX_GAMES)
             .collect();
-        if selected.len() < 3 {
+        if selected.len() < MAX_GAMES {
             for game in steam_games.iter().filter(|game| game.last_played == 0) {
-                if selected.len() >= 3 {
+                if selected.len() >= MAX_GAMES {
                     break;
                 }
                 selected.push(game);
@@ -275,6 +276,27 @@ fn mock_games(notes: &GameNotes) -> Vec<StartedGame> {
             "Guild Wars 2",
             "Terminer les succès d'exploration de Janthir",
             "Il y a 5 j · 89 h",
+        ),
+        (
+            "satisfactory",
+            Some(526_870),
+            "Satisfactory",
+            "Raccorder la centrale nucléaire du nord",
+            "Il y a 6 j · 215 h",
+        ),
+        (
+            "hades2",
+            Some(1_145_350),
+            "Hades II",
+            "Essayer le build bâton sur l'Olympe",
+            "Il y a 9 j · 48 h",
+        ),
+        (
+            "balatro",
+            Some(2_379_780),
+            "Balatro",
+            "Débloquer le deck plasma en mise or",
+            "Il y a 12 j · 64 h",
         ),
     ];
 
@@ -431,7 +453,7 @@ mod tests {
         assert_eq!(games[1].meta_pill, "Installé");
 
         let mock = state.started_games(&[], &playtimes, now, true);
-        assert_eq!(mock.len(), 3);
+        assert_eq!(mock.len(), 6);
         assert_eq!(mock[0].key, "ffxiv");
         assert_eq!(mock[0].note, "Note personnalisée");
 

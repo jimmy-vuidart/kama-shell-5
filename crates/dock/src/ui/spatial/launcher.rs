@@ -173,40 +173,52 @@ fn search_bar<'a>(
         .into()
 }
 
+const ROW_1_HEIGHT: f32 = 248.0;
+const ROW_2_HEIGHT: f32 = 274.0;
+
 fn dashboard_section<'a>(
     dock: &'a Dock,
     layout: &SpatialLayout,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let left = column![
-        cards::daily_tasks_card(dock, palette),
-        cards::project_tasks_card(dock, palette),
-    ]
-    .spacing(16)
-    .width(if layout.two_columns {
-        Length::FillPortion(5)
-    } else {
-        Length::Fill
-    });
-
-    let right = column![
-        cards::games_card(dock, layout.game_columns, palette),
-        cards::calendar_card(dock, layout.calendar_columns, palette),
-    ]
-    .spacing(16)
-    .width(if layout.two_columns {
-        Length::FillPortion(7)
-    } else {
-        Length::Fill
-    });
-
     let body: Element<'a, Message> = if layout.two_columns {
-        row![left, right]
-            .spacing(18)
-            .align_y(Alignment::Start)
-            .into()
+        let top_row = row![
+            container(cards::daily_tasks_card(dock, true, palette))
+                .width(Length::FillPortion(5))
+                .height(Length::Fill),
+            container(cards::games_card(dock, layout.game_columns, true, palette))
+                .width(Length::FillPortion(7))
+                .height(Length::Fill),
+        ]
+        .spacing(18)
+        .height(ROW_1_HEIGHT);
+
+        let bottom_row = row![
+            container(cards::project_tasks_card(dock, true, palette))
+                .width(Length::FillPortion(5))
+                .height(Length::Fill),
+            container(cards::calendar_card(
+                dock,
+                layout.calendar_columns,
+                true,
+                palette
+            ))
+            .width(Length::FillPortion(7))
+            .height(Length::Fill),
+        ]
+        .spacing(18)
+        .height(ROW_2_HEIGHT);
+
+        column![top_row, bottom_row].spacing(14).into()
     } else {
-        column![left, right].spacing(16).into()
+        column![
+            cards::daily_tasks_card(dock, false, palette),
+            cards::project_tasks_card(dock, false, palette),
+            cards::games_card(dock, layout.game_columns, false, palette),
+            cards::calendar_card(dock, layout.calendar_columns, false, palette),
+        ]
+        .spacing(14)
+        .into()
     };
 
     container(body)
