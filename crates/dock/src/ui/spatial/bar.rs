@@ -1,4 +1,4 @@
-//! Permanent full-height 56 px Liquid Glass vertical sidebar for spatial mode.
+//! Permanent full-height Liquid Glass vertical sidebar for spatial mode.
 
 use chrono::{DateTime, Datelike, Local, Timelike, Weekday};
 use coquille_model::OutputRole;
@@ -13,41 +13,181 @@ use crate::app::{BarState, Dock, Message, SpatialPopoverKind};
 use crate::model::bar::{Entry, SpatialIndicator, spatial_indicator};
 use crate::model::battery::Charge;
 use crate::model::{Orientation, Side};
-use crate::ui::bar::tray_icon_element;
+use crate::ui::bar::{MAX_ICON_SIZE, MIN_ICON_SIZE, tray_icon_element};
 use crate::ui::icons::{self, Glyph};
 use crate::ui::style::{self, Palette};
 
-/// Fixed width of the permanent vertical sidebar in logical pixels.
-pub const WIDTH: u32 = 56;
-/// Exclusive zone reserved on the screen edge for the sidebar.
-pub const EXCLUSIVE_ZONE: i32 = 56;
 /// Extra transparent width on the inner side of the surface so hover tooltips
 /// render cleanly without unfolding the bar.
 pub const TOOLTIP_REACH: u32 = 240;
-/// Total logical width of the layer-shell surface.
-pub const SURFACE_WIDTH: u32 = WIDTH + TOOLTIP_REACH;
 
-const PAD_Y: f32 = 10.0;
-const TOP_GAP: f32 = 10.0;
-const BTN_SIZE: f32 = 38.0;
-const BTN_RADIUS: f32 = 11.0;
-const CLOCK_HEIGHT: f32 = 28.0;
-const SEP_WIDTH: f32 = 22.0;
 const SEP_HEIGHT: f32 = 1.0;
-const TASKBAR_GAP: f32 = 6.0;
-const BOTTOM_GAP: f32 = 8.0;
-const TRAY_ICON: f32 = 16.0;
-const TRAY_GAP: f32 = 5.0;
-const TRAY_PAD: f32 = 5.0;
-const PILL_RADIUS: f32 = 14.0;
-const PILL_TOP_HEIGHT: f32 = 34.0;
-const PILL_BASE_HEIGHT: f32 = 92.0;
 const TOOLTIP_GAP: f32 = 10.0;
 
-fn bar_x(side: Side, surface_width: u32) -> i32 {
-    match side {
-        Side::Left => 0,
-        Side::Right => surface_width.saturating_sub(WIDTH) as i32,
+/// Layout metrics of the permanent spatial vertical sidebar, derived from the
+/// configured taskbar icon size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    pub width: u32,
+    pub exclusive_zone: i32,
+    pub surface_width: u32,
+    pub tile_icon: f32,
+    pub tile_fallback: (f32, f32),
+    pub btn_size: f32,
+    pub btn_radius: f32,
+    pub pad_y: f32,
+    pub top_gap: f32,
+    pub taskbar_gap: f32,
+    pub bottom_gap: f32,
+    pub clock_height: f32,
+    pub clock_time_size: f32,
+    pub clock_date_size: f32,
+    pub sep_width: f32,
+    pub launcher_glyph: f32,
+    pub tray_icon: f32,
+    pub tray_gap: f32,
+    pub tray_pad: f32,
+    pub pill_radius: f32,
+    pub pill_top_height: f32,
+    pub pill_base_height: f32,
+    pub bell_size: f32,
+    pub sys_icon: f32,
+    pub sys_gap: f32,
+    pub sys_pad_y: f32,
+    pub unread_height: f32,
+    pub unread_font: f32,
+}
+
+impl Metrics {
+    /// Computes spatial sidebar metrics for the given taskbar `icon_size`.
+    /// At `32 px`, this matches the original 56 px sidebar dimensions.
+    pub fn new(icon_size: u32) -> Self {
+        let tile_icon = icon_size.clamp(MIN_ICON_SIZE, MAX_ICON_SIZE) as f32;
+        let fallback_side = (tile_icon * 0.78).round();
+        let fallback_radius = (fallback_side * 0.24).round();
+        let btn_size = tile_icon + 6.0;
+        let width = (btn_size + 18.0).round() as u32;
+        let scale = (width as f32 / 56.0).clamp(0.75, 1.5);
+        let text_scale = (width as f32 / 56.0).clamp(0.82, 1.4);
+
+        Self {
+            width,
+            exclusive_zone: width as i32,
+            surface_width: width + TOOLTIP_REACH,
+            tile_icon,
+            tile_fallback: (fallback_side, fallback_radius),
+            btn_size,
+            btn_radius: (btn_size * (11.0 / 38.0)).round(),
+            pad_y: (10.0 * scale).round(),
+            top_gap: (10.0 * scale).round(),
+            taskbar_gap: (6.0 * scale).round(),
+            bottom_gap: (8.0 * scale).round(),
+            clock_height: (28.0 * scale).round(),
+            clock_time_size: 12.5 * text_scale,
+            clock_date_size: 9.5 * text_scale,
+            sep_width: (22.0 * scale).round(),
+            launcher_glyph: (18.0 * scale).round(),
+            tray_icon: (16.0 * scale).round(),
+            tray_gap: (5.0 * scale).round(),
+            tray_pad: (5.0 * scale).round(),
+            pill_radius: (btn_size * (14.0 / 38.0)).round(),
+            pill_top_height: (34.0 * scale).round(),
+            pill_base_height: (92.0 * scale).round(),
+            bell_size: (16.0 * scale).round(),
+            sys_icon: (15.0 * scale).round(),
+            sys_gap: (9.0 * scale).round(),
+            sys_pad_y: (9.0 * scale).round(),
+            unread_height: (16.0 * scale).round().max(13.0),
+            unread_font: (9.5 * scale).max(8.0),
+        }
+    }
+
+    fn bar_x(&self, side: Side, surface_width: u32) -> i32 {
+        match side {
+            Side::Left => 0,
+            Side::Right => surface_width.saturating_sub(self.width) as i32,
+        }
+    }
+
+    /// Interactive input region of the sidebar surface (strictly `width` px wide).
+    pub fn input_region(
+        &self,
+        side: Side,
+        surface_width: u32,
+        height: u32,
+    ) -> (i32, i32, i32, i32) {
+        (
+            self.bar_x(side, surface_width),
+            0,
+            self.width as i32,
+            height as i32,
+        )
+    }
+
+    /// Logical rectangle `(x, y, width, height)` of taskbar item `index` inside
+    /// the sidebar surface, used to anchor right-click context menus.
+    pub fn entry_menu_rect(
+        &self,
+        side: Side,
+        surface_width: u32,
+        index: usize,
+        pinned_count: usize,
+    ) -> (i32, i32, i32, i32) {
+        let taskbar_top = (self.pad_y
+            + self.btn_size
+            + self.top_gap
+            + self.clock_height
+            + self.top_gap
+            + SEP_HEIGHT
+            + self.top_gap) as i32;
+        let step = (self.btn_size + self.taskbar_gap) as i32;
+        let sep_offset = if pinned_count > 0 && index >= pinned_count {
+            (self.taskbar_gap + SEP_HEIGHT) as i32
+        } else {
+            0
+        };
+        let item_x =
+            self.bar_x(side, surface_width) + ((self.width as i32 - self.btn_size as i32) / 2);
+        let item_y = taskbar_top + (index as i32) * step + sep_offset;
+        (item_x, item_y, self.btn_size as i32, self.btn_size as i32)
+    }
+
+    /// Logical rectangle `(x, y, width, height)` of tray item `index` inside the
+    /// sidebar surface, used to anchor tray context menus.
+    pub fn tray_menu_rect(
+        &self,
+        side: Side,
+        surface_width: u32,
+        height: u32,
+        tray_len: usize,
+        index: usize,
+    ) -> (i32, i32, i32, i32) {
+        let bx = self.bar_x(side, surface_width);
+        let icon = self.tray_icon as i32;
+        if tray_len == 0 {
+            return (
+                bx + ((self.width as i32 - self.btn_size as i32) / 2),
+                (height as i32)
+                    - (self.pad_y + self.pill_base_height + self.bottom_gap + self.tray_icon)
+                        as i32,
+                icon,
+                icon,
+            );
+        }
+        let rows = tray_len.div_ceil(2) as i32;
+        let gap = self.tray_gap as i32;
+        let pad = self.tray_pad as i32;
+        let tray_w = pad * 2 + icon * 2 + gap + 2;
+        let tray_h = pad * 2 + rows * icon + rows.saturating_sub(1) * gap + 2;
+        let tray_x = bx + ((self.width as i32 - tray_w) / 2);
+        let tray_y = (height as i32)
+            - (self.pad_y + self.pill_base_height + self.bottom_gap) as i32
+            - tray_h;
+        let row = (index / 2) as i32;
+        let col = (index % 2) as i32;
+        let x = tray_x + 1 + pad + col * (icon + gap);
+        let y = tray_y + 1 + pad + row * (icon + gap);
+        (x, y, icon, icon)
     }
 }
 
@@ -56,65 +196,6 @@ fn side_of(orientation: Orientation) -> Side {
         Orientation::Vertical(side) => side,
         Orientation::Horizontal => Side::Left,
     }
-}
-
-/// Interactive input region of the sidebar surface (strictly 56 px wide).
-pub fn input_region(side: Side, surface_width: u32, height: u32) -> (i32, i32, i32, i32) {
-    (bar_x(side, surface_width), 0, WIDTH as i32, height as i32)
-}
-
-/// Logical rectangle `(x, y, width, height)` of taskbar item `index` inside
-/// the sidebar surface, used to anchor right-click context menus.
-pub fn entry_menu_rect(
-    side: Side,
-    surface_width: u32,
-    index: usize,
-    pinned_count: usize,
-) -> (i32, i32, i32, i32) {
-    let taskbar_top =
-        (PAD_Y + BTN_SIZE + TOP_GAP + CLOCK_HEIGHT + TOP_GAP + SEP_HEIGHT + TOP_GAP) as i32;
-    let step = (BTN_SIZE + TASKBAR_GAP) as i32;
-    let sep_offset = if pinned_count > 0 && index >= pinned_count {
-        (TASKBAR_GAP + SEP_HEIGHT) as i32
-    } else {
-        0
-    };
-    let item_x = bar_x(side, surface_width) + ((WIDTH as i32 - BTN_SIZE as i32) / 2);
-    let item_y = taskbar_top + (index as i32) * step + sep_offset;
-    (item_x, item_y, BTN_SIZE as i32, BTN_SIZE as i32)
-}
-
-/// Logical rectangle `(x, y, width, height)` of tray item `index` inside the
-/// sidebar surface, used to anchor tray context menus.
-pub fn tray_menu_rect(
-    side: Side,
-    surface_width: u32,
-    height: u32,
-    tray_len: usize,
-    index: usize,
-) -> (i32, i32, i32, i32) {
-    let bx = bar_x(side, surface_width);
-    if tray_len == 0 {
-        return (
-            bx + 9,
-            (height as i32) - (PAD_Y + PILL_BASE_HEIGHT + BOTTOM_GAP + TRAY_ICON) as i32,
-            TRAY_ICON as i32,
-            TRAY_ICON as i32,
-        );
-    }
-    let rows = tray_len.div_ceil(2) as i32;
-    let icon = TRAY_ICON as i32;
-    let gap = TRAY_GAP as i32;
-    let pad = TRAY_PAD as i32;
-    let tray_w = pad * 2 + icon * 2 + gap + 2;
-    let tray_h = pad * 2 + rows * icon + rows.saturating_sub(1) * gap + 2;
-    let tray_x = bx + ((WIDTH as i32 - tray_w) / 2);
-    let tray_y = (height as i32) - (PAD_Y + PILL_BASE_HEIGHT + BOTTOM_GAP) as i32 - tray_h;
-    let row = (index / 2) as i32;
-    let col = (index % 2) as i32;
-    let x = tray_x + 1 + pad + col * (icon + gap);
-    let y = tray_y + 1 + pad + row * (icon + gap);
-    (x, y, icon, icon)
 }
 
 /// Formats `now` as a short uppercase French weekday + day number (e.g. `"VEN 27"`).
@@ -131,33 +212,34 @@ pub fn format_short_date(now: DateTime<Local>) -> String {
     format!("{day} {}", now.day())
 }
 
-/// Renders the permanent 56 px Liquid Glass vertical sidebar and its optional
+/// Renders the permanent Liquid Glass vertical sidebar and its optional
 /// hover tooltip inside the `TOOLTIP_REACH` area.
 pub fn view<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<'a, Message> {
+    let metrics = dock.spatial_metrics();
     let side = side_of(bar.orientation);
     let launcher_visible = dock.spatial_launcher_visible_on(bar.screen);
 
     let top_block = column![
-        launcher_button(bar.screen, side, launcher_visible, palette),
-        clock_block(dock.now, palette),
-        separator_line(palette),
+        launcher_button(bar.screen, side, launcher_visible, metrics, palette),
+        clock_block(dock.now, metrics, palette),
+        separator_line(metrics, palette),
     ]
-    .spacing(TOP_GAP)
+    .spacing(metrics.top_gap)
     .align_x(Alignment::Center)
     .width(Length::Fill);
 
-    let taskbar_block = taskbar(dock, bar, side, launcher_visible, palette);
-    let bottom_block = bottom_controls(dock, bar, palette);
+    let taskbar_block = taskbar(dock, bar, side, launcher_visible, metrics, palette);
+    let bottom_block = bottom_controls(dock, bar, metrics, palette);
 
     let bar_content = column![top_block, taskbar_block, bottom_block]
-        .spacing(TOP_GAP)
+        .spacing(metrics.top_gap)
         .align_x(Alignment::Center)
-        .padding(Padding::from([PAD_Y, 0.0]))
-        .width(WIDTH as f32)
+        .padding(Padding::from([metrics.pad_y, 0.0]))
+        .width(metrics.width as f32)
         .height(Length::Fill);
 
     let bar_bg = container(bar_content)
-        .width(WIDTH as f32)
+        .width(metrics.width as f32)
         .height(Length::Fill)
         .style(move |_| style::fill(palette.glass, 0.0));
 
@@ -169,12 +251,12 @@ pub fn view<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<
         container(space().width(1).height(Length::Fill))
             .style(move |_| style::fill(palette.rim, 0.0)),
     )
-    .width(WIDTH as f32)
+    .width(metrics.width as f32)
     .height(Length::Fill)
     .align_x(rim_align);
 
     let sidebar: Element<'a, Message> = stack![bar_bg, inner_rim].into();
-    let tooltip_area = hover_tooltip(bar, side, launcher_visible, palette);
+    let tooltip_area = hover_tooltip(bar, side, launcher_visible, metrics, palette);
 
     let layout = match side {
         Side::Left => row![sidebar, tooltip_area],
@@ -184,8 +266,8 @@ pub fn view<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<
     layout.width(Length::Fill).height(Length::Fill).into()
 }
 
-fn separator_line<'a>(palette: Palette) -> Element<'a, Message> {
-    container(space().width(SEP_WIDTH).height(SEP_HEIGHT))
+fn separator_line<'a>(metrics: Metrics, palette: Palette) -> Element<'a, Message> {
+    container(space().width(metrics.sep_width).height(SEP_HEIGHT))
         .style(move |_| style::fill(palette.separator, 0.0))
         .into()
 }
@@ -222,12 +304,13 @@ fn wrap_with_outer_mark<'a>(
     mark: Option<Element<'a, Message>>,
     side: Side,
     inset: f32,
+    metrics: Metrics,
 ) -> Element<'a, Message> {
     let centered_tile = container(tile)
-        .width(WIDTH as f32)
-        .height(BTN_SIZE)
-        .center_x(WIDTH as f32)
-        .center_y(BTN_SIZE);
+        .width(metrics.width as f32)
+        .height(metrics.btn_size)
+        .center_x(metrics.width as f32)
+        .center_y(metrics.btn_size);
 
     let Some(mark) = mark else {
         return centered_tile.into();
@@ -238,8 +321,8 @@ fn wrap_with_outer_mark<'a>(
         Side::Right => (Horizontal::Right, Padding::ZERO.right(inset)),
     };
     let positioned_mark = container(mark)
-        .width(WIDTH as f32)
-        .height(BTN_SIZE)
+        .width(metrics.width as f32)
+        .height(metrics.btn_size)
         .padding(pad)
         .align_x(align)
         .align_y(Vertical::Center);
@@ -251,53 +334,65 @@ fn launcher_button<'a>(
     screen: OutputRole,
     side: Side,
     active: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let icon = icons::glyph(Glyph::Launcher, 18.0, palette.text);
-    let btn = button(container(icon).center_x(BTN_SIZE).center_y(BTN_SIZE))
-        .width(BTN_SIZE)
-        .height(BTN_SIZE)
-        .padding(0)
-        .on_press(Message::Launcher(Some(screen)))
-        .style(move |_, status| {
-            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let bg = if active {
-                if hovered { palette.hover } else { palette.card }
-            } else if hovered {
-                palette.hover
-            } else {
-                Color::TRANSPARENT
-            };
-            let border = if active {
-                Border {
-                    color: palette.rim,
-                    width: 1.0,
-                    radius: BTN_RADIUS.into(),
-                }
-            } else {
-                Border {
-                    radius: BTN_RADIUS.into(),
-                    ..Border::default()
-                }
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                border,
-                ..button::Style::default()
+    let icon = icons::glyph(Glyph::Launcher, metrics.launcher_glyph, palette.text);
+    let btn = button(
+        container(icon)
+            .center_x(metrics.btn_size)
+            .center_y(metrics.btn_size),
+    )
+    .width(metrics.btn_size)
+    .height(metrics.btn_size)
+    .padding(0)
+    .on_press(Message::Launcher(Some(screen)))
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let bg = if active {
+            if hovered { palette.hover } else { palette.card }
+        } else if hovered {
+            palette.hover
+        } else {
+            Color::TRANSPARENT
+        };
+        let border = if active {
+            Border {
+                color: palette.rim,
+                width: 1.0,
+                radius: metrics.btn_radius.into(),
             }
-        });
+        } else {
+            Border {
+                radius: metrics.btn_radius.into(),
+                ..Border::default()
+            }
+        };
+        button::Style {
+            background: Some(Background::Color(bg)),
+            border,
+            ..button::Style::default()
+        }
+    });
 
     let mark = active.then(|| outer_edge_bar(side, palette.accent));
-    wrap_with_outer_mark(btn.into(), mark, side, 0.0)
+    wrap_with_outer_mark(btn.into(), mark, side, 0.0, metrics)
 }
 
-fn clock_block<'a>(now: DateTime<Local>, palette: Palette) -> Element<'a, Message> {
+fn clock_block<'a>(
+    now: DateTime<Local>,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
     let hhmm = format!("{:02}:{:02}", now.hour(), now.minute());
     let date = format_short_date(now);
 
-    let time_text = text(hhmm).size(12.5).font(style::BOLD).color(palette.text);
+    let time_text = text(hhmm)
+        .size(metrics.clock_time_size)
+        .font(style::BOLD)
+        .color(palette.text);
     let date_text = text(date)
-        .size(9.5)
+        .size(metrics.clock_date_size)
         .font(style::SEMIBOLD)
         .color(palette.muted);
 
@@ -306,9 +401,9 @@ fn clock_block<'a>(now: DateTime<Local>, palette: Palette) -> Element<'a, Messag
             .spacing(2)
             .align_x(Alignment::Center),
     )
-    .height(CLOCK_HEIGHT)
-    .center_x(WIDTH as f32)
-    .center_y(CLOCK_HEIGHT)
+    .height(metrics.clock_height)
+    .center_x(metrics.width as f32)
+    .center_y(metrics.clock_height)
     .into()
 }
 
@@ -317,15 +412,18 @@ fn taskbar<'a>(
     bar: &'a BarState,
     side: Side,
     launcher_visible: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let pinned_count = bar.pinned();
     let has_unpinned = bar.entries.len() > pinned_count;
 
-    let mut items: Column<'a, Message> = column![].spacing(TASKBAR_GAP).align_x(Alignment::Center);
+    let mut items: Column<'a, Message> = column![]
+        .spacing(metrics.taskbar_gap)
+        .align_x(Alignment::Center);
     for (index, entry) in bar.entries.iter().enumerate() {
         if index == pinned_count && pinned_count > 0 && has_unpinned {
-            items = items.push(separator_line(palette));
+            items = items.push(separator_line(metrics, palette));
         }
         items = items.push(app_tile(
             dock,
@@ -334,12 +432,13 @@ fn taskbar<'a>(
             entry,
             side,
             launcher_visible,
+            metrics,
             palette,
         ));
     }
 
-    scrollable(items.width(WIDTH as f32))
-        .width(WIDTH as f32)
+    scrollable(items.width(metrics.width as f32))
+        .width(metrics.width as f32)
         .height(Length::Fill)
         .direction(scrollable::Direction::Vertical(
             scrollable::Scrollbar::new().width(0).scroller_width(0),
@@ -347,6 +446,7 @@ fn taskbar<'a>(
         .into()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn app_tile<'a>(
     dock: &'a Dock,
     bar: &'a BarState,
@@ -354,6 +454,7 @@ fn app_tile<'a>(
     entry: &'a Entry,
     side: Side,
     launcher_visible: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let hovered = bar.hover_entry == Some(index);
@@ -374,28 +475,28 @@ fn app_tile<'a>(
     let tile_icon = icons::tile(
         &dock.icons,
         &entry.identity,
-        32.0,
-        (25.0, 6.0),
+        metrics.tile_icon,
+        metrics.tile_fallback,
         palette,
         hovered,
     );
 
     let tile_box = container(tile_icon)
-        .center_x(BTN_SIZE)
-        .center_y(BTN_SIZE)
+        .center_x(metrics.btn_size)
+        .center_y(metrics.btn_size)
         .style(move |_| {
             if indicator == SpatialIndicator::ActiveHere {
-                style::outlined(bg, palette.rim, BTN_RADIUS)
+                style::outlined(bg, palette.rim, metrics.btn_radius)
             } else {
-                style::fill(bg, BTN_RADIUS)
+                style::fill(bg, metrics.btn_radius)
             }
         });
 
     let unread = dock.spatial_unread_for(entry);
     let tile_with_badge: Element<'a, Message> = if unread > 0 {
-        let badge_el = container(unread_badge(unread))
-            .width(BTN_SIZE)
-            .height(BTN_SIZE)
+        let badge_el = container(unread_badge(unread, metrics))
+            .width(metrics.btn_size)
+            .height(metrics.btn_size)
             .align_x(Horizontal::Right)
             .align_y(Vertical::Top);
         stack![tile_box, badge_el].into()
@@ -440,43 +541,54 @@ fn app_tile<'a>(
         SpatialIndicator::None => (None, 0.0),
     };
 
-    wrap_with_outer_mark(interactive.into(), mark, side, inset)
+    wrap_with_outer_mark(interactive.into(), mark, side, inset, metrics)
 }
 
-fn unread_badge<'a>(count: usize) -> Element<'a, Message> {
+fn unread_badge<'a>(count: usize, metrics: Metrics) -> Element<'a, Message> {
     let label = if count > 99 {
         "99+".to_owned()
     } else {
         count.to_string()
     };
-    let text_el = text(label).size(9.5).font(style::BOLD).color(Color::WHITE);
+    let text_el = text(label)
+        .size(metrics.unread_font)
+        .font(style::BOLD)
+        .color(Color::WHITE);
     container(text_el)
         .center_x(Length::Shrink)
-        .center_y(16.0)
+        .center_y(metrics.unread_height)
         .padding(Padding::from([0.0, 4.0]))
-        .style(|_| style::fill(style::DANGER, 8.0))
+        .style(move |_| style::fill(style::DANGER, metrics.unread_height / 2.0))
         .into()
 }
 
 fn bottom_controls<'a>(
     dock: &'a Dock,
     bar: &'a BarState,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
-    let mut col: Column<'a, Message> = column![].spacing(BOTTOM_GAP).align_x(Alignment::Center);
+    let mut col: Column<'a, Message> = column![]
+        .spacing(metrics.bottom_gap)
+        .align_x(Alignment::Center);
 
     if !dock.tray.is_empty() {
-        col = col.push(compact_tray(dock, bar, palette));
+        col = col.push(compact_tray(dock, bar, metrics, palette));
     }
-    col = col.push(split_pill(dock, bar, palette));
-    col.width(WIDTH as f32).into()
+    col = col.push(split_pill(dock, bar, metrics, palette));
+    col.width(metrics.width as f32).into()
 }
 
-fn compact_tray<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<'a, Message> {
-    let mut rows: Column<'a, Message> = column![].spacing(TRAY_GAP);
+fn compact_tray<'a>(
+    dock: &'a Dock,
+    bar: &'a BarState,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
+    let mut rows: Column<'a, Message> = column![].spacing(metrics.tray_gap);
     for pair in dock.tray.chunks(2).enumerate() {
         let (row_idx, items) = pair;
-        let mut r: Row<'a, Message> = row![].spacing(TRAY_GAP);
+        let mut r: Row<'a, Message> = row![].spacing(metrics.tray_gap);
         for (col_idx, item) in items.iter().enumerate() {
             let index = row_idx * 2 + col_idx;
             let hovered = bar.hover_tray == Some(index);
@@ -485,10 +597,10 @@ fn compact_tray<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elem
             } else {
                 Color::TRANSPARENT
             };
-            let icon = tray_icon_element(dock, item, TRAY_ICON);
+            let icon = tray_icon_element(dock, item, metrics.tray_icon);
             let slot = container(icon)
-                .center_x(TRAY_ICON)
-                .center_y(TRAY_ICON)
+                .center_x(metrics.tray_icon)
+                .center_y(metrics.tray_icon)
                 .style(move |_| style::fill(bg, 4.0));
             let interactive = mouse_area(slot)
                 .on_enter(Message::TrayHover(bar.id, Some(index)))
@@ -503,12 +615,17 @@ fn compact_tray<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elem
 
     let tray_bg = style::alpha(palette.card, palette.card.a * 0.55);
     container(rows)
-        .padding(TRAY_PAD)
+        .padding(metrics.tray_pad)
         .style(move |_| style::outlined(tray_bg, palette.separator, 10.0))
         .into()
 }
 
-fn split_pill<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<'a, Message> {
+fn split_pill<'a>(
+    dock: &'a Dock,
+    bar: &'a BarState,
+    metrics: Metrics,
+    palette: Palette,
+) -> Element<'a, Message> {
     let open_kind = dock
         .spatial_popover
         .as_ref()
@@ -523,28 +640,33 @@ fn split_pill<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elemen
     } else {
         palette.text
     };
-    let bell_icon = icons::glyph(Glyph::Bell, 16.0, bell_color);
+    let bell_icon = icons::glyph(Glyph::Bell, metrics.bell_size, bell_color);
+    let bell_box = metrics.bell_size + 4.0;
     let bell_content: Element<'a, Message> = if dock.spatial_visible_unread() > 0 {
         let dot = container(
             container(space().width(7).height(7)).style(|_| style::fill(style::DANGER, 3.5)),
         )
-        .width(20)
-        .height(20)
+        .width(bell_box)
+        .height(bell_box)
         .align_x(Horizontal::Right)
         .align_y(Vertical::Top);
-        stack![container(bell_icon).center_x(20).center_y(20), dot].into()
+        stack![
+            container(bell_icon).center_x(bell_box).center_y(bell_box),
+            dot
+        ]
+        .into()
     } else {
         bell_icon
     };
 
     let notif_zone = button(
         container(bell_content)
-            .width(BTN_SIZE)
-            .height(PILL_TOP_HEIGHT)
-            .center_x(BTN_SIZE)
-            .center_y(PILL_TOP_HEIGHT),
+            .width(metrics.btn_size)
+            .height(metrics.pill_top_height)
+            .center_x(metrics.btn_size)
+            .center_y(metrics.pill_top_height),
     )
-    .width(BTN_SIZE)
+    .width(metrics.btn_size)
     .padding(0)
     .on_press(Message::SpatialPopoverToggle(
         bar.screen,
@@ -554,8 +676,8 @@ fn split_pill<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elemen
         notif_open,
         palette,
         Radius {
-            top_left: PILL_RADIUS,
-            top_right: PILL_RADIUS,
+            top_left: metrics.pill_radius,
+            top_right: metrics.pill_radius,
             bottom_right: 0.0,
             bottom_left: 0.0,
         },
@@ -582,10 +704,10 @@ fn split_pill<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elemen
     };
 
     let mut sys_icons = column![
-        icons::glyph(Glyph::Wifi, 15.0, wifi_color),
-        icons::glyph(audio_glyph, 15.0, audio_color),
+        icons::glyph(Glyph::Wifi, metrics.sys_icon, wifi_color),
+        icons::glyph(audio_glyph, metrics.sys_icon, audio_color),
     ]
-    .spacing(9)
+    .spacing(metrics.sys_gap)
     .align_x(Alignment::Center);
 
     if let Some(battery) = dock.battery {
@@ -602,16 +724,16 @@ fn split_pill<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elemen
         } else {
             palette.text
         };
-        sys_icons = sys_icons.push(icons::glyph(bat_glyph, 15.0, bat_color));
+        sys_icons = sys_icons.push(icons::glyph(bat_glyph, metrics.sys_icon, bat_color));
     }
 
     let ctrl_zone = button(
         container(sys_icons)
-            .width(BTN_SIZE)
-            .padding(Padding::from([9.0, 0.0]))
-            .center_x(BTN_SIZE),
+            .width(metrics.btn_size)
+            .padding(Padding::from([metrics.sys_pad_y, 0.0]))
+            .center_x(metrics.btn_size),
     )
-    .width(BTN_SIZE)
+    .width(metrics.btn_size)
     .padding(0)
     .on_press(Message::SpatialPopoverToggle(
         bar.screen,
@@ -623,18 +745,18 @@ fn split_pill<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Elemen
         Radius {
             top_left: 0.0,
             top_right: 0.0,
-            bottom_right: PILL_RADIUS,
-            bottom_left: PILL_RADIUS,
+            bottom_right: metrics.pill_radius,
+            bottom_left: metrics.pill_radius,
         },
     ));
 
-    let pill_inner = column![notif_zone, separator_line(palette), ctrl_zone]
+    let pill_inner = column![notif_zone, separator_line(metrics, palette), ctrl_zone]
         .align_x(Alignment::Center)
-        .width(BTN_SIZE);
+        .width(metrics.btn_size);
 
     container(pill_inner)
-        .width(BTN_SIZE)
-        .style(move |_| style::outlined(palette.card, palette.rim, PILL_RADIUS))
+        .width(metrics.btn_size)
+        .style(move |_| style::outlined(palette.card, palette.rim, metrics.pill_radius))
         .into()
 }
 
@@ -677,6 +799,7 @@ fn hover_tooltip<'a>(
     bar: &'a BarState,
     side: Side,
     launcher_visible: bool,
+    metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
     let Some(index) = bar.hover_entry else {
@@ -706,8 +829,9 @@ fn hover_tooltip<'a>(
         ..style::outlined(palette.glass_strong, palette.rim_bright, 9.0)
     });
 
-    let (_, item_y, _, item_h) = entry_menu_rect(side, SURFACE_WIDTH, index, bar.pinned());
-    let top_offset = (item_y as f32 + (item_h as f32 - 26.0) / 2.0).max(PAD_Y);
+    let (_, item_y, _, item_h) =
+        metrics.entry_menu_rect(side, metrics.surface_width, index, bar.pinned());
+    let top_offset = (item_y as f32 + (item_h as f32 - 26.0) / 2.0).max(metrics.pad_y);
 
     let (align_x, pad) = match side {
         Side::Left => (
@@ -758,23 +882,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn input_region_covers_only_the_56_px_bar_on_each_side() {
+    fn input_region_covers_only_the_bar_on_each_side() {
+        let m = Metrics::new(32);
+        assert_eq!(m.width, 56);
         assert_eq!(
-            input_region(Side::Left, SURFACE_WIDTH, 1440),
+            m.input_region(Side::Left, m.surface_width, 1440),
             (0, 0, 56, 1440)
         );
         assert_eq!(
-            input_region(Side::Right, SURFACE_WIDTH, 1440),
+            m.input_region(Side::Right, m.surface_width, 1440),
             (240, 0, 56, 1440)
         );
     }
 
     #[test]
+    fn metrics_scale_with_icon_size() {
+        let small = Metrics::new(16);
+        let default = Metrics::new(24);
+        let medium = Metrics::new(32);
+        let large = Metrics::new(64);
+
+        assert_eq!(small.tile_icon, 16.0);
+        assert_eq!(default.tile_icon, 24.0);
+        assert_eq!(medium.tile_icon, 32.0);
+        assert_eq!(large.tile_icon, 64.0);
+
+        assert!(small.width < default.width);
+        assert!(default.width < medium.width);
+        assert!(medium.width < large.width);
+        assert_eq!(medium.width, 56);
+        assert_eq!(medium.exclusive_zone, 56);
+        assert_eq!(small.exclusive_zone, small.width as i32);
+        assert_eq!(large.exclusive_zone, large.width as i32);
+    }
+
+    #[test]
     fn entry_menu_rect_accounts_for_pinned_separator_and_side() {
-        let first_left = entry_menu_rect(Side::Left, SURFACE_WIDTH, 0, 2);
-        let second_left = entry_menu_rect(Side::Left, SURFACE_WIDTH, 1, 2);
-        let first_unpinned = entry_menu_rect(Side::Left, SURFACE_WIDTH, 2, 2);
-        let right = entry_menu_rect(Side::Right, SURFACE_WIDTH, 0, 2);
+        let m = Metrics::new(32);
+        let first_left = m.entry_menu_rect(Side::Left, m.surface_width, 0, 2);
+        let second_left = m.entry_menu_rect(Side::Left, m.surface_width, 1, 2);
+        let first_unpinned = m.entry_menu_rect(Side::Left, m.surface_width, 2, 2);
+        let right = m.entry_menu_rect(Side::Right, m.surface_width, 0, 2);
 
         assert_eq!(first_left.0, 9);
         assert_eq!(right.0, 240 + 9);
@@ -786,9 +934,10 @@ mod tests {
 
     #[test]
     fn tray_menu_rect_positions_2_column_grid_above_bottom_pill() {
-        let slot0 = tray_menu_rect(Side::Left, SURFACE_WIDTH, 1080, 3, 0);
-        let slot1 = tray_menu_rect(Side::Left, SURFACE_WIDTH, 1080, 3, 1);
-        let slot2 = tray_menu_rect(Side::Left, SURFACE_WIDTH, 1080, 3, 2);
+        let m = Metrics::new(32);
+        let slot0 = m.tray_menu_rect(Side::Left, m.surface_width, 1080, 3, 0);
+        let slot1 = m.tray_menu_rect(Side::Left, m.surface_width, 1080, 3, 1);
+        let slot2 = m.tray_menu_rect(Side::Left, m.surface_width, 1080, 3, 2);
 
         assert_eq!(slot0.2, 16);
         assert_eq!(slot0.3, 16);

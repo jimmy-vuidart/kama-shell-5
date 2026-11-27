@@ -614,6 +614,10 @@ impl Dock {
         ui::bar::Metrics::new(self.config.icon_size()).with_battery(self.battery.is_some())
     }
 
+    pub fn spatial_metrics(&self) -> ui::spatial::bar::Metrics {
+        ui::spatial::bar::Metrics::new(self.config.icon_size())
+    }
+
     pub fn identify(&self, name: &str) -> Identity {
         identify(&self.catalog, &self.games, name)
     }
@@ -1022,11 +1026,12 @@ impl Dock {
                     Side::Right => Anchor::Right | Anchor::Top | Anchor::Bottom,
                 };
                 let height = self.screen(screen).map_or(1080, |s| s.height.max(1) as u32);
+                let sm = self.spatial_metrics();
                 (
                     Orientation::Vertical(side),
-                    (ui::spatial::bar::SURFACE_WIDTH, height),
+                    (sm.surface_width, height),
                     anchor,
-                    ui::spatial::bar::EXCLUSIVE_ZONE,
+                    sm.exclusive_zone,
                 )
             } else {
                 let metrics = self.metrics();
@@ -1244,14 +1249,24 @@ impl Dock {
     /// pointer to what shows.
     fn fit_bars(&mut self) -> Task<Message> {
         if self.is_spatial() {
+            let sm = self.spatial_metrics();
             let mut tasks = Vec::new();
             for index in 0..self.bars.len() {
                 let id = self.bars[index].id;
+                let resize = if self.bars[index].size.0 != sm.surface_width {
+                    self.bars[index].size.0 = sm.surface_width;
+                    Task::done(Message::SizeChange {
+                        id,
+                        size: (sm.surface_width, 0),
+                    })
+                } else {
+                    Task::none()
+                };
                 let exclusive = Task::done(Message::ExclusiveZoneChange {
                     id,
-                    zone_size: ui::spatial::bar::EXCLUSIVE_ZONE,
+                    zone_size: sm.exclusive_zone,
                 });
-                tasks.push(exclusive.chain(self.input_region(id)));
+                tasks.push(resize.chain(exclusive).chain(self.input_region(id)));
             }
             return Task::batch(tasks);
         }
@@ -1292,7 +1307,8 @@ impl Dock {
                 Orientation::Vertical(side) => side,
                 Orientation::Horizontal => Side::Left,
             };
-            ui::spatial::bar::input_region(side, bar.size.0, bar.size.1.max(1080))
+            self.spatial_metrics()
+                .input_region(side, bar.size.0, bar.size.1.max(1080))
         } else {
             let unfolded = bar.hovered || bar.unfold > 0.0;
             self.metrics()
@@ -2593,7 +2609,8 @@ impl Dock {
                         Orientation::Vertical(side) => side,
                         Orientation::Horizontal => Side::Left,
                     };
-                    ui::spatial::bar::entry_menu_rect(side, bar.size.0, index, bar.pinned())
+                    self.spatial_metrics()
+                        .entry_menu_rect(side, bar.size.0, index, bar.pinned())
                 } else {
                     let unfolded = bar.unfold > 0.5 && !self.covered(id);
                     self.metrics()
@@ -2663,7 +2680,7 @@ impl Dock {
                         Orientation::Vertical(side) => side,
                         Orientation::Horizontal => Side::Left,
                     };
-                    ui::spatial::bar::tray_menu_rect(
+                    self.spatial_metrics().tray_menu_rect(
                         side,
                         bar.size.0,
                         bar.size.1.max(1080),
