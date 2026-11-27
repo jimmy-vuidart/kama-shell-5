@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 use crate::animation::{Curve, Exit, Motion, durations};
 use crate::config::LayoutConfig;
 use crate::decoration::capsules::{CapsuleButton, GroupLayout};
-use crate::decoration::layout::TitlebarButton;
+use crate::decoration::layout::{TitlebarButton, TitlebarButtons};
 use crate::decoration::naming::badge_color;
 use crate::decoration::paint::{CapsuleSpec, GroupSpec, Painter, TitlebarSpec};
 use crate::focus::KeyFocus;
@@ -111,10 +111,17 @@ impl ManagedWindow {
         self.geometry.client.translated(self.origin)
     }
 
-    /// Whether its title bar shows buttons: in a slot, they are on its
-    /// capsule.
-    pub fn buttons(&self) -> bool {
-        self.geometry.floating
+    /// Which buttons its title bar shows: floating windows show all three,
+    /// spatial maximized windows show minimize and close, and slotted windows
+    /// show none (their buttons live on their capsules).
+    pub fn buttons(&self, spatial: bool) -> TitlebarButtons {
+        if self.geometry.floating {
+            TitlebarButtons::Floating
+        } else if spatial && self.geometry.maximized {
+            TitlebarButtons::Spatial
+        } else {
+            TitlebarButtons::None
+        }
     }
 }
 
@@ -210,6 +217,7 @@ impl Shell {
         memory: AppMemory,
         proportions: &Proportions,
         layout: &LayoutConfig,
+        spatial: bool,
     ) -> Self {
         let outputs = screens
             .iter()
@@ -217,7 +225,8 @@ impl Shell {
             .collect();
         let mut desk = Desk::new(outputs, Metrics::default())
             .with_memory(memory)
-            .with_proportions(proportions);
+            .with_proportions(proportions)
+            .with_spatial(spatial);
         for screen in &screens {
             // The screens were just given to the desk: they are all known.
             let _ = desk.set_layout(screen.id, layout.of(screen.role));
@@ -464,6 +473,7 @@ impl Shell {
         capsule_hover: Option<CapsuleHit>,
     ) {
         self.refresh_capsules(painter, theme, capsule_hover);
+        let spatial = self.desk.is_spatial();
         let corner_radius = self.desk.metrics().corner_radius;
         let scales: Vec<(OutputId, Scale)> = self
             .screens
@@ -491,7 +501,7 @@ impl Shell {
                 hovered: hover
                     .filter(|(id, _)| *id == managed.id)
                     .map(|(_, button)| button),
-                buttons: managed.buttons(),
+                buttons: managed.buttons(spatial),
                 theme: theme.kind,
                 accent: theme.accent,
                 corner_radius,

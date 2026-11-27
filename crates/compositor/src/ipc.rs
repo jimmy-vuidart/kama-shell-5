@@ -269,6 +269,7 @@ impl State {
                 Backend::Udev(udev) => udev.has_touchpad(),
                 Backend::Winit(_) => false,
             },
+            spatial: self.shell.desk.is_spatial(),
         }
     }
 
@@ -337,6 +338,32 @@ impl State {
                     self.liquid.insert(key, shapes);
                 }
             }
+            Command::MoveToScreen { window, screen } => {
+                let wanted = self
+                    .shell
+                    .screens
+                    .iter()
+                    .find(|known| known.role == screen)
+                    .map(|known| known.id);
+                match wanted {
+                    Some(output) => {
+                        if let Err(error) = self.shell.desk.move_to_screen(WindowId(window), output)
+                        {
+                            warn!(%error, "cannot move the window to that screen");
+                        } else {
+                            self.apply_arrangement();
+                        }
+                    }
+                    None => warn!(?screen, "the shell asked for a screen that is not there"),
+                }
+            }
+            Command::Minimize { window } => {
+                if let Err(error) = self.shell.desk.minimize(WindowId(window)) {
+                    warn!(%error, "cannot minimize the window the shell asked for");
+                } else {
+                    self.apply_arrangement();
+                }
+            }
         }
     }
 
@@ -346,7 +373,24 @@ impl State {
         self.free_pointer();
         // Each screen may have its dock: the launcher opens where the
         // pointer is.
-        let screen = self.pointer_screen().map(|screen| screen.role);
+        let pointer_screen = self.pointer_screen();
+        let screen = pointer_screen.map(|screen| screen.role);
+        if self.shell.desk.is_spatial() {
+            let target = pointer_screen.or_else(|| self.shell.screens.first().copied());
+            if let Some(target) = target {
+                let has_visible = self
+                    .shell
+                    .windows
+                    .iter()
+                    .any(|w| w.geometry.output == target.id && w.geometry.visible);
+                if !has_visible {
+                    if let Some(home) = self.home_panel_on(target.role) {
+                        self.panel_focus = Some(home);
+                        self.sync_keyboard_focus();
+                    }
+                }
+            }
+        }
         if let Some(ipc) = self.ipc.as_mut() {
             ipc.broadcast(&Event::ToggleLauncher { screen });
         }

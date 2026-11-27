@@ -221,6 +221,8 @@ pub struct Desk {
     /// Windows the user brought over the game that holds their screen:
     /// shown above it until the game is clicked again.
     over_game: Vec<WindowId>,
+    /// Spatial mode: normal windows open maximized edge-to-edge on each screen.
+    spatial: bool,
 }
 
 impl Desk {
@@ -237,7 +239,18 @@ impl Desk {
             last_side: None,
             asked: Vec::new(),
             over_game: Vec::new(),
+            spatial: false,
         }
+    }
+
+    /// Enables or disables spatial mode (always-maximized windows per screen).
+    pub fn with_spatial(mut self, spatial: bool) -> Self {
+        self.spatial = spatial;
+        self
+    }
+
+    pub fn is_spatial(&self) -> bool {
+        self.spatial
     }
 
     /// Starts from habits saved by a previous session.
@@ -384,7 +397,8 @@ impl Desk {
 
         // A dialog has the name of its application, never its place.
         let remembered = app.as_ref().and_then(|app| self.memory.get(app));
-        let remembered = remembered.filter(|_| wanted.is_none() && request.parent.is_none());
+        let remembered =
+            remembered.filter(|_| !self.spatial && wanted.is_none() && request.parent.is_none());
         let placement = match remembered.and_then(|place| self.remembered_target(place)) {
             Some(Target::Slot { screen, slot }) => {
                 // Another window of the same application: the new one opens
@@ -416,12 +430,23 @@ impl Desk {
             None => {
                 let free = wanted.filter(|screen| self.screens[*screen].anchored().is_none());
                 let screen = free.unwrap_or_else(|| self.floating_screen(cursor));
-                let rect = self.opening_rect_over(screen, request.preferred_size, request.parent);
-                let screen = &mut self.screens[screen];
-                screen.push_floating(id, rect);
-                Placement::Floating {
-                    output: screen.id(),
-                    rect,
+                if self.spatial && request.parent.is_none() {
+                    let origin =
+                        Origin::Floating(self.opening_rect(screen, request.preferred_size));
+                    let screen = &mut self.screens[screen];
+                    screen.maximized_mut().push(id);
+                    screen.set_covered(true);
+                    self.restore.insert(id, origin);
+                    Placement::Maximized(screen.id())
+                } else {
+                    let rect =
+                        self.opening_rect_over(screen, request.preferred_size, request.parent);
+                    let screen = &mut self.screens[screen];
+                    screen.push_floating(id, rect);
+                    Placement::Floating {
+                        output: screen.id(),
+                        rect,
+                    }
                 }
             }
         };
@@ -524,6 +549,9 @@ impl Desk {
     /// application will reopen there.
     pub fn move_to_slot(&mut self, id: WindowId, slot: SlotId) -> Result<(), ModelError> {
         let (from, _) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        if self.spatial {
+            return Ok(());
+        }
         let to = self.screen_index(slot.output)?;
         self.ensure_not_anchored(from)?;
         self.ensure_not_anchored(to)?;
@@ -556,6 +584,9 @@ impl Desk {
         rect: Rect,
     ) -> Result<(), ModelError> {
         let (from, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        if self.spatial && !matches!(spot, Spot::Floating(_)) {
+            return Ok(());
+        }
         let to = self.screen_index(output)?;
         self.ensure_not_anchored(from)?;
         self.ensure_not_anchored(to)?;
@@ -804,6 +835,36 @@ impl Desk {
         Ok(())
     }
 
+    /// Moves `id` to `target` screen (teleportation). If already on `target`,
+    /// unminimizes and focuses it. On a different screen, refuses if `target` is
+    /// anchored by another window, otherwise moves `id` onto `target` and
+    /// focuses it, revealing the fallback window on the source screen if any.
+    pub fn move_to_screen(&mut self, id: WindowId, target: OutputId) -> Result<(), ModelError> {
+        let (src_idx, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        let dst_idx = self.screen_index(target)?;
+        if src_idx == dst_idx {
+            return self.bring(id);
+        }
+        self.ensure_not_anchored(dst_idx)?;
+
+        self.take(src_idx, id);
+        if self.spatial || !matches!(spot, Spot::Floating(_)) {
+            let origin = Origin::Floating(self.opening_rect(dst_idx, None));
+            let screen = &mut self.screens[dst_idx];
+            screen.maximized_mut().push(id);
+            screen.set_covered(true);
+            self.restore.insert(id, origin);
+        } else if let Spot::Floating(rect) = spot {
+            let area = self.screens[dst_idx].floating_area(&self.metrics);
+            self.screens[dst_idx].push_floating(id, rect.clamped_to(area));
+        }
+        self.minimized.retain(|window| *window != id);
+        self.forget_over_game();
+        self.settle();
+        self.mark_focused(id);
+        Ok(())
+    }
+
     /// A maximized window goes back where it was: its column, opened again
     /// if it closed and there is room, else as a tab; or floating where it
     /// floated. Its application reopens there; floating, it has no habit
@@ -813,6 +874,9 @@ impl Desk {
     /// it and floats, and its application has no habit any more.
     pub fn unmaximize(&mut self, id: WindowId) -> Result<(), ModelError> {
         let (index, spot) = self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+        if self.spatial {
+            return Ok(());
+        }
         match spot {
             Spot::Maximized => {}
             Spot::Slot(_) if self.screens[index].whole_column() => {
@@ -857,6 +921,10 @@ impl Desk {
     /// Maximizes a window, or restores it if it is maximized: the gesture
     /// of the shell's own title bar and capsules.
     pub fn toggle_maximized(&mut self, id: WindowId) -> Result<(), ModelError> {
+        if self.spatial {
+            self.locate(id).ok_or(ModelError::UnknownWindow(id))?;
+            return Ok(());
+        }
         if self.is_maximized(id) {
             self.unmaximize(id)
         } else {
@@ -896,6 +964,9 @@ impl Desk {
     /// The gaps between the columns of a screen, left to right, relative
     /// to the screen. An anchored screen has none to grab.
     pub fn separators(&self, output: OutputId) -> Vec<Rect> {
+        if self.spatial {
+            return Vec::new();
+        }
         match self.screen(output) {
             Some(screen) if screen.anchored().is_none() => screen.separators(&self.metrics),
             _ => Vec::new(),
@@ -994,6 +1065,9 @@ impl Desk {
     /// shown as they would be with one more on the right while the layout
     /// has room, that one free. Anchored screens offer nothing.
     pub fn drop_zones(&self, dragged: WindowId) -> Vec<DropZone> {
+        if self.spatial {
+            return Vec::new();
+        }
         let mut zones = Vec::new();
         for screen in &self.screens {
             if screen.anchored().is_some() {
@@ -1028,6 +1102,9 @@ impl Desk {
     /// windows first, if any, then one group above each occupied slot.
     /// Anchored screens have none.
     pub fn capsule_groups(&self) -> Vec<CapsuleGroup> {
+        if self.spatial {
+            return Vec::new();
+        }
         let mut groups = Vec::new();
         for screen in &self.screens {
             if screen.anchored().is_some() {
@@ -1097,7 +1174,11 @@ impl Desk {
                     add(self.geometry(screen, *id, frame, shown, Layer::Slot));
                 }
             }
-            let (_, frame) = screen.maximized_parts(&self.metrics);
+            let frame = if self.spatial {
+                screen.info().usable()
+            } else {
+                screen.maximized_parts(&self.metrics).1
+            };
             let maximized = screen.maximized();
             for id in maximized.windows() {
                 let shown = covered && maximized.active() == Some(*id);

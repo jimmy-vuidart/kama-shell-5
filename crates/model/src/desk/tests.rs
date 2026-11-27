@@ -2793,3 +2793,146 @@ fn a_floating_window_put_down_goes_back_to_where_it_floated() {
     );
     assert_eq!(desk.memory().get(&AppKey::new("gimp")), None);
 }
+
+// Spatial mode
+
+#[test]
+fn spatial_normal_windows_open_maximized_edge_to_edge() {
+    let mut memory = AppMemory::default();
+    memory.remember(
+        AppKey::new("kitty"),
+        RememberedPlace::in_slot(OutputRole::Right, 1),
+    );
+    let mut desk = desk().with_memory(memory).with_spatial(true);
+    assert!(desk.is_spatial());
+
+    let placement = desk
+        .open_window(
+            WindowId(1),
+            Some(AppKey::new("kitty")),
+            OpenRequest::at(LEFT).with_size(Size::new(600, 400)),
+        )
+        .unwrap();
+
+    assert_eq!(placement, Placement::Maximized(LEFT));
+    let g = geo(&desk, 1);
+    assert_eq!(g.frame, desk.screen(LEFT).unwrap().info().usable());
+    assert!(g.maximized);
+    assert!(!g.floating);
+    assert!(g.visible);
+
+    // Classic unmaximize / float / move_to_slot are no-ops for maximized windows.
+    desk.unmaximize(WindowId(1)).unwrap();
+    desk.toggle_maximized(WindowId(1)).unwrap();
+    desk.float_window(WindowId(1), LEFT, Rect::new(10, 10, 400, 300))
+        .unwrap();
+    desk.move_to_slot(WindowId(1), slot(RIGHT, 0)).unwrap();
+    assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
+    desk.check_invariants().unwrap();
+}
+
+#[test]
+fn spatial_dialogs_stay_floating_centered_over_parent() {
+    let mut desk = desk().with_spatial(true);
+    open(&mut desk, 1, "gimp", CENTER);
+
+    let placement = desk
+        .open_window(
+            WindowId(2),
+            Some(AppKey::new("gimp")),
+            OpenRequest::at(CENTER)
+                .with_parent(WindowId(1))
+                .with_size(Size::new(400, 300)),
+        )
+        .unwrap();
+
+    assert_eq!(floating_output(placement), CENTER);
+    let g = geo(&desk, 2);
+    assert!(g.floating);
+    assert!(!g.maximized);
+
+    // Floating dialogs can still be moved.
+    let moved = Rect::new(100, 100, 400, 300);
+    desk.float_window(WindowId(2), CENTER, moved).unwrap();
+    assert_eq!(
+        place(&desk, 2),
+        Placement::Floating {
+            output: CENTER,
+            rect: moved,
+        }
+    );
+    desk.check_invariants().unwrap();
+}
+
+#[test]
+fn spatial_has_no_capsules_drop_zones_or_separators() {
+    let mut desk = desk().with_spatial(true);
+    open(&mut desk, 1, "kitty", LEFT);
+    open(&mut desk, 2, "firefox", CENTER);
+
+    assert!(desk.capsule_groups().is_empty());
+    assert!(desk.drop_zones(WindowId(1)).is_empty());
+    assert!(desk.separators(LEFT).is_empty());
+}
+
+#[test]
+fn move_to_screen_teleports_and_reveals_fallback() {
+    let mut desk = desk().with_spatial(true);
+    open(&mut desk, 1, "kitty", LEFT);
+    open(&mut desk, 2, "firefox", LEFT);
+    assert!(geo(&desk, 2).visible);
+    assert!(!geo(&desk, 1).visible);
+
+    // Teleport window 2 to CENTER: window 1 is revealed on LEFT.
+    desk.move_to_screen(WindowId(2), CENTER).unwrap();
+    assert_eq!(place(&desk, 2), Placement::Maximized(CENTER));
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+    assert!(geo(&desk, 1).visible);
+    assert!(geo(&desk, 2).visible);
+
+    // Minimize window 2, then move_to_screen on its own screen: unminimizes and focuses.
+    desk.minimize(WindowId(2)).unwrap();
+    assert!(geo(&desk, 2).minimized);
+    desk.move_to_screen(WindowId(2), CENTER).unwrap();
+    assert!(!geo(&desk, 2).minimized);
+    assert_eq!(desk.focused(), Some(WindowId(2)));
+
+    // Teleport the last window off LEFT: LEFT becomes empty (revealing spatial home).
+    desk.move_to_screen(WindowId(1), CENTER).unwrap();
+    let left = desk.screen(LEFT).unwrap();
+    assert!(left.maximized().is_empty());
+    assert!(!left.covered());
+    desk.check_invariants().unwrap();
+}
+
+#[test]
+fn move_to_screen_rejects_anchored_target() {
+    let mut desk = desk().with_spatial(true);
+    open(&mut desk, 1, "kitty", LEFT);
+    open(&mut desk, 2, "game", CENTER);
+    desk.set_anchored(WindowId(2), true).unwrap();
+
+    assert_eq!(
+        desk.move_to_screen(WindowId(1), CENTER),
+        Err(ModelError::Anchored(CENTER))
+    );
+    assert_eq!(place(&desk, 1), Placement::Maximized(LEFT));
+    desk.check_invariants().unwrap();
+}
+
+#[test]
+fn spatial_game_mode_and_rule_7() {
+    let mut desk = desk().with_spatial(true);
+    // Steam game opens on CENTER even when cursor is on LEFT.
+    let game_place = open(&mut desk, 1, "steam_app_123", LEFT);
+    assert_eq!(game_place, Placement::Maximized(CENTER));
+    desk.set_anchored(WindowId(1), true).unwrap();
+
+    // New window opened with cursor on CENTER goes to side screen, game keeps focus.
+    let side_place = open(&mut desk, 2, "discord", CENTER);
+    assert_eq!(side_place, Placement::Maximized(LEFT));
+    assert_eq!(desk.focused(), Some(WindowId(1)));
+    assert!(geo(&desk, 1).anchored);
+    assert!(geo(&desk, 2).visible);
+    desk.check_invariants().unwrap();
+}

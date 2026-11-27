@@ -89,6 +89,8 @@ pub struct Options {
     pub layout: LayoutConfig,
     /// Whether animations run, and how fast.
     pub pace: Pace,
+    /// Spatial mode: windows open maximized edge-to-edge on each screen.
+    pub spatial: bool,
 }
 
 /// A screen as clients see it.
@@ -369,7 +371,13 @@ impl State {
             config_path: options.config_path,
             outputs,
             backend,
-            shell: Shell::new(infos, habits.clone(), &proportions, &options.layout),
+            shell: Shell::new(
+                infos,
+                habits.clone(),
+                &proportions,
+                &options.layout,
+                options.spatial,
+            ),
             state_dir: options.state_dir,
             saved_habits: habits,
             saved_proportions: proportions,

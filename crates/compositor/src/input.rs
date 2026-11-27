@@ -826,14 +826,15 @@ impl State {
                 at,
                 button: None,
                 drag: Drag::Move,
-            }) if beyond(
-                at,
-                if floating(window) {
-                    DRAG_THRESHOLD
-                } else {
-                    UNTIDY_THRESHOLD
-                },
-            ) =>
+            }) if (!self.shell.desk.is_spatial() || floating(window))
+                && beyond(
+                    at,
+                    if floating(window) {
+                        DRAG_THRESHOLD
+                    } else {
+                        UNTIDY_THRESHOLD
+                    },
+                ) =>
             {
                 self.start_moving(window, at, location)
             }
@@ -1384,8 +1385,10 @@ impl State {
         };
         let window = managed.id;
         let anchored = managed.geometry.anchored;
+        let floating = managed.geometry.floating;
+        let spatial = self.shell.desk.is_spatial();
 
-        if let Some(edges) = hit.resize.filter(|_| !mod_held) {
+        if let Some(edges) = hit.resize.filter(|_| !mod_held && (floating || !spatial)) {
             self.gesture = Some(Gesture::Resizing {
                 window,
                 edges,
@@ -1394,7 +1397,7 @@ impl State {
             });
             return true;
         }
-        if mod_held && !anchored {
+        if mod_held && !anchored && !spatial {
             // Anywhere on the window: dragged from there, it shows where it
             // can be placed.
             self.gesture = Some(Gesture::Pressed {
@@ -1405,7 +1408,7 @@ impl State {
             });
             return true;
         }
-        if hit.titlebar && hit.button.is_none() {
+        if hit.titlebar && hit.button.is_none() && !spatial {
             // Twice on its title bar: maximized, or back in its place.
             let press = BarPress {
                 window,
@@ -1419,7 +1422,7 @@ impl State {
                 return true;
             }
         }
-        if hit.titlebar {
+        if hit.titlebar && (hit.button.is_some() || floating || !spatial) {
             // Dragged by its title bar, it floats and follows the pointer.
             self.gesture = Some(Gesture::Pressed {
                 window,
@@ -1583,7 +1586,8 @@ impl State {
                 };
             }
             if let Some(bar) = managed.titlebar().filter(|bar| bar.contains(point)) {
-                let layout = TitlebarLayout::new(bar.size(), managed.buttons());
+                let layout =
+                    TitlebarLayout::new(bar.size(), managed.buttons(self.shell.desk.is_spatial()));
                 let local = ModelPoint::new(point.x - bar.x, point.y - bar.y);
                 let button = layout.button_at(local);
                 return Hit {

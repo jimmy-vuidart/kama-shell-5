@@ -48,6 +48,9 @@ pub struct Snapshot {
     /// A touchpad is plugged in (a laptop).
     #[serde(default)]
     pub touchpad: bool,
+    /// Spatial mode: windows open maximized edge-to-edge on each screen.
+    #[serde(default)]
+    pub spatial: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +164,15 @@ pub enum Command {
         namespace: String,
         screen: OutputRole,
         shapes: Vec<GlassShape>,
+    },
+    /// Moves a window to another screen (teleportation).
+    MoveToScreen {
+        window: u64,
+        screen: OutputRole,
+    },
+    /// Hides a window until it is restored or activated again.
+    Minimize {
+        window: u64,
     },
 }
 
@@ -277,6 +289,7 @@ mod tests {
             }],
             x11_scale: Scale::new(1.5),
             touchpad: true,
+            spatial: true,
         }
     }
 
@@ -309,6 +322,11 @@ mod tests {
                     radius: 15,
                 }],
             },
+            Command::MoveToScreen {
+                window: 12,
+                screen: OutputRole::Center,
+            },
+            Command::Minimize { window: 12 },
         ];
 
         for command in commands {
@@ -346,6 +364,7 @@ mod tests {
         };
 
         assert!(!snapshot.simulated);
+        assert!(!snapshot.spatial);
     }
 
     #[test]

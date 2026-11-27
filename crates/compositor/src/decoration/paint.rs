@@ -13,7 +13,7 @@ use tiny_skia::{
 
 use super::capsules::{CapsuleButton, CapsuleCell, GroupLayout};
 use super::icons::IconCache;
-use super::layout::{TitlebarButton, TitlebarLayout};
+use super::layout::{TitlebarButton, TitlebarButtons, TitlebarLayout};
 use super::switcher::{self, SwitcherLayout};
 use crate::theme::{Rgba, Theme, ThemeKind};
 
@@ -41,8 +41,8 @@ pub struct TitlebarSpec {
     pub badge: [u8; 3],
     pub focused: bool,
     pub hovered: Option<TitlebarButton>,
-    /// Whether the bar has its buttons.
-    pub buttons: bool,
+    /// Which buttons the bar shows.
+    pub buttons: TitlebarButtons,
     pub theme: ThemeKind,
     pub accent: Rgba,
     pub corner_radius: i32,

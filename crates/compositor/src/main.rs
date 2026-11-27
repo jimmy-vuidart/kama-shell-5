@@ -140,6 +140,10 @@ struct Cli {
     #[arg(long)]
     fullscreen: bool,
 
+    /// Mode spatial : fenêtres maximisées bord à bord sur chaque écran.
+    #[arg(long)]
+    spatial: bool,
+
     /// Thème des décorations (sinon celui du fichier de configuration).
     #[arg(long, value_enum)]
     theme: Option<ThemeKind>,
@@ -496,6 +500,7 @@ fn options(cli: &Cli, config: &Config, mod_key: ModKey) -> Options {
         wallpaper: config.wallpaper.clone(),
         layout: config.layout,
         pace: Pace::new(config.animations.enabled(), cli.animation_slowdown),
+        spatial: config.is_spatial() || cli.spatial,
     }
 }
 

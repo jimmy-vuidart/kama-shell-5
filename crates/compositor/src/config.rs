@@ -9,6 +9,14 @@ use tracing::{info, warn};
 use crate::outputs::RoleConfig;
 use crate::theme::{Rgba, ThemeKind};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShellMode {
+    #[default]
+    Classic,
+    Spatial,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -24,11 +32,14 @@ pub struct Config {
     pub theme: Option<ThemeKind>,
     /// The accent color, as `#rrggbb`; by default, the one of the theme.
     pub accent: Option<String>,
+    /// Window management mode: classic (slots) or spatial (always-maximized).
+    pub mode: Option<ShellMode>,
     /// Sections of the dock, which reads the same file: not for the
     /// compositor, but no reason to reject the whole file either.
     pub dock: Ignored,
     pub drawer: Ignored,
     pub audio: Ignored,
+    pub widgets: Ignored,
     /// Command of the terminal opened by the shortcut.
     pub terminal: Option<String>,
     /// Whether X11 applications can run, through XWayland; they can unless
@@ -41,6 +52,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn is_spatial(&self) -> bool {
+        self.mode == Some(ShellMode::Spatial)
+    }
+
     /// The accent the user chose, when it is a color.
     pub fn accent(&self) -> Option<Rgba> {
         let text = self.accent.as_deref()?;
@@ -697,5 +712,20 @@ mod tests {
 
         let high = parse("[glass]\nstrength = 99").unwrap();
         assert_eq!(high.glass.strength(), 5);
+    }
+
+    #[test]
+    fn mode_and_widgets_settings_are_parsed() {
+        let default_cfg = parse("").unwrap();
+        assert!(!default_cfg.is_spatial());
+        assert_eq!(default_cfg.mode, None);
+
+        let classic = parse("mode = \"classic\"").unwrap();
+        assert!(!classic.is_spatial());
+        assert_eq!(classic.mode, Some(ShellMode::Classic));
+
+        let spatial = parse("mode = \"spatial\"\n[widgets]\nclock = true\n").unwrap();
+        assert!(spatial.is_spatial());
+        assert_eq!(spatial.mode, Some(ShellMode::Spatial));
     }
 }

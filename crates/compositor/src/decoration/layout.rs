@@ -19,6 +19,17 @@ pub enum TitlebarButton {
     Close,
 }
 
+/// Which buttons a title bar shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TitlebarButtons {
+    /// No buttons (a window in a slot, whose buttons live on its capsule).
+    None,
+    /// Floating window: minimize, maximize, close.
+    Floating,
+    /// Spatial maximized window: minimize and close (no maximize/restore).
+    Spatial,
+}
+
 /// Rectangles relative to the title bar's top-left corner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitlebarLayout {
@@ -32,19 +43,21 @@ pub struct TitlebarLayout {
 impl TitlebarLayout {
     /// Buttons are right-aligned. When the bar is too narrow, the leftmost
     /// ones are dropped; the close button always stays.
-    pub fn new(size: Size, with_buttons: bool) -> Self {
-        let wanted = [
-            TitlebarButton::Close,
-            TitlebarButton::Maximize,
-            TitlebarButton::Minimize,
-        ]
-        .into_iter()
-        .filter(|_| with_buttons);
+    pub fn new(size: Size, buttons_kind: TitlebarButtons) -> Self {
+        let wanted: &[TitlebarButton] = match buttons_kind {
+            TitlebarButtons::None => &[],
+            TitlebarButtons::Floating => &[
+                TitlebarButton::Close,
+                TitlebarButton::Maximize,
+                TitlebarButton::Minimize,
+            ],
+            TitlebarButtons::Spatial => &[TitlebarButton::Close, TitlebarButton::Minimize],
+        };
 
         // Laid out from the right edge; the first one (close) is never dropped.
         let mut buttons = Vec::new();
         let mut x = size.w - RIGHT_PADDING - BUTTON_WIDTH;
-        for button in wanted {
+        for &button in wanted {
             if !buttons.is_empty() && x < TEXT_LEFT {
                 break;
             }
@@ -81,7 +94,7 @@ mod tests {
 
     #[test]
     fn buttons_are_right_aligned_in_order() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::Floating);
 
         assert_eq!(
             layout.buttons,
@@ -94,8 +107,21 @@ mod tests {
     }
 
     #[test]
+    fn spatial_titlebar_shows_minimize_and_close_only() {
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::Spatial);
+
+        assert_eq!(
+            layout.buttons,
+            vec![
+                (TitlebarButton::Minimize, Rect::new(320, 0, 38, 38)),
+                (TitlebarButton::Close, Rect::new(358, 0, 38, 38)),
+            ]
+        );
+    }
+
+    #[test]
     fn a_bar_without_buttons_leaves_its_whole_width_to_the_text() {
-        let layout = TitlebarLayout::new(BAR, false);
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::None);
 
         assert!(layout.buttons.is_empty());
         assert_eq!(layout.text, Rect::new(40, 0, 352, 38));
@@ -103,21 +129,21 @@ mod tests {
 
     #[test]
     fn the_icon_is_vertically_centered_on_the_left() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::Floating);
 
         assert_eq!(layout.icon, Rect::new(12, 10, 18, 18));
     }
 
     #[test]
     fn the_text_fills_the_room_between_the_icon_and_the_buttons() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::Floating);
 
         assert_eq!(layout.text, Rect::new(40, 0, 234, 38));
     }
 
     #[test]
     fn a_narrow_bar_drops_the_leftmost_button_but_keeps_close() {
-        let layout = TitlebarLayout::new(Size::new(100, 38), true);
+        let layout = TitlebarLayout::new(Size::new(100, 38), TitlebarButtons::Floating);
 
         assert_eq!(kinds(&layout), [TitlebarButton::Close]);
         assert_eq!(layout.text.w, 10);
@@ -125,7 +151,7 @@ mod tests {
 
     #[test]
     fn a_bar_narrower_than_a_button_still_has_close() {
-        let layout = TitlebarLayout::new(Size::new(30, 38), true);
+        let layout = TitlebarLayout::new(Size::new(30, 38), TitlebarButtons::Floating);
 
         assert_eq!(kinds(&layout), [TitlebarButton::Close]);
         assert_eq!(layout.text.w, 0);
@@ -133,7 +159,7 @@ mod tests {
 
     #[test]
     fn a_point_on_a_button_finds_it() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::Floating);
 
         assert_eq!(
             layout.button_at(Point::new(377, 19)),
@@ -151,7 +177,7 @@ mod tests {
 
     #[test]
     fn a_point_on_the_title_finds_no_button() {
-        let layout = TitlebarLayout::new(BAR, true);
+        let layout = TitlebarLayout::new(BAR, TitlebarButtons::Floating);
 
         assert_eq!(layout.button_at(Point::new(100, 19)), None);
         assert_eq!(layout.button_at(Point::new(398, 19)), None);

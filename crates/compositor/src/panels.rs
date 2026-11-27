@@ -19,14 +19,21 @@ use crate::state::State;
 const BAR: &str = "coquille-dock";
 /// The launcher of the dock, which moves by itself.
 const DRAWER: &str = "coquille-drawer";
+/// The permanent spatial home panel on empty screens.
+const HOME: &str = "coquille-home";
+/// The controls popover panel.
+const CONTROLS: &str = "coquille-controls";
 
 /// How a panel comes in: from the one edge it holds on to; in place when
 /// it holds them all (the drawer, which draws a copy of the bar where the
 /// bar is); else from the side of the bar of the dock, `bar`
 /// (notifications, in a corner). A panel held by no edge grows in place.
 pub fn arrival_of(surface: &LayerSurface, bar: Option<Rect>, screen: Size) -> Arrival {
-    if surface.namespace() == DRAWER {
+    if surface.namespace() == DRAWER || surface.namespace() == HOME {
         return Arrival::Own;
+    }
+    if surface.namespace() == CONTROLS {
+        return Arrival::Fade;
     }
     let anchor = surface.cached_state().anchor;
     if anchor.is_empty() {
@@ -110,8 +117,8 @@ fn comes_over_game(output: &smithay::output::Output) -> bool {
 }
 
 /// The panels that come over a game when games hold every screen: the
-/// launcher of the dock, the password asked by polkit.
-const OVER_GAME: [&str; 2] = ["coquille-drawer", "coquille-polkit"];
+/// launcher of the dock, the controls popover, the password asked by polkit.
+const OVER_GAME: [&str; 3] = ["coquille-drawer", "coquille-controls", "coquille-polkit"];
 
 impl State {
     /// The panels shown, topmost first. A screen held by a game shows none,
@@ -165,6 +172,21 @@ impl State {
     pub fn is_anchored(&self, output: OutputId) -> bool {
         let screen = self.shell.desk.screen(output);
         screen.is_some_and(|screen| screen.anchored().is_some())
+    }
+
+    /// Finds the spatial home panel (`coquille-home`) mapped on `Layer::Bottom`
+    /// for `role`, if any.
+    pub fn home_panel_on(&self, role: OutputRole) -> Option<LayerSurface> {
+        self.outputs.iter().find_map(|screen| {
+            let info = self.shell.screen(screen.id)?;
+            if info.role != role {
+                return None;
+            }
+            let map = layer_map_for_output(&screen.output);
+            map.layers_on(Layer::Bottom)
+                .find(|surface| surface.namespace() == HOME)
+                .cloned()
+        })
     }
 
     /// The panel `surface` belongs to: its own surface, a subsurface of it.
