@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use coquille_config::{
-    Array, Change, DockPlace, PerScreen, Settings, ShellMode, Value, apply, docks_for,
-    effective_dock_place, with_value,
+    Array, Change, DockPlace, PerScreen, Settings, ShellMode, Value, apply, docks_for_mode,
+    with_value,
 };
 pub use coquille_config::{default_path, update};
 use coquille_ipc::ThemeName;
@@ -59,17 +59,25 @@ impl Config {
     }
 
     /// The screens that have a dock, and which way each lies, when these
-    /// screens are `present` (all three when none is known yet): one on
-    /// the left screen unless the file says otherwise, and always one on a
-    /// lone screen unless the file turns it off.
+    /// screens are `present` (all three when none is known yet).
+    #[cfg(test)]
     pub fn docks(&self, present: &[OutputRole]) -> Vec<(OutputRole, Orientation)> {
-        let places = docks_for(&self.places, present);
+        self.docks_in_mode(present, self.mode)
+    }
+
+    /// Like [`Self::docks`], using an explicit [`ShellMode`] (e.g. when the
+    /// compositor overrides the file via `--spatial`).
+    pub fn docks_in_mode(
+        &self,
+        present: &[OutputRole],
+        mode: ShellMode,
+    ) -> Vec<(OutputRole, Orientation)> {
+        let places = docks_for_mode(&self.places, present, mode);
         PerScreen::<()>::ROLES
             .into_iter()
             .filter(|role| present.is_empty() || present.contains(role))
             .filter_map(|role| {
-                let place = effective_dock_place(*places.get(role), self.mode);
-                let orientation = match place {
+                let orientation = match *places.get(role) {
                     DockPlace::Vertical => Orientation::Vertical(Side::Left),
                     DockPlace::VerticalRight => Orientation::Vertical(Side::Right),
                     DockPlace::Horizontal => Orientation::Horizontal,

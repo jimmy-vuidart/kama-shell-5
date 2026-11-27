@@ -11,6 +11,7 @@ mod settings;
 pub use edit::{default_path, update, with_value, without};
 pub use settings::{
     Change, DockPlace, MouseAccelProfile, PerScreen, Settings, ShellMode, TouchpadClick,
-    WallpaperDefinition, WallpaperMode, apply, assign, docks_for, effective_dock_place,
+    WallpaperDefinition, WallpaperMode, apply, assign, docks_for, docks_for_mode,
+    effective_dock_place,
 };
 pub use toml_edit::{Array, Value};

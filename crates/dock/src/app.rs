@@ -839,9 +839,15 @@ impl Dock {
     }
 
     /// The screens that have a dock, as the configuration and the screens
-    /// plugged in say: a lone screen always has one, unless turned off.
+    /// plugged in say: a lone screen always has one in classic mode, and every
+    /// screen has one by default in spatial mode, unless turned off.
     fn docks(&self) -> Vec<(OutputRole, Orientation)> {
-        self.config.docks(&self.present_screens())
+        let mode = if self.is_spatial() {
+            ShellMode::Spatial
+        } else {
+            ShellMode::Classic
+        };
+        self.config.docks_in_mode(&self.present_screens(), mode)
     }
 
     fn screen(&self, role: OutputRole) -> Option<&coquille_ipc::Screen> {

@@ -110,6 +110,27 @@ pub fn docks_for(
     said: &PerScreen<Option<DockPlace>>,
     present: &[OutputRole],
 ) -> PerScreen<DockPlace> {
+    docks_for_mode(said, present, ShellMode::Classic)
+}
+
+/// The dock of each screen, taking `mode` into account.
+///
+/// In [`ShellMode::Classic`], follows the classic default (left screen only,
+/// with a lone-screen fallback). In [`ShellMode::Spatial`], every screen
+/// defaults to a permanent vertical sidebar on its left edge unless explicitly
+/// set in `said`, and [`DockPlace::Horizontal`] falls back to
+/// [`DockPlace::Vertical`].
+pub fn docks_for_mode(
+    said: &PerScreen<Option<DockPlace>>,
+    present: &[OutputRole],
+    mode: ShellMode,
+) -> PerScreen<DockPlace> {
+    if mode == ShellMode::Spatial {
+        return PerScreen::from_roles(|role| match said.get(role) {
+            Some(place) => effective_dock_place(*place, ShellMode::Spatial),
+            None => DockPlace::Vertical,
+        });
+    }
     let mut docks = PerScreen::from_roles(|role| said.get(role).unwrap_or(DockPlace::usual(role)));
     let present: Vec<OutputRole> = if present.is_empty() {
         PerScreen::<()>::ROLES.to_vec()
@@ -453,9 +474,9 @@ impl Settings {
     }
 
     /// The dock each screen has when these screens are `present` (see
-    /// [`docks_for`]).
+    /// [`docks_for_mode`]).
     pub fn docks_on(&self, present: &[OutputRole]) -> PerScreen<DockPlace> {
-        docks_for(&self.docks, present)
+        docks_for_mode(&self.docks, present, self.mode.unwrap_or_default())
     }
 
     pub fn layout(&self, role: OutputRole) -> LayoutKind {
@@ -1346,5 +1367,24 @@ mod tests {
         for place in DockPlace::ALL {
             assert_eq!(effective_dock_place(place, ShellMode::Classic), place);
         }
+    }
+
+    #[test]
+    fn spatial_mode_places_a_vertical_sidebar_on_every_screen_by_default() {
+        let all = [OutputRole::Left, OutputRole::Center, OutputRole::Right];
+        let defaults = docks_for_mode(&PerScreen::default(), &all, ShellMode::Spatial);
+        assert_eq!(defaults.left, DockPlace::Vertical);
+        assert_eq!(defaults.center, DockPlace::Vertical);
+        assert_eq!(defaults.right, DockPlace::Vertical);
+
+        let custom = PerScreen {
+            left: Some(DockPlace::Horizontal),
+            center: Some(DockPlace::Off),
+            right: Some(DockPlace::VerticalRight),
+        };
+        let resolved = docks_for_mode(&custom, &all, ShellMode::Spatial);
+        assert_eq!(resolved.left, DockPlace::Vertical);
+        assert_eq!(resolved.center, DockPlace::Off);
+        assert_eq!(resolved.right, DockPlace::VerticalRight);
     }
 }
