@@ -90,6 +90,22 @@ impl Notice {
             .collect();
         self
     }
+
+    /// Case-insensitive match against `desktop_entry` (or its last `.`-segment) or `app`.
+    #[allow(dead_code)]
+    pub fn matches_app(&self, names: &[String]) -> bool {
+        names.iter().filter(|n| !n.is_empty()).any(|name| {
+            let matches_app = !self.app.is_empty() && self.app.eq_ignore_ascii_case(name);
+            let matches_desktop = self.desktop_entry.as_deref().is_some_and(|entry| {
+                entry.eq_ignore_ascii_case(name)
+                    || entry
+                        .rsplit('.')
+                        .next()
+                        .is_some_and(|last| !last.is_empty() && last.eq_ignore_ascii_case(name))
+            });
+            matches_app || matches_desktop
+        })
+    }
 }
 
 /// Whether a newly ingested notice should show a toast.
@@ -114,6 +130,7 @@ pub struct NotifyState {
     pub user_dnd: bool,
     next_id: u32,
     shown_at: HashMap<u32, Instant>,
+    unread: HashSet<u32>,
 }
 
 impl NotifyState {
@@ -166,6 +183,9 @@ impl NotifyState {
         }
         self.history.insert(0, notice);
         self.history.truncate(MAX_HISTORY);
+        self.unread.insert(id);
+        self.unread
+            .retain(|unread_id| self.history.iter().any(|n| n.id == *unread_id));
 
         let any_anchored = !anchored.is_empty();
         let show = !self.effective_dnd(any_anchored) && self.toast_bar(bars, anchored).is_some();
@@ -256,6 +276,7 @@ impl NotifyState {
     pub fn close(&mut self, id: u32) -> bool {
         let had = self.history.iter().any(|notice| notice.id == id);
         self.history.retain(|notice| notice.id != id);
+        self.unread.remove(&id);
         self.hide(id);
         had
     }
@@ -266,7 +287,54 @@ impl NotifyState {
         self.history.clear();
         self.visible.clear();
         self.shown_at.clear();
+        self.unread.clear();
         ids
+    }
+
+    #[allow(dead_code)]
+    pub fn is_unread(&self, id: u32) -> bool {
+        self.unread.contains(&id)
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_read(&mut self, id: u32) -> bool {
+        self.unread.remove(&id)
+    }
+
+    #[allow(dead_code)]
+    pub fn unread_count(&self) -> usize {
+        self.unread.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn visible_unread_count(&self, any_anchored: bool) -> usize {
+        if self.effective_dnd(any_anchored) {
+            0
+        } else {
+            self.unread.len()
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_app_read(&mut self, names: &[String]) -> usize {
+        let mut changed = 0;
+        for notice in &self.history {
+            if notice.matches_app(names) && self.unread.remove(&notice.id) {
+                changed += 1;
+            }
+        }
+        changed
+    }
+
+    #[allow(dead_code)]
+    pub fn unread_for_app(&self, names: &[String], any_anchored: bool) -> usize {
+        if self.effective_dnd(any_anchored) {
+            return 0;
+        }
+        self.history
+            .iter()
+            .filter(|notice| self.is_unread(notice.id) && notice.matches_app(names))
+            .count()
     }
 
     pub fn notice(&self, id: u32) -> Option<&Notice> {
@@ -1045,5 +1113,79 @@ mod tests {
             "j'arrive — ok"
         );
         assert_eq!(plain_text(&sanitize_markup("l'appli")), "l'appli");
+    }
+
+    #[test]
+    fn unread_tracking_tracks_ingest_read_close_and_clear() {
+        let mut state = NotifyState::new();
+        let bars = left_bar();
+        state.ingest(notice(10, "first"), &bars, &[]);
+        state.ingest(notice(11, "second"), &bars, &[]);
+
+        assert!(state.is_unread(10));
+        assert!(state.is_unread(11));
+        assert_eq!(state.unread_count(), 2);
+        assert_eq!(state.visible_unread_count(false), 2);
+        assert_eq!(state.visible_unread_count(true), 0);
+
+        assert!(state.mark_read(10));
+        assert!(!state.mark_read(10));
+        assert!(!state.is_unread(10));
+        assert_eq!(state.unread_count(), 1);
+
+        // Replacing a read notice marks it unread again.
+        state.ingest(notice(10, "first updated"), &bars, &[]);
+        assert!(state.is_unread(10));
+        assert_eq!(state.unread_count(), 2);
+
+        // Closing removes from unread.
+        assert!(state.close(10));
+        assert!(!state.is_unread(10));
+        assert_eq!(state.unread_count(), 1);
+
+        // DND suppresses visible_unread_count.
+        state.user_dnd = true;
+        assert_eq!(state.unread_count(), 1);
+        assert_eq!(state.visible_unread_count(false), 0);
+        state.user_dnd = false;
+
+        // Clear empties unread.
+        state.clear();
+        assert_eq!(state.unread_count(), 0);
+        assert!(!state.is_unread(11));
+    }
+
+    #[test]
+    fn unread_for_app_and_mark_app_read_match_case_insensitively() {
+        let mut state = NotifyState::new();
+        let bars = left_bar();
+
+        let mut discord = notice(1, "msg");
+        discord.app = "Discord".into();
+        discord.desktop_entry = Some("com.discordapp.Discord".into());
+
+        let mut firefox = notice(2, "dl");
+        firefox.app = "Firefox".into();
+        firefox.desktop_entry = Some("org.mozilla.firefox".into());
+
+        let mut discord2 = notice(3, "ping");
+        discord2.app = "discord".into();
+
+        state.ingest(discord, &bars, &[]);
+        state.ingest(firefox, &bars, &[]);
+        state.ingest(discord2, &bars, &[]);
+
+        let discord_names = vec!["discord".to_owned()];
+        let firefox_names = vec!["firefox".to_owned()];
+
+        assert_eq!(state.unread_for_app(&discord_names, false), 2);
+        assert_eq!(state.unread_for_app(&discord_names, true), 0);
+        assert_eq!(state.unread_for_app(&firefox_names, false), 1);
+
+        assert_eq!(state.mark_app_read(&discord_names), 2);
+        assert_eq!(state.mark_app_read(&discord_names), 0);
+        assert_eq!(state.unread_for_app(&discord_names, false), 0);
+        assert_eq!(state.unread_for_app(&firefox_names, false), 1);
+        assert_eq!(state.unread_count(), 1);
     }
 }

@@ -162,6 +162,87 @@ pub fn left_click(entry: &Entry) -> Click {
     }
 }
 
+/// The mark of an application in spatial mode.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpatialIndicator {
+    None,
+    /// Active maximized window on this screen (and launcher is not covering it).
+    ActiveHere,
+    /// Open on this screen, but behind another window or minimized.
+    Here,
+    /// Open only on other screens (hollow ring).
+    Elsewhere,
+}
+
+/// What a left click on an application does in spatial mode.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpatialClick {
+    Launch,
+    /// Bring an inactive or minimized window on THIS screen to the front.
+    Activate(u64),
+    /// Teleport a window currently on ANOTHER screen to THIS screen.
+    Teleport(u64),
+    /// Clicked the already-active window on this screen: toggle spatial launcher overlay.
+    ToggleLauncher,
+}
+
+/// Computes the spatial indicator for an entry on `here`.
+#[allow(dead_code)]
+pub fn spatial_indicator(
+    entry: &Entry,
+    here: OutputRole,
+    launcher_visible: bool,
+) -> SpatialIndicator {
+    if entry.windows.is_empty() {
+        return SpatialIndicator::None;
+    }
+    let has_here = entry.windows.iter().any(|window| window.screen == here);
+    if !has_here {
+        return SpatialIndicator::Elsewhere;
+    }
+    let active_here = !launcher_visible
+        && entry
+            .windows
+            .iter()
+            .any(|window| window.screen == here && window.active && !window.minimized);
+    if active_here {
+        SpatialIndicator::ActiveHere
+    } else {
+        SpatialIndicator::Here
+    }
+}
+
+/// Computes the spatial left-click action for an entry on `here`.
+#[allow(dead_code)]
+pub fn spatial_left_click(entry: &Entry, here: OutputRole, launcher_visible: bool) -> SpatialClick {
+    let Some(latest) = entry.windows.first() else {
+        return SpatialClick::Launch;
+    };
+    let latest_visible_here = entry
+        .windows
+        .iter()
+        .find(|window| window.screen == here && !window.minimized);
+    if let Some(active) = latest_visible_here.filter(|window| window.active && !launcher_visible) {
+        if let Some(other) = entry
+            .windows
+            .iter()
+            .rev()
+            .find(|window| window.screen == here && window.id != active.id)
+        {
+            return SpatialClick::Activate(other.id);
+        }
+        return SpatialClick::ToggleLauncher;
+    }
+    if let Some(local) =
+        latest_visible_here.or_else(|| entry.windows.iter().find(|window| window.screen == here))
+    {
+        return SpatialClick::Activate(local.id);
+    }
+    SpatialClick::Teleport(latest.id)
+}
+
 /// The screen the launcher opens on when its shortcut is pressed: the one
 /// the pointer is on if it has a dock, else the first screen that has one.
 /// `docks` gives each screen with a dock, and whether a game holds it: no
@@ -771,5 +852,107 @@ mod tests {
         unpin(&mut favorites, &entries[0], &identity);
 
         assert_eq!(favorites, ["kitty"]);
+    }
+
+    #[test]
+    fn spatial_indicator_distinguishes_none_active_here_and_elsewhere() {
+        let closed = bar(&["kitty"], &[]);
+        assert_eq!(
+            spatial_indicator(&closed[0], HERE, false),
+            SpatialIndicator::None
+        );
+
+        let elsewhere = bar(&["kitty"], &[window(1, "kitty", OutputRole::Right)]);
+        assert_eq!(
+            spatial_indicator(&elsewhere[0], HERE, false),
+            SpatialIndicator::Elsewhere
+        );
+
+        let mut active = window(1, "kitty", HERE);
+        active.active = true;
+        let active_here = bar(&["kitty"], &[active.clone()]);
+        assert_eq!(
+            spatial_indicator(&active_here[0], HERE, false),
+            SpatialIndicator::ActiveHere
+        );
+        assert_eq!(
+            spatial_indicator(&active_here[0], HERE, true),
+            SpatialIndicator::Here
+        );
+
+        let mut minimized = active;
+        minimized.minimized = true;
+        let min_here = bar(&["kitty"], &[minimized]);
+        assert_eq!(
+            spatial_indicator(&min_here[0], HERE, false),
+            SpatialIndicator::Here
+        );
+
+        let inactive_here = bar(&["kitty"], &[window(2, "kitty", HERE)]);
+        assert_eq!(
+            spatial_indicator(&inactive_here[0], HERE, false),
+            SpatialIndicator::Here
+        );
+    }
+
+    #[test]
+    fn spatial_left_click_covers_launch_activate_cycle_toggle_and_teleport() {
+        let closed = bar(&["kitty"], &[]);
+        assert_eq!(
+            spatial_left_click(&closed[0], HERE, false),
+            SpatialClick::Launch
+        );
+
+        let elsewhere = bar(&["kitty"], &[window(10, "kitty", OutputRole::Right)]);
+        assert_eq!(
+            spatial_left_click(&elsewhere[0], HERE, false),
+            SpatialClick::Teleport(10)
+        );
+
+        let inactive_here = bar(
+            &["kitty"],
+            &[
+                window(5, "kitty", HERE),
+                window(6, "kitty", OutputRole::Right),
+            ],
+        );
+        assert_eq!(
+            spatial_left_click(&inactive_here[0], HERE, false),
+            SpatialClick::Activate(5)
+        );
+
+        let mut minimized = window(7, "kitty", HERE);
+        minimized.minimized = true;
+        minimized.active = true;
+        let min_entry = bar(&["kitty"], &[minimized]);
+        assert_eq!(
+            spatial_left_click(&min_entry[0], HERE, false),
+            SpatialClick::Activate(7)
+        );
+
+        let mut active = window(8, "kitty", HERE);
+        active.active = true;
+        let single_active = bar(&["kitty"], &[active.clone()]);
+        assert_eq!(
+            spatial_left_click(&single_active[0], HERE, false),
+            SpatialClick::ToggleLauncher
+        );
+        assert_eq!(
+            spatial_left_click(&single_active[0], HERE, true),
+            SpatialClick::Activate(8)
+        );
+
+        let multi_active = bar(
+            &["kitty"],
+            &[
+                active,
+                window(9, "kitty", HERE),
+                window(11, "kitty", OutputRole::Right),
+            ],
+        );
+        assert_eq!(
+            spatial_left_click(&multi_active[0], HERE, false),
+            SpatialClick::Activate(9)
+        );
     }
 }

@@ -7,7 +7,11 @@ pub mod drawer;
 pub mod mixer;
 pub mod motion;
 pub mod notify;
+#[allow(dead_code)]
+pub mod spatial;
 pub mod tray;
+#[allow(dead_code)]
+pub mod widgets;
 
 use crate::steam::Game;
 

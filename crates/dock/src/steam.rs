@@ -1,5 +1,6 @@
 //! The games installed with Steam, read from its library folders.
 
+use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
@@ -194,6 +195,199 @@ pub fn pick_cover(files: &[PathBuf]) -> Option<PathBuf> {
     wanted.iter().find_map(|name| named(name)).cloned()
 }
 
+/// Parses playtime in minutes per Steam app ID from `localconfig.vdf`.
+#[allow(dead_code)]
+pub fn parse_playtimes(vdf: &str) -> HashMap<u64, u32> {
+    let mut playtimes = HashMap::new();
+    let tokens = vdf_tokens(vdf);
+    let mut depth: usize = 0;
+    let mut apps_depth: Option<usize> = None;
+    let mut current_app: Option<u64> = None;
+    let mut i = 0;
+
+    while i < tokens.len() {
+        match &tokens[i] {
+            VdfToken::Open => {
+                depth += 1;
+                i += 1;
+            }
+            VdfToken::Close => {
+                if apps_depth == Some(depth) {
+                    apps_depth = None;
+                    current_app = None;
+                } else if apps_depth.is_some_and(|ad| depth == ad + 1) {
+                    current_app = None;
+                }
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            VdfToken::Text(key) => {
+                let next = tokens.get(i + 1);
+                match next {
+                    Some(VdfToken::Open) => {
+                        if key.eq_ignore_ascii_case("apps") && apps_depth.is_none() {
+                            apps_depth = Some(depth + 1);
+                        } else if apps_depth == Some(depth) {
+                            current_app = key.parse::<u64>().ok();
+                        }
+                        depth += 1;
+                        i += 2;
+                    }
+                    Some(VdfToken::Text(value)) => {
+                        if let (Some(ad), Some(app_id)) = (apps_depth, current_app)
+                            && depth == ad + 1
+                            && (key.eq_ignore_ascii_case("Playtime")
+                                || key.eq_ignore_ascii_case("PlaytimeForever"))
+                            && let Ok(mins) = value.parse::<u32>()
+                        {
+                            playtimes
+                                .entry(app_id)
+                                .and_modify(|existing: &mut u32| *existing = (*existing).max(mins))
+                                .or_insert(mins);
+                        }
+                        i += 2;
+                    }
+                    _ => {
+                        i += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    playtimes
+}
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq)]
+enum VdfToken {
+    Open,
+    Close,
+    Text(String),
+}
+
+#[allow(dead_code)]
+fn vdf_tokens(input: &str) -> Vec<VdfToken> {
+    let mut tokens = Vec::new();
+    let mut chars = input.char_indices().peekable();
+
+    while let Some(&(idx, ch)) = chars.peek() {
+        match ch {
+            c if c.is_whitespace() => {
+                chars.next();
+            }
+            '/' if input[idx..].starts_with("//") => {
+                while let Some(&(_, c)) = chars.peek() {
+                    chars.next();
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            }
+            '{' => {
+                tokens.push(VdfToken::Open);
+                chars.next();
+            }
+            '}' => {
+                tokens.push(VdfToken::Close);
+                chars.next();
+            }
+            '"' => {
+                chars.next();
+                let mut text = String::new();
+                while let Some((_, c)) = chars.next() {
+                    if c == '"' {
+                        break;
+                    }
+                    if c == '\\'
+                        && let Some((_, escaped)) = chars.next()
+                    {
+                        text.push(escaped);
+                        continue;
+                    }
+                    text.push(c);
+                }
+                tokens.push(VdfToken::Text(text));
+            }
+            _ => {
+                let mut text = String::new();
+                while let Some(&(_, c)) = chars.peek() {
+                    if c.is_whitespace() || c == '{' || c == '}' || c == '"' {
+                        break;
+                    }
+                    text.push(c);
+                    chars.next();
+                }
+                if !text.is_empty() {
+                    tokens.push(VdfToken::Text(text));
+                }
+            }
+        }
+    }
+
+    tokens
+}
+
+/// Scans `<steam_root>/userdata/*/config/localconfig.vdf` and merges max playtime per app ID.
+#[allow(dead_code)]
+pub fn load_playtimes() -> HashMap<u64, u32> {
+    let mut out = HashMap::new();
+    let Some(root) = steam_root() else {
+        return out;
+    };
+    let Ok(users) = std::fs::read_dir(root.join("userdata")) else {
+        return out;
+    };
+    for entry in users.flatten() {
+        let path = entry.path().join("config/localconfig.vdf");
+        if let Ok(content) = std::fs::read_to_string(path) {
+            for (id, mins) in parse_playtimes(&content) {
+                out.entry(id)
+                    .and_modify(|existing: &mut u32| *existing = (*existing).max(mins))
+                    .or_insert(mins);
+            }
+        }
+    }
+    out
+}
+
+/// Formats a French pill for a game's last-played date and total playtime.
+#[allow(dead_code)]
+pub fn format_last_played(last_played: u64, playtime_mins: u32, now_secs: i64) -> String {
+    let day_part = if last_played > 0 {
+        let diff_secs = now_secs.saturating_sub(last_played as i64).max(0);
+        let days = diff_secs / 86_400;
+        let label = if days == 0 {
+            "Aujourd'hui".to_owned()
+        } else if days == 1 {
+            "Hier".to_owned()
+        } else if days < 30 {
+            format!("Il y a {days} j")
+        } else {
+            let months = days / 30;
+            format!("Il y a {months} mois")
+        };
+        Some(label)
+    } else {
+        None
+    };
+
+    let time_part = if playtime_mins >= 60 {
+        Some(format!("{} h", playtime_mins / 60))
+    } else if playtime_mins > 0 {
+        Some(format!("{playtime_mins} min"))
+    } else {
+        None
+    };
+
+    match (day_part, time_part) {
+        (Some(d), Some(t)) => format!("{d} · {t}"),
+        (Some(d), None) => d,
+        (None, Some(t)) => t,
+        (None, None) => "Installé".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +502,74 @@ mod tests {
 
         let names: Vec<&str> = games.iter().map(|game| game.name.as_str()).collect();
         assert_eq!(names, ["No Man's Sky", "Factorio", "anno", "Zelda"]);
+    }
+
+    #[test]
+    fn parse_playtimes_extracts_playtime_and_ignores_malformed_sections() {
+        let vdf = r#"
+"UserLocalConfigStore"
+{
+    "Software"
+    {
+        "Valve"
+        {
+            "Steam"
+            {
+                "apps"
+                {
+                    "427520"
+                    {
+                        "Playtime"		"8520"
+                        "LastPlayed"	"1732600000"
+                        "nested"
+                        {
+                            "Playtime"	"999999"
+                        }
+                    }
+                    "1284210"
+                    {
+                        "PlaytimeForever"	"45"
+                    }
+                    "not_an_id"
+                    {
+                        "Playtime"	"100"
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+        let map = parse_playtimes(vdf);
+        assert_eq!(map.get(&427_520), Some(&8520));
+        assert_eq!(map.get(&1_284_210), Some(&45));
+        assert_eq!(map.len(), 2);
+
+        assert!(parse_playtimes("").is_empty());
+        assert!(parse_playtimes("\"apps\" { \"123\" { \"Playtime\" \"bad\" }").is_empty());
+    }
+
+    #[test]
+    fn format_last_played_formats_french_pills() {
+        let now = 1_732_700_000i64;
+        assert_eq!(format_last_played(0, 0, now), "Installé");
+        assert_eq!(format_last_played(0, 45, now), "45 min");
+        assert_eq!(format_last_played(0, 120, now), "2 h");
+        assert_eq!(
+            format_last_played((now - 3_600) as u64, 90, now),
+            "Aujourd'hui · 1 h"
+        );
+        assert_eq!(
+            format_last_played((now - 90_000) as u64, 8_520, now),
+            "Hier · 142 h"
+        );
+        assert_eq!(
+            format_last_played((now - 5 * 86_400) as u64, 0, now),
+            "Il y a 5 j"
+        );
+        assert_eq!(
+            format_last_played((now - 65 * 86_400) as u64, 30, now),
+            "Il y a 2 mois · 30 min"
+        );
     }
 }
