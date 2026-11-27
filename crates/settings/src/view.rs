@@ -2,8 +2,8 @@
 //! the chosen one on the right, each in a card.
 
 use coquille_config::{
-    Change, DockPlace, MouseAccelProfile, PerScreen, TouchpadClick, WallpaperDefinition,
-    WallpaperMode,
+    Change, DockPlace, MouseAccelProfile, PerScreen, ShellMode, TouchpadClick, WallpaperDefinition,
+    WallpaperMode, effective_dock_place,
 };
 use coquille_ipc::ThemeName;
 use coquille_model::{LayoutKind, OutputRole};
@@ -502,9 +502,33 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
     let choices = model::connector_choices(&app.file, snapshot);
     let simulated = snapshot.is_some_and(|snapshot| snapshot.simulated);
     let shown = model::shown_roles(snapshot);
+    let mode = app.file.shell_mode();
+    let spatial = mode == ShellMode::Spatial;
+
+    let modes = [
+        (ShellMode::Classic, ShellMode::Classic.label()),
+        (ShellMode::Spatial, ShellMode::Spatial.label()),
+    ];
+    let mode_choice = segmented(
+        &modes,
+        mode,
+        |mode| Message::Change(Change::ShellMode(mode)),
+        palette,
+    );
+    let mode_card = card(
+        vec![setting(
+            "Mode du bureau",
+            "Classique : colonnes et dock flottant. Spatial : fenêtres maximisées, barre latérale \
+             56 px et lanceur spatial permanent.",
+            Some("Au prochain démarrage"),
+            mode_choice,
+            palette,
+        )],
+        palette,
+    );
 
     let mut content: Column<'_, Message> =
-        column![drawing(app, &cards, &shown, palette)].spacing(18);
+        column![mode_card, drawing(app, &cards, &shown, palette)].spacing(18);
     for &role in &shown {
         let screen = cards.get(role);
         let connector: Element<'a, Message> = if simulated {
@@ -519,25 +543,41 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             let pick = move |choice| Message::Connector(role, choice);
             picker(choices.clone(), chosen, pick, 180.0, palette)
         };
-        let places = [
-            (DockPlace::Vertical, "À gauche"),
-            (DockPlace::VerticalRight, "À droite"),
-            (DockPlace::Horizontal, "En bas"),
-            (DockPlace::Off, "Aucun"),
-        ];
-        let dock = segmented(
-            &places,
-            *app.file.docks_on(&shown).get(role),
-            move |place| Message::Change(Change::Dock(role, place)),
-            palette,
-        );
-        let layouts = LayoutKind::ALL.map(|kind| (kind, kind.label()));
-        let layout = segmented(
-            &layouts,
-            app.file.layout(role),
-            move |kind| Message::Change(Change::Layout(role, kind)),
-            palette,
-        );
+        let raw_dock = *app.file.docks_on(&shown).get(role);
+        let (dock, dock_detail) = if spatial {
+            let places = [
+                (DockPlace::Vertical, "À gauche"),
+                (DockPlace::VerticalRight, "À droite"),
+                (DockPlace::Off, "Aucun"),
+            ];
+            let control = segmented(
+                &places,
+                effective_dock_place(raw_dock, ShellMode::Spatial),
+                move |place| Message::Change(Change::Dock(role, place)),
+                palette,
+            );
+            (
+                control,
+                "Une barre verticale permanente de 56 px sur le bord gauche ou droit.",
+            )
+        } else {
+            let places = [
+                (DockPlace::Vertical, "À gauche"),
+                (DockPlace::VerticalRight, "À droite"),
+                (DockPlace::Horizontal, "En bas"),
+                (DockPlace::Off, "Aucun"),
+            ];
+            let control = segmented(
+                &places,
+                raw_dock,
+                move |place| Message::Change(Change::Dock(role, place)),
+                palette,
+            );
+            (
+                control,
+                "Une colonne sur le bord gauche ou droit, ou une rangée sur le bord bas.",
+            )
+        };
         let scale = picker(
             model::scale_choices(),
             model::scale_choice(app.file.scale(role)),
@@ -545,7 +585,7 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
             120.0,
             palette,
         );
-        let rows = vec![
+        let mut rows = vec![
             setting(
                 "Mise à l'échelle",
                 "La taille de tout ce qui s'affiche. Les applis X11 la prennent au prochain démarrage.",
@@ -560,21 +600,24 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
                 connector,
                 palette,
             ),
-            setting(
+        ];
+        if !spatial {
+            let layouts = LayoutKind::ALL.map(|kind| (kind, kind.label()));
+            let layout = segmented(
+                &layouts,
+                app.file.layout(role),
+                move |kind| Message::Change(Change::Layout(role, kind)),
+                palette,
+            );
+            rows.push(setting(
                 "Disposition",
                 "Combien de colonnes les fenêtres rangées se partagent au plus.",
                 None,
                 layout,
                 palette,
-            ),
-            setting(
-                "Dock",
-                "Une colonne sur le bord gauche ou droit, ou une rangée sur le bord bas.",
-                None,
-                dock,
-                palette,
-            ),
-        ];
+            ));
+        }
+        rows.push(setting("Dock", dock_detail, None, dock, palette));
         let title = row![
             text(model::screen_title(role, shown.len()))
                 .size(14)
@@ -587,37 +630,39 @@ fn screens<'a>(app: &'a App, palette: Palette) -> Element<'a, Message> {
         content = content.push(column![title, card(rows, palette)].spacing(8));
     }
 
-    let icon_size = row![
-        slider(
-            model::DOCK_ICON_SIZE_RANGE,
-            app.dock_icon_size,
-            Message::DockIconSize,
-        )
-        .step(model::DOCK_ICON_SIZE_STEP)
-        .on_release(Message::DockIconSizeReleased)
-        .width(200)
-        .style(move |_, _| slider_style(palette)),
-        text(format!("{} px", app.dock_icon_size))
-            .size(13)
-            .font(style::MEDIUM)
-            .color(palette.text)
-            .width(52)
-            .align_x(Alignment::End),
-    ]
-    .spacing(10)
-    .align_y(Alignment::Center);
-    let dock_settings = vec![setting(
-        "Taille des icônes",
-        "La taille des icônes dans la barre du dock (en pixels).",
-        None,
-        icon_size,
-        palette,
-    )];
-    let dock_title = text("Dock")
-        .size(14)
-        .font(style::SEMIBOLD)
-        .color(palette.text);
-    content = content.push(column![dock_title, card(dock_settings, palette)].spacing(8));
+    if !spatial {
+        let icon_size = row![
+            slider(
+                model::DOCK_ICON_SIZE_RANGE,
+                app.dock_icon_size,
+                Message::DockIconSize,
+            )
+            .step(model::DOCK_ICON_SIZE_STEP)
+            .on_release(Message::DockIconSizeReleased)
+            .width(200)
+            .style(move |_, _| slider_style(palette)),
+            text(format!("{} px", app.dock_icon_size))
+                .size(13)
+                .font(style::MEDIUM)
+                .color(palette.text)
+                .width(52)
+                .align_x(Alignment::End),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+        let dock_settings = vec![setting(
+            "Taille des icônes",
+            "La taille des icônes dans la barre du dock (en pixels).",
+            None,
+            icon_size,
+            palette,
+        )];
+        let dock_title = text("Dock")
+            .size(14)
+            .font(style::SEMIBOLD)
+            .color(palette.text);
+        content = content.push(column![dock_title, card(dock_settings, palette)].spacing(8));
+    }
 
     content.into()
 }
@@ -630,6 +675,7 @@ fn drawing<'a>(
     shown: &[OutputRole],
     palette: Palette,
 ) -> Element<'a, Message> {
+    let mode = app.file.shell_mode();
     let sizes = model::drawing(cards, shown, DRAWING);
     let mut line: Row<'_, Message> = row![].spacing(8).align_y(Alignment::Start);
     for &role in shown {
@@ -642,21 +688,27 @@ fn drawing<'a>(
         };
         let name = container(text(name).size(12).font(style::MEDIUM).color(palette.muted))
             .center(Length::Fill);
-        let label = stack![columns(app.file.layout(role), palette), name];
+        let layout = if mode == ShellMode::Spatial {
+            LayoutKind::Full
+        } else {
+            app.file.layout(role)
+        };
+        let label = stack![columns(layout, palette), name];
         let dock = |width: Length, height: Length| {
             container(space().width(width).height(height))
                 .style(move |_| style::fill(palette.accent, 2.0))
         };
-        let inside: Element<'a, Message> = match *app.file.docks_on(shown).get(role) {
-            DockPlace::Vertical => row![dock(4.0.into(), Length::Fill), label].into(),
-            DockPlace::VerticalRight => row![label, dock(4.0.into(), Length::Fill)].into(),
-            DockPlace::Horizontal => {
-                let lying =
-                    container(dock((width * 0.45).into(), 4.0.into())).center_x(Length::Fill);
-                column![label, lying].into()
-            }
-            DockPlace::Off => label.into(),
-        };
+        let inside: Element<'a, Message> =
+            match effective_dock_place(*app.file.docks_on(shown).get(role), mode) {
+                DockPlace::Vertical => row![dock(4.0.into(), Length::Fill), label].into(),
+                DockPlace::VerticalRight => row![label, dock(4.0.into(), Length::Fill)].into(),
+                DockPlace::Horizontal => {
+                    let lying =
+                        container(dock((width * 0.45).into(), 4.0.into())).center_x(Length::Fill);
+                    column![label, lying].into()
+                }
+                DockPlace::Off => label.into(),
+            };
         let screen = container(inside)
             .width(width)
             .height(height)

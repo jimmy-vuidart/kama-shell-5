@@ -47,6 +47,9 @@ pub enum Glyph {
     Bell,
     /// The password asked by polkit.
     Lock,
+    Wifi,
+    Speakers,
+    Edit,
 }
 
 impl Glyph {
@@ -134,6 +137,15 @@ impl Glyph {
             Self::Lock => {
                 r#"<rect x="4.5" y="10.5" width="15" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/>"#
             }
+            Self::Wifi => {
+                r#"<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="19.5" r="1" fill="black" stroke="none"/>"#
+            }
+            Self::Speakers => {
+                r#"<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6"/>"#
+            }
+            Self::Edit => {
+                r#"<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>"#
+            }
         }
     }
 
@@ -198,6 +210,9 @@ mod tests {
             Glyph::BatteryCharging,
             Glyph::Bell,
             Glyph::Lock,
+            Glyph::Wifi,
+            Glyph::Speakers,
+            Glyph::Edit,
         ];
         for glyph in glyphs {
             let shapes = glyph.shapes();

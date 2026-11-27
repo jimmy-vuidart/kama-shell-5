@@ -22,6 +22,11 @@
 # passent par XWayland, démarré avec le compositeur. `false` s'en passe.
 # xwayland = true
 
+# Mode de bureau (pris en compte au prochain démarrage) : "classic" (colonnes
+# et dock flottant) ou "spatial" (fenêtres systématiquement maximisées, barre
+# latérale verticale de 56 px et lanceur spatial permanent).
+# mode = "classic"
+
 # Quel connecteur est quel écran. Sans cette section, l'écran le plus large
 # est le centre et les deux autres sont pris dans l'ordre des connecteurs.
 [outputs]

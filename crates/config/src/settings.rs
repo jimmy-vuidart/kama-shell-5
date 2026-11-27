@@ -231,6 +231,47 @@ impl WallpaperDefinition {
     }
 }
 
+/// Which shell experience coquille runs: classic columns + floating dock,
+/// or spatial maximized windows + permanent vertical sidebar + spatial launcher.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ShellMode {
+    #[default]
+    Classic,
+    Spatial,
+}
+
+impl ShellMode {
+    pub const ALL: [Self; 2] = [Self::Classic, Self::Spatial];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Spatial => "spatial",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.name() == name)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "Classique",
+            Self::Spatial => "Spatial",
+        }
+    }
+}
+
+/// Effective dock placement for a given shell mode: in Spatial mode, a
+/// horizontal bottom dock gracefully maps to a left vertical sidebar
+/// without modifying the user's configuration file.
+pub fn effective_dock_place(place: DockPlace, mode: ShellMode) -> DockPlace {
+    match (mode, place) {
+        (ShellMode::Spatial, DockPlace::Horizontal) => DockPlace::Vertical,
+        (_, place) => place,
+    }
+}
+
 /// What the file says. `None` is a setting left to its default.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
@@ -239,6 +280,7 @@ pub struct Settings {
     pub accent: Option<String>,
     pub terminal: Option<String>,
     pub xwayland: Option<bool>,
+    pub mode: Option<ShellMode>,
     /// The connector of each screen.
     pub outputs: PerScreen<Option<String>>,
     pub keyboard_layout: Option<String>,
@@ -326,6 +368,7 @@ impl Settings {
             accent: text_of(&["accent"]).filter(|accent| is_color(accent)),
             terminal: name_of(&["terminal"]),
             xwayland: switch(&["xwayland"]),
+            mode: text_of(&["mode"]).as_deref().and_then(ShellMode::named),
             outputs: PerScreen::from_roles(|role| name_of(&["outputs", role_name(role)])),
             keyboard_layout: name_of(&["keyboard", "layout"]),
             keyboard_variant: name_of(&["keyboard", "variant"]),
@@ -382,6 +425,10 @@ impl Settings {
 
     pub fn xwayland(&self) -> bool {
         self.xwayland.unwrap_or(true)
+    }
+
+    pub fn shell_mode(&self) -> ShellMode {
+        self.mode.unwrap_or_default()
     }
 
     pub fn sticky_edges_ms(&self) -> u64 {
@@ -512,6 +559,7 @@ pub enum Change {
     /// `None` goes back to the first terminal found.
     Terminal(Option<String>),
     Xwayland(bool),
+    ShellMode(ShellMode),
     /// The connector of each screen.
     Outputs(PerScreen<Option<String>>),
     /// `None` goes back to the layout of the system.
@@ -578,6 +626,7 @@ pub fn apply(text: &str, change: &Change) -> Option<String> {
         }
         Change::Terminal(terminal) => text_or_nothing(text, &["terminal"], terminal),
         Change::Xwayland(on) => with_value(text, &["xwayland"], (*on).into()),
+        Change::ShellMode(mode) => with_value(text, &["mode"], mode.name().into()),
         Change::Outputs(outputs) => {
             let mut text = text.to_owned();
             for role in PerScreen::<()>::ROLES {
@@ -809,6 +858,7 @@ mod tests {
             Change::Accent(Some("#ff8800".into())),
             Change::Terminal(Some("foot".into())),
             Change::Xwayland(false),
+            Change::ShellMode(ShellMode::Spatial),
             Change::Outputs(screens("DP-1", "DP-2", "HDMI-A-1")),
             Change::Keyboard {
                 layout: Some("fr".into()),
@@ -854,6 +904,7 @@ mod tests {
             accent: Some("#ff8800".into()),
             terminal: Some("foot".into()),
             xwayland: Some(false),
+            mode: Some(ShellMode::Spatial),
             outputs: screens("DP-1", "DP-2", "HDMI-A-1"),
             keyboard_layout: Some("fr".into()),
             keyboard_variant: Some("bepo".into()),
@@ -1231,5 +1282,69 @@ mod tests {
         .unwrap();
         let settings = Settings::parse(&text);
         assert!(!settings.is_audio_sink_visible("alsa_output.speaker"));
+    }
+
+    #[test]
+    fn shell_mode_defaults_to_classic_and_parses_values() {
+        let empty = Settings::parse("");
+        assert_eq!(empty.mode, None);
+        assert_eq!(empty.shell_mode(), ShellMode::Classic);
+
+        let spatial = Settings::parse("mode = \"spatial\"\n");
+        assert_eq!(spatial.mode, Some(ShellMode::Spatial));
+        assert_eq!(spatial.shell_mode(), ShellMode::Spatial);
+
+        let classic = Settings::parse("mode = \"classic\"\n");
+        assert_eq!(classic.mode, Some(ShellMode::Classic));
+        assert_eq!(classic.shell_mode(), ShellMode::Classic);
+
+        let unknown = Settings::parse("mode = \"floating\"\n");
+        assert_eq!(unknown.mode, None);
+        assert_eq!(unknown.shell_mode(), ShellMode::Classic);
+    }
+
+    #[test]
+    fn shell_mode_apply_writes_before_outputs_and_preserves_comments() {
+        let text = "# Header comment\n\n[outputs]\nleft = \"HDMI-A-1\"\n";
+        let changed = apply(text, &Change::ShellMode(ShellMode::Spatial)).unwrap();
+        let mode_pos = changed.find("mode = \"spatial\"").unwrap();
+        let outputs_pos = changed.find("[outputs]").unwrap();
+        assert!(mode_pos < outputs_pos);
+        assert!(changed.contains("# Header comment"));
+        assert_eq!(Settings::parse(&changed).shell_mode(), ShellMode::Spatial);
+
+        let sample_changed = apply(SAMPLE, &Change::ShellMode(ShellMode::Spatial)).unwrap();
+        let sample_mode_pos = sample_changed.find("mode = \"spatial\"").unwrap();
+        let sample_outputs_pos = sample_changed.find("\n[outputs]").unwrap();
+        assert!(sample_mode_pos < sample_outputs_pos);
+        assert!(sample_changed.contains("# Mode de bureau"));
+        assert_eq!(
+            Settings::parse(&sample_changed).shell_mode(),
+            ShellMode::Spatial
+        );
+    }
+
+    #[test]
+    fn effective_dock_place_maps_horizontal_in_spatial_mode() {
+        assert_eq!(
+            effective_dock_place(DockPlace::Horizontal, ShellMode::Spatial),
+            DockPlace::Vertical
+        );
+        assert_eq!(
+            effective_dock_place(DockPlace::Vertical, ShellMode::Spatial),
+            DockPlace::Vertical
+        );
+        assert_eq!(
+            effective_dock_place(DockPlace::VerticalRight, ShellMode::Spatial),
+            DockPlace::VerticalRight
+        );
+        assert_eq!(
+            effective_dock_place(DockPlace::Off, ShellMode::Spatial),
+            DockPlace::Off
+        );
+
+        for place in DockPlace::ALL {
+            assert_eq!(effective_dock_place(place, ShellMode::Classic), place);
+        }
     }
 }
