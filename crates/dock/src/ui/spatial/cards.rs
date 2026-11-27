@@ -143,13 +143,17 @@ fn glass_card<'a>(
         .size(12)
         .font(style::SEMIBOLD)
         .color(palette.muted);
-    let meta_label = text(meta)
-        .size(11.5)
-        .font(style::MEDIUM)
-        .color(palette.muted);
-    let mut header = row![dot, title_label, space().width(Length::Fill), meta_label]
+    let mut header = row![dot, title_label, space().width(Length::Fill)]
         .spacing(8)
         .align_y(Alignment::Center);
+    if !meta.is_empty() {
+        header = header.push(
+            text(meta)
+                .size(11.5)
+                .font(style::MEDIUM)
+                .color(palette.muted),
+        );
+    }
     if let Some(pager) = pager {
         header = header.push(pager);
     }
@@ -512,7 +516,7 @@ pub fn games_card<'a>(
     let body = grid(cells, columns, 8.0);
     glass_card(
         "JEUX",
-        "Clic sur le commentaire pour éditer".to_owned(),
+        String::new(),
         card_pager(CardKind::Games, page, pages, palette),
         body,
         fill_height,
