@@ -87,6 +87,8 @@ pub struct Drag {
 /// The layer-shell names of the bars and of the notifications.
 const BAR_NAMESPACE: &str = "coquille-dock";
 const TOASTS_NAMESPACE: &str = "coquille-toasts";
+const HOME_NAMESPACE: &str = "coquille-home";
+const CONTROLS_NAMESPACE: &str = "coquille-controls";
 
 pub struct BarState {
     pub id: window::Id,
@@ -193,7 +195,6 @@ impl Drawer {
 }
 
 /// Which decoupled popover is open beside the spatial sidebar.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpatialPopoverKind {
     Notifications,
@@ -201,7 +202,6 @@ pub enum SpatialPopoverKind {
 }
 
 /// The decoupled notifications or control-center popover of spatial mode.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpatialPopover {
     pub id: window::Id,
@@ -215,7 +215,6 @@ pub struct SpatialPopover {
 }
 
 /// Permanent spatial home surface (`Layer::Bottom`) on an output.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialHome {
     pub id: window::Id,
@@ -402,9 +401,9 @@ pub struct Dock {
     /// The applications started from the bar whose icons hop.
     pub launches: Vec<Launch>,
     pub drag: Option<Drag>,
-    /// The menu, with the bar it opened from and the key of its
-    /// application.
-    pub menu: Option<(window::Id, window::Id, String)>,
+    /// The menu, with the bar/surface it opened from and the key of its
+    /// application, plus an optional synthesized entry for spatial app-grid menus.
+    pub menu: Option<(window::Id, window::Id, String, Option<Entry>)>,
     pub tray: Vec<TrayItem>,
     pub tray_menu: Option<(window::Id, window::Id, String)>,
     pub drawer: Option<Drawer>,
@@ -421,16 +420,11 @@ pub struct Dock {
     pub do_not_disturb: bool,
     pub night_light: bool,
     pub notify: NotifyState,
-    #[allow(dead_code)]
     pub playtimes: HashMap<u64, u32>,
-    #[allow(dead_code)]
     pub widgets: WidgetsState,
     /// Inline game note editor: `(game_key, draft_text)`.
-    #[allow(dead_code)]
     pub editing_game: Option<(String, String)>,
-    #[allow(dead_code)]
     pub spatial_popover: Option<SpatialPopover>,
-    #[allow(dead_code)]
     pub spatial_homes: Vec<SpatialHome>,
     ticks: u64,
 }
@@ -452,6 +446,7 @@ impl Dock {
         let snapshot = if simulated(Backend::Compositor) {
             let mut snapshot = mock::snapshot(theme, &config.favorites);
             snapshot.accent = config.accent.clone().unwrap_or_default();
+            snapshot.spatial = options.spatial || config.mode == ShellMode::Spatial;
             snapshot
         } else {
             Snapshot::default()
@@ -526,7 +521,11 @@ impl Dock {
             spatial_homes: Vec::new(),
             ticks: 0,
         };
-        let mut tasks = vec![dock.load_icons(), dock.show_bars()];
+        let mut tasks = vec![
+            dock.load_icons(),
+            dock.show_bars(),
+            dock.sync_spatial_homes(),
+        ];
         if dock.options.drawer || dock.options.mixer {
             tasks.push(Task::done(Message::Launcher(None)));
         }
@@ -605,19 +604,16 @@ impl Dock {
     }
 
     /// Whether the dock is running in spatial mode.
-    #[allow(dead_code)]
     pub fn is_spatial(&self) -> bool {
         self.options.spatial || self.config.mode == ShellMode::Spatial || self.snapshot.spatial
     }
 
     /// Whether any screen is currently held by a fullscreen game.
-    #[allow(dead_code)]
     pub fn any_anchored(&self) -> bool {
         self.snapshot.screens.iter().any(|screen| screen.anchored)
     }
 
     /// Visible unread notification count for an application entry (0 when DND/game).
-    #[allow(dead_code)]
     pub fn spatial_unread_for(&self, entry: &Entry) -> usize {
         let count = self
             .notify
@@ -633,7 +629,6 @@ impl Dock {
     }
 
     /// Total visible unread notification count for the bottom pill badge.
-    #[allow(dead_code)]
     pub fn spatial_visible_unread(&self) -> usize {
         let count = self.notify.visible_unread_count(self.any_anchored());
         if count > 0 || self.notify.effective_dnd(self.any_anchored()) {
@@ -644,13 +639,62 @@ impl Dock {
 
     /// Whether the spatial launcher is currently shown on `screen` (either as
     /// overlay or because no non-minimized window is visible on `screen`).
-    #[allow(dead_code)]
     pub fn spatial_launcher_visible_on(&self, screen: OutputRole) -> bool {
         let overlay = self
             .drawer
             .as_ref()
             .is_some_and(|drawer| drawer.screen == screen);
         overlay || !crate::model::spatial::screen_has_visible_window(&self.snapshot.windows, screen)
+    }
+
+    /// Finds an entry for a context menu: on the originating bar first, or
+    /// synthesized for an app right-clicked from the spatial launcher grid.
+    fn entry_for_menu(&self, parent: window::Id, key: &str) -> Option<Entry> {
+        if let Some(bar) = self.bar(parent) {
+            if let Some(entry) = bar.entries.iter().find(|entry| entry.identity.key == key) {
+                return Some(entry.clone());
+            }
+        }
+        // Synthesize from the screen of the spatial launcher/home surface.
+        let screen = self
+            .drawer
+            .as_ref()
+            .filter(|drawer| drawer.id == parent)
+            .map(|drawer| drawer.screen)
+            .or_else(|| {
+                self.spatial_homes
+                    .iter()
+                    .find(|home| home.id == parent)
+                    .map(|home| home.screen)
+            })
+            .unwrap_or(OutputRole::Center);
+        let identity = self.identify(key);
+        let windows: Vec<_> = self
+            .snapshot
+            .windows
+            .iter()
+            .filter(|window| self.identify(&window.app).key == identity.key)
+            .cloned()
+            .collect();
+        let pinned = self
+            .config
+            .favorites
+            .iter()
+            .any(|fav| self.identify(fav).key == identity.key);
+        let here = windows.iter().any(|window| window.screen == screen);
+        let indicator = match (windows.is_empty(), here) {
+            (true, _) => crate::model::bar::Indicator::None,
+            (false, true) => crate::model::bar::Indicator::Here,
+            (false, false) => crate::model::bar::Indicator::Elsewhere,
+        };
+        Some(Entry {
+            identity,
+            pinned,
+            windows,
+            indicator,
+            subtitle: String::new(),
+            habit: None,
+        })
     }
 
     /// Whether the launcher covers bar `id`, drawing it again over itself.
@@ -882,8 +926,9 @@ impl Dock {
     /// Whether anything moves at `now`: frames are then needed.
     fn animating(&self, now: Instant) -> bool {
         let pace = self.pace();
+        let spatial = self.is_spatial();
         self.bars.iter().any(|bar| {
-            bar.unfold != unfold_target(bar)
+            (!spatial && bar.unfold != unfold_target(bar))
                 || bar
                     .arrivals
                     .values()
@@ -900,6 +945,7 @@ impl Dock {
     /// which output that screen is.
     fn show_bars(&mut self) -> Task<Message> {
         let simulated = !self.options.is_real(Backend::Compositor);
+        let spatial = self.is_spatial();
         let mut tasks = Vec::new();
         for (index, (screen, orientation)) in self.docks().into_iter().enumerate() {
             if self.bar_on(screen).is_some() {
@@ -920,19 +966,53 @@ impl Dock {
             };
             let entries = self.entries_for(screen);
             let pinned = entries.iter().filter(|entry| entry.pinned).count();
-            let metrics = self.metrics();
-            let size =
-                metrics.surface_size(orientation, pinned, entries.len() - pinned, self.tray.len());
-            let anchor = match orientation {
-                Orientation::Vertical(Side::Left) => Anchor::Left,
-                Orientation::Vertical(Side::Right) => Anchor::Right,
-                Orientation::Horizontal => Anchor::Bottom,
+            let (orientation, size, anchor, exclusive_zone) = if spatial {
+                let side = match orientation {
+                    Orientation::Vertical(side) => side,
+                    Orientation::Horizontal => Side::Left,
+                };
+                let anchor = match side {
+                    Side::Left => Anchor::Left | Anchor::Top | Anchor::Bottom,
+                    Side::Right => Anchor::Right | Anchor::Top | Anchor::Bottom,
+                };
+                let height = self.screen(screen).map_or(1080, |s| s.height.max(1) as u32);
+                (
+                    Orientation::Vertical(side),
+                    (ui::spatial::bar::SURFACE_WIDTH, height),
+                    anchor,
+                    ui::spatial::bar::EXCLUSIVE_ZONE,
+                )
+            } else {
+                let metrics = self.metrics();
+                let size = metrics.surface_size(
+                    orientation,
+                    pinned,
+                    entries.len() - pinned,
+                    self.tray.len(),
+                );
+                let anchor = match orientation {
+                    Orientation::Vertical(Side::Left) => Anchor::Left,
+                    Orientation::Vertical(Side::Right) => Anchor::Right,
+                    Orientation::Horizontal => Anchor::Bottom,
+                };
+                (
+                    orientation,
+                    size,
+                    anchor,
+                    metrics.exclusive_zone_for(orientation),
+                )
+            };
+            let layer_size = if spatial {
+                // Anchored Top | Bottom: height 0 stretches to the full output height.
+                Some((size.0, 0))
+            } else {
+                Some(size)
             };
             let (id, task) = Message::layershell_open(NewLayerShellSettings {
-                size: Some(size),
+                size: layer_size,
                 layer: Layer::Top,
                 anchor,
-                exclusive_zone: Some(metrics.exclusive_zone_for(orientation)),
+                exclusive_zone: Some(exclusive_zone),
                 margin: None,
                 keyboard_interactivity: KeyboardInteractivity::None,
                 output_option: output,
@@ -956,9 +1036,150 @@ impl Dock {
         Task::batch(tasks)
     }
 
+    /// Maintains a permanent `Layer::Bottom` Spatial Home surface on every
+    /// connected screen in spatial mode so empty screens (or screens whose
+    /// windows are all minimized) always display the Spatial Launcher.
+    fn sync_spatial_homes(&mut self) -> Task<Message> {
+        if !self.is_spatial() {
+            if self.spatial_homes.is_empty() {
+                return Task::none();
+            }
+            let gone = std::mem::take(&mut self.spatial_homes);
+            return Task::batch(gone.into_iter().map(|home| window::close(home.id)));
+        }
+        let simulated = !self.options.is_real(Backend::Compositor);
+        let wanted: Vec<(OutputRole, OutputOption)> = if simulated {
+            // In `--mock`, a single active output exists.
+            let screen = self.bars.first().map_or(OutputRole::Left, |bar| bar.screen);
+            let output = self
+                .options
+                .output
+                .clone()
+                .map_or(OutputOption::Active, OutputOption::OutputName);
+            vec![(screen, output)]
+        } else {
+            self.snapshot
+                .screens
+                .iter()
+                .map(|screen| (screen.role, OutputOption::OutputName(screen.name.clone())))
+                .collect()
+        };
+        let wanted_roles: Vec<OutputRole> = wanted.iter().map(|(role, _)| *role).collect();
+        let (kept, gone): (Vec<SpatialHome>, Vec<SpatialHome>) =
+            std::mem::take(&mut self.spatial_homes)
+                .into_iter()
+                .partition(|home| wanted_roles.contains(&home.screen));
+        self.spatial_homes = kept;
+        let mut tasks: Vec<Task<Message>> = gone
+            .into_iter()
+            .map(|home| window::close(home.id))
+            .collect();
+        for (role, output) in wanted {
+            if self.spatial_homes.iter().any(|home| home.screen == role) {
+                continue;
+            }
+            let (id, task) = Message::layershell_open(NewLayerShellSettings {
+                size: None,
+                layer: Layer::Bottom,
+                anchor: Anchor::Left | Anchor::Right | Anchor::Top | Anchor::Bottom,
+                // Respects the 56 px exclusive zone of the sidebar automatically.
+                exclusive_zone: Some(0),
+                margin: None,
+                keyboard_interactivity: KeyboardInteractivity::OnDemand,
+                output_option: output,
+                events_transparent: false,
+                namespace: Some(HOME_NAMESPACE.to_owned()),
+            });
+            self.spatial_homes.push(SpatialHome {
+                id,
+                screen: role,
+                query: String::new(),
+                surface: None,
+            });
+            tasks.push(task);
+        }
+        Task::batch(tasks)
+    }
+
+    fn close_spatial_popover(&mut self) -> Task<Message> {
+        let Some(popover) = self.spatial_popover.take() else {
+            return Task::none();
+        };
+        self.request(Request::Levels(false));
+        window::close(popover.id).chain(self.sync_toasts())
+    }
+
+    fn toggle_spatial_popover(
+        &mut self,
+        screen: OutputRole,
+        kind: SpatialPopoverKind,
+    ) -> Task<Message> {
+        let close_menus = self.close_menu().chain(self.close_tray_menu());
+        if let Some(popover) = &mut self.spatial_popover {
+            if popover.screen == screen {
+                if popover.kind == kind {
+                    return close_menus.chain(self.close_spatial_popover());
+                }
+                popover.kind = kind;
+                popover.mixer = false;
+                popover.confirm = None;
+                popover.screenshot_prompt = false;
+                popover.note = None;
+                self.request(Request::Levels(false));
+                return close_menus.chain(self.sync_toasts());
+            }
+        }
+        let close_prev = self.close_spatial_popover();
+        let side = self
+            .bar_on(screen)
+            .map_or(Side::Left, |bar| match bar.orientation {
+                Orientation::Vertical(side) => side,
+                Orientation::Horizontal => Side::Left,
+            });
+        let output = self.output_for_bar(screen);
+        let (id, open) = Message::layershell_open(NewLayerShellSettings {
+            size: None,
+            layer: Layer::Overlay,
+            anchor: Anchor::Left | Anchor::Right | Anchor::Top | Anchor::Bottom,
+            // Respects the 56 px sidebar so the sidebar pill stays directly clickable.
+            exclusive_zone: Some(0),
+            margin: None,
+            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            output_option: output,
+            events_transparent: false,
+            namespace: Some(CONTROLS_NAMESPACE.to_owned()),
+        });
+        self.spatial_popover = Some(SpatialPopover {
+            id,
+            screen,
+            side,
+            kind,
+            mixer: false,
+            confirm: None,
+            screenshot_prompt: false,
+            note: None,
+        });
+        close_menus
+            .chain(close_prev)
+            .chain(open)
+            .chain(self.sync_toasts())
+    }
+
     /// Gives each bar the size its entries need, and limits what takes the
     /// pointer to what shows.
     fn fit_bars(&mut self) -> Task<Message> {
+        if self.is_spatial() {
+            let mut tasks = Vec::new();
+            for index in 0..self.bars.len() {
+                let id = self.bars[index].id;
+                let exclusive = Task::done(Message::ExclusiveZoneChange {
+                    id,
+                    zone_size: ui::spatial::bar::EXCLUSIVE_ZONE,
+                });
+                tasks.push(exclusive.chain(self.input_region(id)));
+            }
+            return Task::batch(tasks);
+        }
         let mut tasks = Vec::new();
         let metrics = self.metrics();
         for index in 0..self.bars.len() {
@@ -991,10 +1212,17 @@ impl Dock {
         let Some(bar) = self.bar(id) else {
             return Task::none();
         };
-        let unfolded = bar.hovered || bar.unfold > 0.0;
-        let (x, y, width, height) =
+        let (x, y, width, height) = if self.is_spatial() {
+            let side = match bar.orientation {
+                Orientation::Vertical(side) => side,
+                Orientation::Horizontal => Side::Left,
+            };
+            ui::spatial::bar::input_region(side, bar.size.0, bar.size.1.max(1080))
+        } else {
+            let unfolded = bar.hovered || bar.unfold > 0.0;
             self.metrics()
-                .input_region(bar.orientation, bar.size, unfolded);
+                .input_region(bar.orientation, bar.size, unfolded)
+        };
         Task::done(Message::SetInputRegion {
             id,
             callback: ActionCallback::new(move |region| region.add(x, y, width, height)),
@@ -1325,6 +1553,7 @@ impl Dock {
         if self.drawer.is_some() {
             return self.update(Message::CloseDrawer);
         }
+        let close_popover = self.close_spatial_popover();
         let held = |role| self.screen(role).is_some_and(|screen| screen.anchored);
         let docks: Vec<(OutputRole, bool)> = self
             .bars
@@ -1332,18 +1561,49 @@ impl Dock {
             .map(|bar| (bar.screen, held(bar.screen)))
             .collect();
         let every_screen = self.every_screen_held();
-        let picked = bar::launcher_screen(&docks, asked, every_screen)
-            .and_then(|screen| self.bar_on(screen));
-        let Some((screen, orientation)) = picked.map(|bar| (bar.screen, bar.orientation)) else {
-            return Task::none();
+        let (screen, orientation) = if self.is_spatial() {
+            let screen = asked
+                .filter(|role| !held(*role) || every_screen)
+                .or_else(|| bar::launcher_screen(&docks, asked, every_screen))
+                .or_else(|| self.snapshot.screens.first().map(|s| s.role));
+            let Some(screen) = screen else {
+                return close_popover;
+            };
+            // On an empty screen (or one whose windows are all minimized),
+            // the permanent `coquille-home` surface is already visible: just
+            // focus its search input instead of opening a duplicate overlay.
+            if !crate::model::spatial::screen_has_visible_window(&self.snapshot.windows, screen)
+                && !held(screen)
+            {
+                let focus = operation::focus(ui::spatial::launcher::search_id(Some(screen)));
+                return close_popover.chain(focus);
+            }
+            let orientation = self
+                .bar_on(screen)
+                .map_or(Orientation::Vertical(Side::Left), |bar| bar.orientation);
+            (screen, orientation)
+        } else {
+            let picked = bar::launcher_screen(&docks, asked, every_screen)
+                .and_then(|screen| self.bar_on(screen));
+            let Some((screen, orientation)) = picked.map(|bar| (bar.screen, bar.orientation))
+            else {
+                return close_popover;
+            };
+            (screen, orientation)
         };
         let output = self.output_for_bar(screen);
+        let exclusive_zone = if self.is_spatial() {
+            // Leave the 56 px sidebar uncovered and directly clickable.
+            Some(0)
+        } else {
+            // Classic: over everything, the bar included (drawer draws its own copy).
+            Some(-1)
+        };
         let (id, task) = Message::layershell_open(NewLayerShellSettings {
             size: None,
             layer: Layer::Overlay,
             anchor: Anchor::Left | Anchor::Right | Anchor::Top | Anchor::Bottom,
-            // Over everything, the bar included: the launcher draws its own.
-            exclusive_zone: Some(-1),
+            exclusive_zone,
             margin: None,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
             output_option: output,
@@ -1375,13 +1635,17 @@ impl Dock {
             reveal: Reveal::coming(now, self.pace().of(durations::DRAWER)),
             mixer_reveal: Reveal::at_rest(0.0, now),
         });
-        if orientation == Orientation::Horizontal {
+        if !self.is_spatial() && orientation == Orientation::Horizontal {
             // Its mixer is always there: its levels move.
             self.request(Request::Levels(true));
         }
         // The control center shows the notices: no toast over it.
         let toasts = self.sync_toasts();
-        gone.chain(self.close_menu()).chain(task).chain(toasts)
+        close_popover
+            .chain(gone)
+            .chain(self.close_menu())
+            .chain(task)
+            .chain(toasts)
     }
 
     /// The size of the screen of the launcher: what its surface says, and
@@ -1451,7 +1715,10 @@ impl Dock {
     /// lists the notices) is open.
     fn toast_target(&self) -> Option<(OutputRole, Orientation)> {
         let anchored = self.anchored_roles();
-        if self.notify.effective_dnd(!anchored.is_empty()) || self.drawer.is_some() {
+        if self.notify.effective_dnd(!anchored.is_empty())
+            || self.drawer.is_some()
+            || self.spatial_popover.is_some()
+        {
             return None;
         }
         self.notify.toast_bar(&self.notify_bars(), &anchored)
@@ -1518,8 +1785,9 @@ impl Dock {
             size: Some((geometry.width, geometry.height)),
             layer: Layer::Overlay,
             anchor,
-            // In the corner itself, like the dock: not beside its zone.
-            exclusive_zone: Some(-1),
+            // Classic: in the corner itself under the centered dock.
+            // Spatial: beside the full-height 56 px sidebar.
+            exclusive_zone: Some(if self.is_spatial() { 0 } else { -1 }),
             margin: None,
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: self.output_for_bar(screen),
@@ -1622,17 +1890,28 @@ impl Dock {
     /// application then shows what it was about), and its window comes to
     /// the front either way.
     fn open_notice(&mut self, id: u32) -> Task<Message> {
-        let Some(notice) = self.notify.notice(id) else {
+        let Some(notice) = self.notify.notice(id).cloned() else {
             return Task::none();
         };
+        self.notify.mark_read(id);
         let default = notice.actions.iter().any(|(key, _)| key == "default");
-        if let Some(window) = self.window_of_notice(notice) {
-            self.send(Command::Activate { window });
+        if let Some(window) = self.window_of_notice(&notice) {
+            if let Some(popover) = &self.spatial_popover {
+                self.send(Command::MoveToScreen {
+                    window,
+                    screen: popover.screen,
+                });
+            } else {
+                self.send(Command::Activate { window });
+            }
         }
-        if default {
-            return self.invoke_notice(id, "default".into());
-        }
-        self.dismiss_notice(id)
+        let close_pop = self.close_spatial_popover();
+        let rest = if default {
+            self.invoke_notice(id, "default".into())
+        } else {
+            self.dismiss_notice(id)
+        };
+        close_pop.chain(rest)
     }
 
     /// The window of the application that sent a notice: the one its
@@ -1745,16 +2024,28 @@ impl Dock {
     fn glass(&self) -> HashMap<(&'static str, OutputRole), Vec<GlassShape>> {
         let metrics = self.metrics();
         let mut glass = HashMap::new();
+        let spatial = self.is_spatial();
         for bar in &self.bars {
-            let pinned = bar.pinned();
-            let shape = metrics.glass_shape(
-                bar.orientation,
-                bar.size,
-                (pinned, bar.entries.len() - pinned),
-                self.tray.len(),
-                bar.unfold,
-            );
-            glass.insert((BAR_NAMESPACE, bar.screen), vec![shape]);
+            if spatial {
+                let side = match bar.orientation {
+                    Orientation::Vertical(side) => side,
+                    Orientation::Horizontal => Side::Left,
+                };
+                glass.insert(
+                    (BAR_NAMESPACE, bar.screen),
+                    ui::spatial::bar::glass_shapes(side, bar.size.0, bar.size.1.max(1080)),
+                );
+            } else {
+                let pinned = bar.pinned();
+                let shape = metrics.glass_shape(
+                    bar.orientation,
+                    bar.size,
+                    (pinned, bar.entries.len() - pinned),
+                    self.tray.len(),
+                    bar.unfold,
+                );
+                glass.insert((BAR_NAMESPACE, bar.screen), vec![shape]);
+            }
         }
         if let Some(toasts) = &self.toasts {
             let (thickness, radius) = metrics.thickness(toasts.orientation);
@@ -1850,21 +2141,25 @@ impl Dock {
                     }
                 }
                 let mut settled = Vec::new();
-                for bar in &mut self.bars {
-                    let target = unfold_target(bar);
-                    if bar.unfold == target {
-                        continue;
+                if !self.is_spatial() {
+                    for bar in &mut self.bars {
+                        let target = unfold_target(bar);
+                        if bar.unfold == target {
+                            continue;
+                        }
+                        bar.unfold = if target > bar.unfold {
+                            (bar.unfold + step).min(1.0)
+                        } else {
+                            (bar.unfold - step).max(0.0)
+                        };
+                        if bar.unfold == target {
+                            settled.push(bar.id);
+                        }
                     }
-                    bar.unfold = if target > bar.unfold {
-                        (bar.unfold + step).min(1.0)
-                    } else {
-                        (bar.unfold - step).max(0.0)
-                    };
-                    if bar.unfold == target {
-                        settled.push(bar.id);
+                    if self.bars.iter().all(|bar| bar.unfold == unfold_target(bar)) {
+                        self.last_frame = None;
                     }
-                }
-                if self.bars.iter().all(|bar| bar.unfold == unfold_target(bar)) {
+                } else {
                     self.last_frame = None;
                 }
                 // Folded again: the windows beside the bar get the pointer
@@ -1885,8 +2180,16 @@ impl Dock {
                 Task::none()
             }
             Message::Window(id, window::Event::Opened { size, .. }) => {
-                if self.bar(id).is_some() {
+                let spatial = self.is_spatial();
+                if let Some(bar) = self.bar_mut(id) {
+                    if spatial {
+                        bar.size = (size.width.round() as u32, size.height.round() as u32);
+                    }
                     return self.input_region(id);
+                }
+                if let Some(home) = self.spatial_homes.iter_mut().find(|home| home.id == id) {
+                    home.surface = Some(size);
+                    return Task::none();
                 }
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
                     self.fit_drawer(size);
@@ -1895,6 +2198,17 @@ impl Dock {
                 Task::none()
             }
             Message::Window(id, window::Event::Resized(size)) => {
+                let spatial = self.is_spatial();
+                if let Some(bar) = self.bar_mut(id) {
+                    if spatial {
+                        bar.size = (size.width.round() as u32, size.height.round() as u32);
+                        return self.input_region(id);
+                    }
+                }
+                if let Some(home) = self.spatial_homes.iter_mut().find(|home| home.id == id) {
+                    home.surface = Some(size);
+                    return Task::none();
+                }
                 if self.drawer.as_ref().is_some_and(|drawer| drawer.id == id) {
                     self.fit_drawer(size);
                 }
@@ -1965,7 +2279,7 @@ impl Dock {
                 self.leaving.take_if(|drawer| drawer.id == id);
                 // A click outside the menu closes it without telling more;
                 // the bar, kept as it was for it, folds again.
-                if let Some((_, bar, _)) = self.menu.take_if(|(menu, ..)| *menu == id) {
+                if let Some((_, bar, ..)) = self.menu.take_if(|(menu, ..)| *menu == id) {
                     if let Some(bar) = self.bar_mut(bar) {
                         bar.hovered = false;
                         bar.hover_entry = None;
@@ -1984,18 +2298,27 @@ impl Dock {
                         self.forget_drawer_pointer(drawer.screen);
                     }
                 }
+                let popover = self
+                    .spatial_popover
+                    .as_ref()
+                    .is_some_and(|popover| popover.id == id);
+                if popover {
+                    self.spatial_popover = None;
+                    self.request(Request::Levels(false));
+                }
+                self.spatial_homes.retain(|home| home.id != id);
                 if self.toasts.as_ref().is_some_and(|surface| surface.id == id) {
                     self.toasts = None;
                 }
                 self.bars.retain(|bar| bar.id != id);
-                if drawer {
+                if drawer || popover {
                     return self.sync_toasts();
                 }
                 Task::none()
             }
             Message::BarHover(id, hovered) => {
                 // The menu keeps its bar as it is while it is open.
-                let has_menu = self.menu.as_ref().is_some_and(|(_, bar, _)| *bar == id)
+                let has_menu = self.menu.as_ref().is_some_and(|(_, bar, ..)| *bar == id)
                     || self
                         .tray_menu
                         .as_ref()
@@ -2048,10 +2371,44 @@ impl Dock {
                     self.save_favorites();
                     return Task::none();
                 }
-                let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
-                let Some(entry) = entry.cloned() else {
+                let Some((screen, entry)) = self.bar(id).and_then(|bar| {
+                    bar.entries
+                        .get(index)
+                        .map(|entry| (bar.screen, entry.clone()))
+                }) else {
                     return Task::none();
                 };
+                if self.is_spatial() {
+                    let launcher_visible = self.spatial_launcher_visible_on(screen);
+                    self.notify.mark_app_read(&entry.identity.names);
+                    let close_pop = self.close_spatial_popover();
+                    match bar::spatial_left_click(&entry, screen, launcher_visible) {
+                        bar::SpatialClick::Launch => {
+                            self.send(Command::OpenOn {
+                                apps: entry.identity.names.clone(),
+                                screen,
+                            });
+                            if let Some(command) = &entry.identity.command {
+                                spawn(command);
+                                self.launched(&entry.identity.key);
+                            } else {
+                                warn!(name = entry.identity.name, "no command to start this");
+                            }
+                            return close_pop.chain(self.leave_drawer_of(id));
+                        }
+                        bar::SpatialClick::Activate(window) => {
+                            self.send(Command::Activate { window });
+                            return close_pop.chain(self.leave_drawer_of(id));
+                        }
+                        bar::SpatialClick::Teleport(window) => {
+                            self.send(Command::MoveToScreen { window, screen });
+                            return close_pop.chain(self.leave_drawer_of(id));
+                        }
+                        bar::SpatialClick::ToggleLauncher => {
+                            return close_pop.chain(self.toggle_drawer(Some(screen)));
+                        }
+                    }
+                }
                 match bar::left_click(&entry) {
                     Click::Activate(window) => self.send(Command::Activate { window }),
                     Click::Launch => match &entry.identity.command {
@@ -2065,12 +2422,15 @@ impl Dock {
                 self.leave_drawer_of(id)
             }
             Message::EntryMiddle(id, index) => {
-                let entry = self.bar(id).and_then(|bar| bar.entries.get(index));
-                let identity = entry.map(|entry| entry.identity.clone());
-                if let Some(identity) = identity {
-                    if let Some(command) = &identity.command {
+                let entry = self.bar(id).and_then(|bar| bar.entries.get(index)).cloned();
+                if let Some(entry) = entry {
+                    if self.is_spatial() {
+                        if let Some(window) = entry.windows.first() {
+                            self.send(Command::Close { window: window.id });
+                        }
+                    } else if let Some(command) = &entry.identity.command {
                         spawn(command);
-                        self.launched(&identity.key);
+                        self.launched(&entry.identity.key);
                     }
                 }
                 self.leave_drawer_of(id)
@@ -2082,12 +2442,23 @@ impl Dock {
                 let Some(entry) = bar.entries.get(index) else {
                     return Task::none();
                 };
-                let menu = bar::menu(entry, &self.present_screens());
+                let mut menu = bar::menu(entry, &self.present_screens());
+                if self.is_spatial() {
+                    menu.actions
+                        .retain(|action| !matches!(action, MenuAction::Forget));
+                }
                 let size = (ui::menu::WIDTH, ui::menu::height(&menu));
-                let unfolded = bar.unfold > 0.5 && !self.covered(id);
-                let rect =
+                let rect = if self.is_spatial() {
+                    let side = match bar.orientation {
+                        Orientation::Vertical(side) => side,
+                        Orientation::Horizontal => Side::Left,
+                    };
+                    ui::spatial::bar::entry_menu_rect(side, bar.size.0, index, bar.pinned())
+                } else {
+                    let unfolded = bar.unfold > 0.5 && !self.covered(id);
                     self.metrics()
-                        .entry_rect(bar.orientation, index, bar.pinned(), unfolded);
+                        .entry_rect(bar.orientation, index, bar.pinned(), unfolded)
+                };
                 let (parent, anchor) = self.menu_parent(id, rect);
                 // Beside an upright bar, above a lying one.
                 let (corner, grows) = match bar.orientation {
@@ -2105,7 +2476,7 @@ impl Dock {
                 let key = entry.identity.key.clone();
                 let close = self.close_menu().chain(self.close_tray_menu());
                 let (popup, open) = Message::popup_open(settings);
-                self.menu = Some((popup, id, key));
+                self.menu = Some((popup, id, key, None));
                 self.drag = None;
                 close.chain(open)
             }
@@ -2147,17 +2518,31 @@ impl Dock {
                 }
                 let height = ui::tray_menu::height(item);
                 let size = (ui::tray_menu::WIDTH, height);
-                let unfolded = bar.unfold > 0.5 && !self.covered(id);
-                let pinned = bar.pinned();
-                let others = bar.entries.len() - pinned;
-                let rect = self.metrics().tray_rect(
-                    bar.orientation,
-                    index,
-                    pinned,
-                    others,
-                    self.tray.len(),
-                    unfolded,
-                );
+                let rect = if self.is_spatial() {
+                    let side = match bar.orientation {
+                        Orientation::Vertical(side) => side,
+                        Orientation::Horizontal => Side::Left,
+                    };
+                    ui::spatial::bar::tray_menu_rect(
+                        side,
+                        bar.size.0,
+                        bar.size.1.max(1080),
+                        self.tray.len(),
+                        index,
+                    )
+                } else {
+                    let unfolded = bar.unfold > 0.5 && !self.covered(id);
+                    let pinned = bar.pinned();
+                    let others = bar.entries.len() - pinned;
+                    self.metrics().tray_rect(
+                        bar.orientation,
+                        index,
+                        pinned,
+                        others,
+                        self.tray.len(),
+                        unfolded,
+                    )
+                };
                 let (parent, anchor) = self.menu_parent(id, rect);
                 let (corner, grows) = match bar.orientation {
                     Orientation::Vertical(Side::Left) => {
@@ -2191,15 +2576,10 @@ impl Dock {
             }
             Message::Launcher(asked) => self.toggle_drawer(asked),
             Message::Menu(action) => {
-                let Some((_, bar, key)) = self.menu.clone() else {
+                let Some((_, parent, key, cached)) = self.menu.clone() else {
                     return Task::none();
                 };
-                let entries = self.bar(bar).map(|bar| bar.entries.as_slice());
-                let entry = entries
-                    .unwrap_or_default()
-                    .iter()
-                    .find(|entry| entry.identity.key == key);
-                let Some(entry) = entry.cloned() else {
+                let Some(entry) = cached.or_else(|| self.entry_for_menu(parent, &key)) else {
                     return self.close_menu();
                 };
                 // What starts or shows an application leaves the launcher.
@@ -2209,12 +2589,29 @@ impl Dock {
                 );
                 match action {
                     MenuAction::OpenOn(screen) => {
-                        self.send(Command::OpenOn {
-                            apps: entry.identity.names.clone(),
-                            screen,
-                        });
-                        if let Some(command) = &entry.identity.command {
-                            spawn(command);
+                        if self.is_spatial() {
+                            if let Some(window) = entry.windows.first() {
+                                self.send(Command::MoveToScreen {
+                                    window: window.id,
+                                    screen,
+                                });
+                            } else {
+                                self.send(Command::OpenOn {
+                                    apps: entry.identity.names.clone(),
+                                    screen,
+                                });
+                                if let Some(command) = &entry.identity.command {
+                                    spawn(command);
+                                }
+                            }
+                        } else {
+                            self.send(Command::OpenOn {
+                                apps: entry.identity.names.clone(),
+                                screen,
+                            });
+                            if let Some(command) = &entry.identity.command {
+                                spawn(command);
+                            }
                         }
                     }
                     MenuAction::Run { command, .. } => spawn(&command),
@@ -2244,11 +2641,15 @@ impl Dock {
                 }
                 self.rebuild_entries();
                 let leave = if leaves {
-                    self.leave_drawer_of(bar)
+                    if self.drawer.is_some() {
+                        self.update(Message::CloseDrawer)
+                    } else {
+                        self.leave_drawer_of(parent)
+                    }
                 } else {
                     Task::none()
                 };
-                if let Some(bar) = self.bar_mut(bar) {
+                if let Some(bar) = self.bar_mut(parent) {
                     bar.hovered = false;
                 }
                 Task::batch([self.close_menu(), self.fit_bars(), leave])
@@ -2316,6 +2717,12 @@ impl Dock {
                 None => Task::none(),
             },
             Message::ToggleMixer => {
+                if let Some(popover) = &mut self.spatial_popover {
+                    popover.mixer = !popover.mixer;
+                    let shown = popover.mixer;
+                    self.request(Request::Levels(shown));
+                    return Task::none();
+                }
                 let pace = self.pace();
                 let Some(drawer) = &mut self.drawer else {
                     return Task::none();
@@ -2408,23 +2815,33 @@ impl Dock {
                     drawer.confirm = Some(action);
                     drawer.note = None;
                 }
+                if let Some(popover) = &mut self.spatial_popover {
+                    popover.confirm = Some(action);
+                    popover.note = None;
+                }
                 Task::none()
             }
             Message::Confirm(confirmed) => {
                 let action = self
                     .drawer
                     .as_mut()
-                    .and_then(|drawer| drawer.confirm.take());
+                    .and_then(|drawer| drawer.confirm.take())
+                    .or_else(|| {
+                        self.spatial_popover
+                            .as_mut()
+                            .and_then(|popover| popover.confirm.take())
+                    });
                 let Some(action) = action.filter(|_| confirmed) else {
                     return Task::none();
                 };
                 if !self.options.is_real(Backend::Session) {
                     info!(?action, "session action simulated: nothing was done");
+                    let msg = format!("« {} » : simulé, rien n'a été fait.", action.verb());
                     if let Some(drawer) = &mut self.drawer {
-                        drawer.note = Some(format!(
-                            "« {} » : simulé, rien n'a été fait.",
-                            action.verb()
-                        ));
+                        drawer.note = Some(msg.clone());
+                    }
+                    if let Some(popover) = &mut self.spatial_popover {
+                        popover.note = Some(msg);
                     }
                     return Task::none();
                 }
@@ -2461,7 +2878,10 @@ impl Dock {
             Message::SessionRefused(why) => {
                 warn!(why, "session action refused");
                 if let Some(drawer) = &mut self.drawer {
-                    drawer.note = Some(why);
+                    drawer.note = Some(why.clone());
+                }
+                if let Some(popover) = &mut self.spatial_popover {
+                    popover.note = Some(why);
                 }
                 Task::none()
             }
@@ -2474,11 +2894,18 @@ impl Dock {
                     drawer.screenshot_prompt = !drawer.screenshot_prompt;
                     drawer.confirm = None;
                 }
+                if let Some(popover) = &mut self.spatial_popover {
+                    popover.screenshot_prompt = !popover.screenshot_prompt;
+                    popover.confirm = None;
+                }
                 Task::none()
             }
             Message::CancelScreenshot => {
                 if let Some(drawer) = &mut self.drawer {
                     drawer.screenshot_prompt = false;
+                }
+                if let Some(popover) = &mut self.spatial_popover {
+                    popover.screenshot_prompt = false;
                 }
                 Task::none()
             }
@@ -2486,12 +2913,17 @@ impl Dock {
                 if let Some(drawer) = &mut self.drawer {
                     drawer.screenshot_prompt = false;
                 }
+                if let Some(popover) = &mut self.spatial_popover {
+                    popover.screenshot_prompt = false;
+                }
                 self.send(Command::Screenshot { target });
-                self.update(Message::CloseDrawer)
+                let close_pop = self.close_spatial_popover();
+                close_pop.chain(self.update(Message::CloseDrawer))
             }
             Message::Settings => {
                 spawn(&settings_command(&self.options.config));
-                self.update(Message::CloseDrawer)
+                let close_pop = self.close_spatial_popover();
+                close_pop.chain(self.update(Message::CloseDrawer))
             }
             Message::NoticeDismiss(id) => self.dismiss_notice(id),
             Message::NoticeOpen(id) => self.open_notice(id),
@@ -2513,6 +2945,165 @@ impl Dock {
                     });
                 }
                 self.sync_toasts()
+            }
+            Message::SpatialPopoverToggle(screen, kind) => {
+                self.toggle_spatial_popover(screen, kind)
+            }
+            Message::CloseSpatialPopover => self.close_spatial_popover(),
+            Message::SpatialQuery(target, query) => {
+                match target {
+                    None => {
+                        if let Some(drawer) = &mut self.drawer {
+                            drawer.query = query;
+                        }
+                    }
+                    Some(screen) => {
+                        if let Some(home) = self
+                            .spatial_homes
+                            .iter_mut()
+                            .find(|home| home.screen == screen)
+                        {
+                            home.query = query;
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::SpatialSubmit(target) => {
+                let (screen, query) = match target {
+                    None => match &self.drawer {
+                        Some(drawer) => (drawer.screen, drawer.query.clone()),
+                        None => return Task::none(),
+                    },
+                    Some(screen) => {
+                        match self.spatial_homes.iter().find(|home| home.screen == screen) {
+                            Some(home) => (screen, home.query.clone()),
+                            None => return Task::none(),
+                        }
+                    }
+                };
+                let filtered = crate::model::spatial::filter_apps(&self.apps, &query);
+                let Some(first) = filtered.first() else {
+                    return Task::none();
+                };
+                let app_id = first.id.clone();
+                // Clear search field after launching.
+                match target {
+                    None => {
+                        if let Some(drawer) = &mut self.drawer {
+                            drawer.query.clear();
+                        }
+                    }
+                    Some(screen) => {
+                        if let Some(home) = self
+                            .spatial_homes
+                            .iter_mut()
+                            .find(|home| home.screen == screen)
+                        {
+                            home.query.clear();
+                        }
+                    }
+                }
+                self.update(Message::SpatialLaunchApp(screen, app_id))
+            }
+            Message::SpatialLaunchApp(screen, key) => {
+                let identity = self.identify(&key);
+                self.notify.mark_app_read(&identity.names);
+                let existing = self.snapshot.windows.iter().find(|window| {
+                    identity
+                        .names
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(&window.app))
+                });
+                if let Some(window) = existing {
+                    if window.screen == screen {
+                        self.send(Command::Activate { window: window.id });
+                    } else {
+                        self.send(Command::MoveToScreen {
+                            window: window.id,
+                            screen,
+                        });
+                    }
+                } else {
+                    self.send(Command::OpenOn {
+                        apps: identity.names.clone(),
+                        screen,
+                    });
+                    if let Some(command) = &identity.command {
+                        spawn(command);
+                        self.launched(&identity.key);
+                    } else {
+                        warn!(name = identity.name, "no command known to start this");
+                    }
+                }
+                let close_pop = self.close_spatial_popover();
+                close_pop.chain(self.update(Message::CloseDrawer))
+            }
+            Message::SpatialAppMenu(surface_id, _screen, key) => {
+                let Some(entry) = self.entry_for_menu(surface_id, &key) else {
+                    return Task::none();
+                };
+                let mut menu = bar::menu(&entry, &self.present_screens());
+                menu.actions
+                    .retain(|action| !matches!(action, MenuAction::Forget));
+                let size = (ui::menu::WIDTH, ui::menu::height(&menu));
+                let anchor = (200, 320, 1, 1);
+                let settings = IcedNewPopupSettings::new(surface_id, size, anchor)
+                    .anchor(PopupAnchor::TopLeft)
+                    .gravity(PopupGravity::BottomRight);
+                let close = self.close_menu().chain(self.close_tray_menu());
+                let (popup, open) = Message::popup_open(settings);
+                let entry_key = entry.identity.key.clone();
+                self.menu = Some((popup, surface_id, entry_key, Some(entry)));
+                close.chain(open)
+            }
+            Message::DailyTaskToggle(id) => {
+                self.widgets.toggle_daily_task(&id);
+                Task::none()
+            }
+            Message::GameNoteEdit(key, current) => {
+                self.editing_game = Some((key, current));
+                operation::focus(ui::spatial::cards::GAME_NOTE_INPUT)
+            }
+            Message::GameNoteDraft(text) => {
+                if let Some((_, draft)) = &mut self.editing_game {
+                    *draft = text;
+                }
+                Task::none()
+            }
+            Message::GameNoteSave => {
+                if let Some((key, draft)) = self.editing_game.take() {
+                    self.widgets.game_notes.set(key, draft);
+                    if let Err(error) = self.widgets.game_notes.save(&self.options.state_dir) {
+                        warn!(%error, "cannot save game notes");
+                    }
+                }
+                Task::none()
+            }
+            Message::GameNoteCancel => {
+                self.editing_game = None;
+                Task::none()
+            }
+            Message::SpatialLaunchGame(key) => {
+                let games = self.widgets.started_games(
+                    &self.games,
+                    &self.playtimes,
+                    self.now.timestamp(),
+                    true,
+                );
+                if let Some(game) = games.into_iter().find(|g| g.key == key) {
+                    if let Some(id) = game.steam_id {
+                        self.send(Command::OpenOn {
+                            apps: vec![format!("steam_app_{id}")],
+                            screen: OutputRole::Center,
+                        });
+                    }
+                    if let Some(command) = &game.command {
+                        spawn(command);
+                    }
+                }
+                let close_pop = self.close_spatial_popover();
+                close_pop.chain(self.update(Message::CloseDrawer))
             }
             // The messages added for the layer shell are handled by it.
             _ => Task::none(),
@@ -2542,10 +3133,28 @@ impl Dock {
                 Task::none()
             }
             compositor::Update::Event(Event::State(snapshot)) => {
+                let prev_focused = self
+                    .snapshot
+                    .windows
+                    .iter()
+                    .find(|w| w.active && !w.minimized)
+                    .map(|w| w.id);
                 self.snapshot = snapshot;
+                // Mark notifications read when an app's window gains focus.
+                if let Some(focused) = self
+                    .snapshot
+                    .windows
+                    .iter()
+                    .find(|w| w.active && !w.minimized)
+                {
+                    if Some(focused.id) != prev_focused {
+                        let names = self.identify(&focused.app).names;
+                        self.notify.mark_app_read(&names);
+                    }
+                }
                 // The screens are known: a lone one gets its dock.
                 let stale = self.drop_stale_bars();
-                let show = Task::batch([stale, self.show_bars()]);
+                let show = Task::batch([stale, self.show_bars(), self.sync_spatial_homes()]);
                 self.rebuild_entries();
                 // A game took the screen of the launcher: the launcher goes.
                 let screen = self.drawer.as_ref().map(|drawer| drawer.screen);
@@ -2556,9 +3165,19 @@ impl Dock {
                 } else {
                     Task::none()
                 };
+                let pop_held = self
+                    .spatial_popover
+                    .as_ref()
+                    .and_then(|p| self.screen(p.screen))
+                    .is_some_and(|s| s.anchored);
+                let close_pop = if pop_held && elsewhere {
+                    self.close_spatial_popover()
+                } else {
+                    Task::none()
+                };
                 let icons = self.follow_icon_style();
                 let toasts = self.sync_toasts();
-                Task::batch([close, show, self.fit_bars(), icons, toasts])
+                Task::batch([close, close_pop, show, self.fit_bars(), icons, toasts])
             }
         }
     }
@@ -2632,6 +3251,17 @@ impl Dock {
         let keyboard::Key::Named(named) = key else {
             return Task::none();
         };
+        if named == Named::Escape {
+            if self.editing_game.is_some() {
+                return self.update(Message::GameNoteCancel);
+            }
+            if let Some(popover) = &self.spatial_popover {
+                if popover.confirm.is_some() {
+                    return self.update(Message::Confirm(false));
+                }
+                return self.update(Message::CloseSpatialPopover);
+            }
+        }
         let Some(open) = &self.drawer else {
             return Task::none();
         };
@@ -2670,7 +3300,8 @@ impl Dock {
         ];
         // The clock; with the mixer open, the made-up levels move faster.
         let simulated_levels = !self.options.is_real(Backend::Audio)
-            && self.drawer.as_ref().is_some_and(Drawer::mixer_shown);
+            && (self.drawer.as_ref().is_some_and(Drawer::mixer_shown)
+                || self.spatial_popover.as_ref().is_some_and(|p| p.mixer));
         let pace = if simulated_levels {
             Duration::from_millis(120)
         } else {
@@ -2686,7 +3317,7 @@ impl Dock {
         if self.animating(Instant::now()) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
-        if self.drawer.is_some() {
+        if self.drawer.is_some() || self.spatial_popover.is_some() || self.editing_game.is_some() {
             // Every key, the ones the search field used too: Escape closes
             // the drawer even while typing.
             subscriptions.push(iced::event::listen_with(|event, _, _| match event {
@@ -2726,11 +3357,19 @@ impl Dock {
     }
 
     pub fn view(&self, id: window::Id) -> Element<'_, Message> {
+        let palette = self.palette();
         if let Some(bar) = self.bar(id) {
+            if self.is_spatial() {
+                return ui::spatial::bar::view(self, bar, palette);
+            }
             return ui::bar::view(self, bar);
         }
-        if let Some((_, bar, key)) = self.menu.as_ref().filter(|(menu, ..)| *menu == id) {
-            let entries = self.bar(*bar).map(|bar| bar.entries.as_slice());
+        if let Some((_, parent, key, cached)) = self.menu.as_ref().filter(|(menu, ..)| *menu == id)
+        {
+            if let Some(entry) = cached.as_ref() {
+                return ui::menu::view(self, entry);
+            }
+            let entries = self.bar(*parent).map(|bar| bar.entries.as_slice());
             let mut entries = entries.unwrap_or_default().iter();
             if let Some(entry) = entries.find(|entry| entry.identity.key == *key) {
                 return ui::menu::view(self, entry);
@@ -2741,8 +3380,37 @@ impl Dock {
                 return ui::tray_menu::view(self, item);
             }
         }
+        if let Some(popover) = self
+            .spatial_popover
+            .as_ref()
+            .filter(|popover| popover.id == id)
+        {
+            return ui::spatial::controls::view(self, popover, palette);
+        }
+        if let Some(home) = self.spatial_homes.iter().find(|home| home.id == id) {
+            return ui::spatial::launcher::view(
+                self,
+                home.id,
+                home.screen,
+                &home.query,
+                home.surface,
+                ui::spatial::launcher::LauncherMode::Home,
+                palette,
+            );
+        }
         let drawers = self.drawer.iter().chain(&self.leaving);
         if let Some(drawer) = drawers.into_iter().find(|drawer| drawer.id == id) {
+            if self.is_spatial() {
+                return ui::spatial::launcher::view(
+                    self,
+                    drawer.id,
+                    drawer.screen,
+                    &drawer.query,
+                    drawer.surface,
+                    ui::spatial::launcher::LauncherMode::Overlay,
+                    palette,
+                );
+            }
             return ui::drawer::view(self, drawer);
         }
         if let Some(surface) = self.toasts.as_ref().filter(|surface| surface.id == id) {

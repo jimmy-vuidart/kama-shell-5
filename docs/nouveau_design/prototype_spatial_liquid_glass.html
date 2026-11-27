@@ -1,0 +1,2446 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark" data-side="left">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>coquille — Prototype Mode Spatial (Liquid Glass)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* =========================================================================
+       JETONS COQUILLE-THEME (crates/theme/src/lib.rs) — CLAIR & SOMBRE
+       Matière : Verre liquide (réfraction, liseré rim, flou Kawase, Figtree)
+       ========================================================================= */
+    :root {
+      --sidebar-w: 56px;
+      --danger: #e5484d;
+      --danger-soft: rgba(229, 72, 77, 0.16);
+      --level: #3fb950;
+      --radius-panel: 18px;
+      --radius-card: 14px;
+      --radius-tile: 12px;
+    }
+
+    html[data-theme="dark"] {
+      --backdrop: #14121e;
+      --glass: rgba(26, 22, 44, 0.50);
+      --glass-strong: rgba(36, 32, 58, 0.84);
+      --glass-clear: rgba(26, 22, 44, 0.34);
+      --glass-overlay-bg: rgba(20, 17, 34, 0.56);
+      --rim: rgba(215, 210, 255, 0.18);
+      --rim-bright: rgba(215, 210, 255, 0.30);
+      --specular: rgba(255, 255, 255, 0.14);
+      --card: rgba(255, 255, 255, 0.075);
+      --card-hover: rgba(255, 255, 255, 0.125);
+      --hover: rgba(255, 255, 255, 0.10);
+      --separator: rgba(255, 255, 255, 0.09);
+      --text: #f1f2f4;
+      --muted: #9498a4;
+      --accent: #8f97ff;
+      --accent-soft: rgba(143, 151, 255, 0.18);
+      --on-accent: #14121e;
+      --shadow: rgba(12, 8, 28, 0.45);
+      --surface: #1c1a26;
+      --label-shadow: 0 1px 4px rgba(10, 8, 22, 0.72);
+      --game-scrim: linear-gradient(180deg, rgba(20, 17, 34, 0.18) 0%, rgba(20, 17, 34, 0.80) 100%);
+    }
+
+    html[data-theme="light"] {
+      --backdrop: #e9e6f4;
+      --glass: rgba(255, 255, 255, 0.50);
+      --glass-strong: rgba(255, 255, 255, 0.84);
+      --glass-clear: rgba(255, 255, 255, 0.24);
+      --glass-overlay-bg: rgba(238, 235, 248, 0.56);
+      --rim: rgba(255, 255, 255, 0.84);
+      --rim-bright: rgba(255, 255, 255, 0.94);
+      --specular: rgba(255, 255, 255, 0.75);
+      --card: rgba(255, 255, 255, 0.62);
+      --card-hover: rgba(255, 255, 255, 0.80);
+      --hover: rgba(255, 255, 255, 0.42);
+      --separator: rgba(30, 34, 60, 0.09);
+      --text: #1d2033;
+      --muted: #6b6f85;
+      --accent: #5b63e6;
+      --accent-soft: rgba(91, 99, 230, 0.14);
+      --on-accent: #ffffff;
+      --shadow: rgba(65, 50, 135, 0.18);
+      --surface: #f6f5fb;
+      --label-shadow: 0 1px 3px rgba(255, 255, 255, 0.85);
+      --game-scrim: linear-gradient(180deg, rgba(20, 18, 36, 0.12) 0%, rgba(18, 16, 32, 0.78) 100%);
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Figtree', system-ui, -apple-system, sans-serif;
+      background: var(--backdrop);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button {
+      font-family: inherit;
+      color: inherit;
+      background: none;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    input {
+      font-family: inherit;
+      color: inherit;
+    }
+
+    .tabular { font-variant-numeric: tabular-nums; }
+    .hidden { display: none !important; }
+
+    /* =========================================================================
+       FOND D'ÉCRAN « GLASS » COQUILLE (vagues verre jour / nuit)
+       ========================================================================= */
+    #wallpaper {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      transition: background 320ms ease;
+    }
+
+    html[data-theme="light"] #wallpaper {
+      background:
+        radial-gradient(ellipse 68% 64% at 15% 12%, rgba(164, 183, 255, 0.78), transparent 65%),
+        radial-gradient(ellipse 62% 62% at 88% 18%, rgba(248, 212, 198, 0.78), transparent 65%),
+        radial-gradient(ellipse 72% 66% at 58% 88%, rgba(206, 194, 240, 0.82), transparent 68%),
+        linear-gradient(135deg, #d7def8 0%, #e7dff2 50%, #f1ded8 100%);
+    }
+
+    html[data-theme="dark"] #wallpaper {
+      background:
+        radial-gradient(ellipse 68% 64% at 16% 16%, rgba(86, 102, 182, 0.42), transparent 64%),
+        radial-gradient(ellipse 64% 58% at 86% 20%, rgba(140, 96, 128, 0.34), transparent 62%),
+        radial-gradient(ellipse 74% 66% at 52% 92%, rgba(92, 82, 158, 0.36), transparent 66%),
+        linear-gradient(140deg, #171828 0%, #242138 50%, #1c192b 100%);
+    }
+
+    /* Arches douces rappelant le fond par défaut « glass » des captures verre/ */
+    .wp-arch {
+      position: absolute;
+      border-radius: 999px 999px 0 0;
+      transform: rotate(-34deg);
+      pointer-events: none;
+      transition: background 320ms ease, border-color 320ms ease;
+    }
+
+    html[data-theme="light"] .wp-arch {
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.42), rgba(215, 206, 244, 0.24));
+      border: 1.5px solid rgba(255, 255, 255, 0.65);
+      box-shadow: 0 -10px 40px rgba(90, 75, 155, 0.08);
+    }
+
+    html[data-theme="dark"] .wp-arch {
+      background: linear-gradient(160deg, rgba(168, 174, 238, 0.16), rgba(92, 82, 138, 0.09));
+      border: 1.5px solid rgba(215, 210, 255, 0.16);
+      box-shadow: 0 -10px 40px rgba(8, 6, 20, 0.28);
+    }
+
+    .wp-arch-1 { width: 52vw; height: 95vh; left: -6vw; top: 18vh; }
+    .wp-arch-2 { width: 48vw; height: 95vh; left: 26vw; top: 8vh; }
+    .wp-arch-3 { width: 46vw; height: 95vh; left: 54vw; top: 24vh; }
+    .wp-arch-4 { width: 44vw; height: 95vh; left: 76vw; top: 42vh; }
+
+    /* =========================================================================
+       SURFACES LIQUID GLASS COQUILLE
+       ========================================================================= */
+    .liquid-bar {
+      background: var(--glass-clear);
+      backdrop-filter: blur(26px) saturate(155%);
+      -webkit-backdrop-filter: blur(26px) saturate(155%);
+      box-shadow:
+        inset 0 1px 0 var(--specular),
+        0 0 28px var(--shadow);
+    }
+
+    html[data-side="left"] .liquid-bar {
+      left: 0;
+      right: auto;
+      border-right: 1px solid var(--rim-bright);
+    }
+
+    html[data-side="right"] .liquid-bar {
+      right: 0;
+      left: auto;
+      border-left: 1px solid var(--rim-bright);
+    }
+
+    .liquid-panel {
+      background: var(--glass);
+      backdrop-filter: blur(26px) saturate(150%);
+      -webkit-backdrop-filter: blur(26px) saturate(150%);
+      border: 1px solid var(--rim);
+      box-shadow:
+        inset 0 1px 0 var(--specular),
+        0 14px 36px -12px var(--shadow);
+    }
+
+    .liquid-strong {
+      background: var(--glass-strong);
+      backdrop-filter: blur(30px) saturate(160%);
+      -webkit-backdrop-filter: blur(30px) saturate(160%);
+      border: 1px solid var(--rim-bright);
+      box-shadow:
+        inset 0 1px 0 var(--specular),
+        0 20px 48px -10px var(--shadow);
+    }
+
+    /* =========================================================================
+       BARRE LATÉRALE PERMANENTE PLEINE HAUTEUR (56 px, gauche ou droite)
+       ========================================================================= */
+    #sidebar {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      width: var(--sidebar-w);
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+    }
+
+    /* Bloc HAUT : Accueil -> Horloge/Date -> Séparateur -> Barre des tâches alignée en haut */
+    .sb-top {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .sb-sep {
+      width: 22px;
+      height: 1px;
+      background: var(--separator);
+    }
+
+    .sb-clock {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      line-height: 1.05;
+      padding: 2px 0;
+    }
+
+    .sb-clock-time {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .sb-clock-date {
+      font-size: 9.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .sb-taskbar {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .sb-btn {
+      position: relative;
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid transparent;
+      transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+    }
+
+    .sb-btn:hover {
+      background: var(--hover);
+    }
+
+    .sb-btn:active {
+      transform: scale(0.95);
+    }
+
+    .sb-btn.is-active {
+      background: var(--card);
+      border-color: var(--rim);
+    }
+
+    .sb-btn.is-running {
+      background: color-mix(in srgb, var(--card) 65%, transparent);
+    }
+
+    /* Indicateurs bord extérieur (miroir gauche / droite) */
+    .sb-mark {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      transition: all 160ms ease;
+    }
+
+    html[data-side="left"] .sb-mark { left: -9px; }
+    html[data-side="right"] .sb-mark { right: -9px; }
+
+    .sb-mark-bar {
+      width: 3px;
+      height: 20px;
+      background: var(--accent);
+    }
+
+    html[data-side="left"] .sb-mark-bar { border-radius: 0 3px 3px 0; }
+    html[data-side="right"] .sb-mark-bar { border-radius: 3px 0 0 3px; }
+
+    .sb-mark-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--accent);
+      opacity: 0.85;
+    }
+
+    html[data-side="left"] .sb-mark-dot { left: -7px; }
+    html[data-side="right"] .sb-mark-dot { right: -7px; }
+
+    .sb-mark-ring {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      border: 1.6px solid var(--accent);
+      background: transparent;
+    }
+
+    html[data-side="left"] .sb-mark-ring { left: -7px; }
+    html[data-side="right"] .sb-mark-ring { right: -7px; }
+
+    /* Pastille non lues (DANGER coquille, comme dock_dark.png) */
+    .sb-badge {
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 999px;
+      background: var(--danger);
+      color: #fff;
+      font-size: 9.5px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(229, 72, 77, 0.45);
+    }
+
+    /* Tooltips sobres en glass_strong, orientés selon le côté de la barre */
+    .has-tip { position: relative; }
+    .has-tip[data-tip]::after {
+      content: attr(data-tip);
+      position: absolute;
+      top: 50%;
+      white-space: nowrap;
+      padding: 5px 10px;
+      border-radius: 9px;
+      font-size: 11.5px;
+      font-weight: 500;
+      background: var(--glass-strong);
+      border: 1px solid var(--rim-bright);
+      color: var(--text);
+      box-shadow: 0 10px 24px var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 130ms ease, transform 130ms ease;
+      z-index: 90;
+    }
+
+    html[data-side="left"] .has-tip[data-tip]::after {
+      left: calc(100% + 12px);
+      transform: translateY(-50%) translateX(-4px);
+    }
+    html[data-side="left"] .has-tip[data-tip]:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    html[data-side="right"] .has-tip[data-tip]::after {
+      right: calc(100% + 12px);
+      transform: translateY(-50%) translateX(4px);
+    }
+    html[data-side="right"] .has-tip[data-tip]:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    /* Bloc BAS : System Tray compact au-dessus de la pilule scindée */
+    .sb-bottom {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .sb-tray {
+      display: grid;
+      grid-template-columns: repeat(2, 16px);
+      gap: 5px;
+      padding: 5px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--card) 55%, transparent);
+      border: 1px solid var(--separator);
+    }
+
+    .tray-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 700;
+      color: #fff;
+      transition: transform 120ms ease;
+    }
+
+    .tray-dot:hover { transform: scale(1.12); }
+
+    /* Pilule scindée en 2 zones cliquables : Cloche (Notifications) vs Système (Centre de contrôle) */
+    .sb-pill {
+      width: 38px;
+      border-radius: 14px;
+      background: var(--card);
+      border: 1px solid var(--rim);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 var(--specular);
+    }
+
+    .sb-pill-zone {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 9px 0;
+      color: var(--text);
+      transition: background 140ms ease;
+    }
+
+    .sb-pill-zone:hover {
+      background: var(--hover);
+    }
+
+    .sb-pill-zone.is-open {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .sb-pill-divider {
+      width: 22px;
+      height: 1px;
+      margin: 0 auto;
+      background: var(--separator);
+    }
+
+    .notif-dot {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--danger);
+      box-shadow: 0 0 0 2px var(--surface);
+    }
+
+    /* =========================================================================
+       POPOVERS DÉCOUPLÉS (Notifications SEUL ou Centre de contrôle SEUL + Mixeur)
+       Réutilisation exacte des composants coquille existants
+       ========================================================================= */
+    .popover-anchor {
+      position: fixed;
+      bottom: 14px;
+      z-index: 60;
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      transition: opacity 170ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    html[data-side="left"] .popover-anchor {
+      left: calc(var(--sidebar-w) + 12px);
+      flex-direction: row;
+    }
+
+    html[data-side="right"] .popover-anchor {
+      right: calc(var(--sidebar-w) + 12px);
+      flex-direction: row-reverse;
+    }
+
+    .popover-anchor.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px) scale(0.98);
+    }
+
+    .coquille-popover {
+      width: 348px;
+      max-height: calc(100vh - 36px);
+      border-radius: var(--radius-panel);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+    }
+
+    .coquille-mixer {
+      width: 300px;
+      border-radius: var(--radius-panel);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .cc-card {
+      background: var(--card);
+      border-radius: var(--radius-card);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .cc-switches {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+
+    .cc-switch {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 1px solid transparent;
+      text-align: left;
+      transition: background 140ms ease, color 140ms ease;
+    }
+
+    .cc-switch:hover {
+      background: var(--card-hover);
+    }
+
+    .cc-switch.on {
+      background: var(--accent);
+      color: var(--on-accent);
+    }
+
+    .cc-switch-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.15;
+    }
+
+    .cc-switch-sub {
+      font-size: 11px;
+      opacity: 0.78;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cc-slider-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cc-icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--card);
+      transition: background 130ms ease, color 130ms ease;
+      flex-shrink: 0;
+    }
+
+    .cc-icon-btn:hover { background: var(--card-hover); }
+    .cc-icon-btn.on { background: var(--accent); color: var(--on-accent); }
+
+    .coquille-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--separator);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .coquille-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--accent);
+      border: 2px solid var(--surface);
+      box-shadow: 0 2px 6px var(--shadow);
+    }
+
+    .cc-pill-badge {
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: var(--card);
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .cc-session-who {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .cc-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: var(--on-accent);
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .cc-session-actions {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 6px;
+    }
+
+    .cc-session-btn {
+      height: 34px;
+      border-radius: 10px;
+      background: var(--card);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 130ms ease;
+    }
+
+    .cc-session-btn:hover { background: var(--card-hover); }
+    .cc-session-btn.danger { background: var(--danger-soft); color: var(--danger); }
+    .cc-session-btn.danger:hover { background: rgba(229, 72, 77, 0.26); }
+
+    /* Notifications block (réutilisation exacte de ui/drawer.rs) */
+    .notice-card {
+      padding: 10px 11px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 1px solid var(--separator);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      transition: background 130ms ease;
+    }
+
+    .notice-card:hover { background: var(--card-hover); }
+
+    .notice-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .notice-close {
+      opacity: 0.45;
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .notice-close:hover { opacity: 1; background: var(--hover); }
+
+    /* =========================================================================
+       MENU CONTEXTUEL CLIC DROIT (conservé à l'identique)
+       ========================================================================= */
+    #context-menu {
+      position: fixed;
+      z-index: 80;
+      width: 224px;
+      border-radius: 14px;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .ctx-head {
+      padding: 6px 8px 8px;
+      border-bottom: 1px solid var(--separator);
+      margin-bottom: 4px;
+    }
+
+    .ctx-screens {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      padding: 4px 2px 6px;
+    }
+
+    .ctx-screen-btn {
+      padding: 5px 4px;
+      border-radius: 8px;
+      background: var(--card);
+      font-size: 11px;
+      font-weight: 500;
+      text-align: center;
+    }
+
+    .ctx-screen-btn:hover { background: var(--accent); color: var(--on-accent); }
+
+    .ctx-item {
+      width: 100%;
+      padding: 7px 9px;
+      border-radius: 8px;
+      text-align: left;
+      font-size: 12.5px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .ctx-item:hover { background: var(--hover); }
+    .ctx-item.danger { color: var(--danger); }
+
+    /* =========================================================================
+       ZONE PRINCIPALE (Hors barre 56 px)
+       ========================================================================= */
+    #stage {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    html[data-side="left"] #stage { left: var(--sidebar-w); right: 0; }
+    html[data-side="right"] #stage { right: var(--sidebar-w); left: 0; }
+
+    /* Fenêtre maximisée bord à bord (zéro marge, zéro capsule) */
+    #maximized-view {
+      position: absolute;
+      inset: 0;
+      z-index: 12;
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .max-bar {
+      height: 40px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--separator);
+      background: var(--glass);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .max-body {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      background:
+        radial-gradient(circle at 30% 25%, var(--accent-soft), transparent 55%),
+        var(--surface);
+    }
+
+    /* =========================================================================
+       LANCEUR SPATIAL :
+       - Mode Bottom (permanent sur écran vide / toutes réduites : directement sur le wallpaper)
+       - Mode Overlay (par-dessus une fenêtre maximisée : floutage complet du bureau ouvert)
+       ========================================================================= */
+    #spatial-launcher {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      overflow-y: auto;
+      padding: 46px 40px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      transition: background 200ms ease, backdrop-filter 200ms ease, opacity 180ms ease;
+    }
+
+    /* Sur écran vide : directement au-dessus du fond d'écran, zéro voile */
+    #spatial-launcher.mode-bottom {
+      background: transparent;
+      backdrop-filter: none;
+    }
+
+    /* Par-dessus une fenêtre maximisée : floutage complet de la fenêtre dessous */
+    #spatial-launcher.mode-overlay {
+      background: var(--glass-overlay-bg);
+      backdrop-filter: blur(30px) saturate(150%);
+      -webkit-backdrop-filter: blur(30px) saturate(150%);
+    }
+
+    /* Recherche centrée */
+    .search-wrap {
+      width: 100%;
+      max-width: 460px;
+      margin: 0 auto;
+      border-radius: 16px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .search-wrap:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft), 0 12px 32px -10px var(--shadow);
+    }
+
+    .search-input {
+      width: 100%;
+      background: transparent;
+      border: 0;
+      outline: none;
+      font-size: 13.5px;
+      font-weight: 500;
+      user-select: text;
+    }
+
+    .search-input::placeholder { color: var(--muted); }
+
+    /* Grille asymétrique 2 colonnes (42% / 58%) */
+    .spatial-grid {
+      width: 100%;
+      max-width: 1440px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 5fr 7fr;
+      gap: 18px;
+      align-items: start;
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 1080px) {
+      .spatial-grid { grid-template-columns: 1fr; }
+    }
+
+    .spatial-col {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .widget-card {
+      border-radius: 20px;
+      padding: 18px 20px;
+    }
+
+    .widget-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .widget-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .widget-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .widget-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .widget-meta {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    /* Vie quotidienne (tâches cochables) */
+    .task-row {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      text-align: left;
+      transition: background 130ms ease, opacity 130ms ease;
+    }
+
+    .task-row:hover { background: var(--hover); }
+    .task-row.done { opacity: 0.52; }
+
+    .task-check {
+      width: 17px;
+      height: 17px;
+      border-radius: 999px;
+      border: 1.6px solid var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .task-row.done .task-check {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--on-accent);
+    }
+
+    /* Tâches des projets */
+    .ticket-row {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 13px;
+      background: var(--card);
+      border: 1px solid var(--separator);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      text-align: left;
+      transition: background 130ms ease, border-color 130ms ease;
+    }
+
+    .ticket-row:hover {
+      background: var(--card-hover);
+      border-color: var(--rim);
+    }
+
+    .status-pill {
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* Jeux (3 cartes + édition inline du commentaire) */
+    .games-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 720px) {
+      .games-grid { grid-template-columns: 1fr; }
+    }
+
+    .game-card {
+      position: relative;
+      height: 152px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--rim);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      color: #fff;
+      cursor: pointer;
+      transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1), border-color 170ms ease;
+    }
+
+    .game-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--rim-bright);
+    }
+
+    .game-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--game-scrim);
+      pointer-events: none;
+    }
+
+    .game-top, .game-bottom {
+      position: relative;
+      z-index: 2;
+    }
+
+    .game-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .game-pill {
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(16, 14, 28, 0.48);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      font-size: 10.5px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.9);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .game-play {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      flex-shrink: 0;
+      transition: background 140ms ease, transform 140ms ease;
+    }
+
+    .game-card:hover .game-play {
+      background: var(--accent);
+      color: var(--on-accent);
+      border-color: transparent;
+      transform: scale(1.06);
+    }
+
+    .game-note-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 3px;
+      padding: 2px 5px;
+      margin-left: -5px;
+      border-radius: 7px;
+      transition: background 130ms ease;
+    }
+
+    .game-note-row:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .game-note-text {
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.84);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    .game-note-edit-icon {
+      opacity: 0;
+      transition: opacity 130ms ease;
+      flex-shrink: 0;
+    }
+
+    .game-card:hover .game-note-edit-icon { opacity: 0.85; }
+
+    .game-note-input {
+      width: 100%;
+      margin-top: 3px;
+      padding: 3px 7px;
+      border-radius: 7px;
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      background: rgba(14, 12, 26, 0.72);
+      color: #fff;
+      font-size: 11.5px;
+      outline: none;
+      user-select: text;
+    }
+
+    /* Agenda 7 jours */
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    @media (max-width: 720px) {
+      .cal-grid { grid-template-columns: 1fr; }
+    }
+
+    .cal-item {
+      padding: 9px 11px;
+      border-radius: 13px;
+      background: var(--card);
+      border: 1px solid var(--separator);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+      transition: background 130ms ease;
+    }
+
+    .cal-item:hover { background: var(--card-hover); }
+    .cal-item.today { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+    .cal-stripe {
+      width: 3.5px;
+      height: 30px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+
+    /* Grille flottante GNOME (zéro carte au repos, gabarit Reversal / icons::tile) */
+    .apps-section {
+      width: 100%;
+      max-width: 1140px;
+      margin: 4px auto 0;
+      flex-shrink: 0;
+    }
+
+    .apps-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 14px 10px;
+    }
+
+    @media (max-width: 1120px) { .apps-grid { grid-template-columns: repeat(6, 1fr); } }
+    @media (max-width: 740px) { .apps-grid { grid-template-columns: repeat(4, 1fr); } }
+
+    .app-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 6px 8px;
+      border-radius: 16px;
+      background: transparent;
+      border: 1px solid transparent;
+      transition: background 150ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .app-tile:hover {
+      background: var(--hover);
+      transform: translateY(-2px);
+    }
+
+    .app-tile:active { transform: scale(0.96); }
+
+    .app-icon-box {
+      width: 52px;
+      height: 52px;
+      border-radius: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      filter: drop-shadow(0 6px 12px var(--shadow));
+      transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .app-tile:hover .app-icon-box { transform: scale(1.05); }
+
+    .app-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      text-shadow: var(--label-shadow);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .app-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+    }
+
+    .app-dot.here { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .app-dot.elsewhere { border: 1.5px solid var(--accent); background: transparent; }
+    .app-dot.none { opacity: 0; }
+
+    /* =========================================================================
+       BARRE DE SIMULATION DISCRÈTE (Haut droit / gauche selon côté de la barre)
+       ========================================================================= */
+    #sim-bar {
+      position: fixed;
+      top: 10px;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    html[data-side="left"] #sim-bar { right: 16px; left: auto; }
+    html[data-side="right"] #sim-bar { left: 16px; right: auto; }
+
+    .seg {
+      display: flex;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 999px;
+      background: var(--card);
+    }
+
+    .seg button {
+      padding: 3px 8px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      transition: background 130ms ease, color 130ms ease;
+    }
+
+    .seg button.active {
+      background: var(--accent);
+      color: var(--on-accent);
+      font-weight: 600;
+    }
+
+    /* Toast micro-feedback */
+    #toast {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      z-index: 95;
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Scrollbar discrète */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--separator); border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <!-- 1. FOND D'ÉCRAN LIQUID GLASS COQUILLE -->
+  <div id="wallpaper">
+    <div class="wp-arch wp-arch-1"></div>
+    <div class="wp-arch wp-arch-2"></div>
+    <div class="wp-arch wp-arch-3"></div>
+    <div class="wp-arch wp-arch-4"></div>
+  </div>
+
+  <!-- 2. BARRE DE SIMULATION (multi-écrans, thème clair/sombre, côté gauche/droite, profil) -->
+  <div id="sim-bar" class="liquid-panel">
+    <div class="seg" title="Écran simulé">
+      <button id="scr-left" onclick="setScreen('left')">Gauche</button>
+      <button id="scr-center" class="active" onclick="setScreen('center')">Centre 21:9</button>
+      <button id="scr-right" onclick="setScreen('right')">Droite</button>
+    </div>
+    <div class="seg" title="Thème coquille">
+      <button id="th-dark" class="active" onclick="setTheme('dark')">Sombre</button>
+      <button id="th-light" onclick="setTheme('light')">Clair</button>
+    </div>
+    <div class="seg" title="Côté de la barre verticale">
+      <button id="side-left" class="active" onclick="setSide('left')">Barre G</button>
+      <button id="side-right" onclick="setSide('right')">Barre D</button>
+    </div>
+    <div class="seg" title="Machine">
+      <button id="host-zenbook" class="active" onclick="setHost('zenbook')">Zenbook</button>
+      <button id="host-titan" onclick="setHost('titan')">TITAN</button>
+    </div>
+  </div>
+
+  <!-- 3. BARRE LATÉRALE PERMANENTE PLEINE HAUTEUR (56 px, Liquid Glass) -->
+  <aside id="sidebar" class="liquid-bar">
+    <!-- HAUT : Accueil -> Horloge/Date -> Séparateur -> Barre des tâches alignée en haut -->
+    <div class="sb-top">
+      <button id="btn-home" class="sb-btn has-tip" onclick="toggleHomeOverlay()" data-tip="Lanceur spatial (Super)" aria-label="Accueil">
+        <span id="home-mark" class="sb-mark sb-mark-bar"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="3" y="3" width="8" height="8" rx="2.2" />
+          <rect x="13" y="3" width="8" height="8" rx="2.2" opacity="0.78" />
+          <rect x="3" y="13" width="8" height="8" rx="2.2" opacity="0.78" />
+          <rect x="13" y="13" width="8" height="8" rx="2.2" opacity="0.58" />
+        </svg>
+      </button>
+
+      <div id="clock-box" class="sb-clock has-tip" data-tip="Vendredi 27 novembre 2026">
+        <span id="clock-time" class="sb-clock-time tabular">13:39</span>
+        <span id="clock-date" class="sb-clock-date tabular">VEN 27</span>
+      </div>
+
+      <div class="sb-sep"></div>
+
+      <!-- Barre des tâches alignée en haut -->
+      <div id="taskbar" class="sb-taskbar"></div>
+    </div>
+
+    <!-- BAS : System Tray compact au-dessus de la pilule scindée (Cloche vs Contrôles) -->
+    <div class="sb-bottom">
+      <!-- Zone System Tray (SNI / XEmbed) -->
+      <div class="sb-tray has-tip" data-tip="Icônes d'état (SNI / XEmbed)">
+        <button class="tray-dot" style="background:#5865f2" onclick="toast('Icône tray : Discord')" title="Discord">D</button>
+        <button class="tray-dot" style="background:#1b73b8" onclick="toast('Icône tray : Steam')" title="Steam">S</button>
+        <button class="tray-dot" style="background:#ea580c" onclick="toast('Icône tray : Mises à jour')" title="Mises à jour">M</button>
+        <button class="tray-dot" style="background:#475569" onclick="toast('Icône tray : Presse-papiers')" title="Presse-papiers">C</button>
+      </div>
+
+      <!-- Pilule unique à 2 zones cliquables distinctes -->
+      <div class="sb-pill">
+        <!-- Zone 1 : Cloche -> ouvre UNIQUEMENT les Notifications -->
+        <button id="pill-notifs" class="sb-pill-zone has-tip" onclick="togglePopover('notifications')" data-tip="Notifications">
+          <span style="position:relative;display:flex;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" />
+              <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
+            </svg>
+            <span id="pill-notif-dot" class="notif-dot"></span>
+          </span>
+        </button>
+
+        <div class="sb-pill-divider"></div>
+
+        <!-- Zone 2 : Reste de la pilule -> ouvre UNIQUEMENT le Centre de contrôle (+ Mixeur) -->
+        <button id="pill-controls" class="sb-pill-zone has-tip" onclick="togglePopover('controls')" data-tip="Centre de contrôle">
+          <svg id="pill-wifi" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+            <circle cx="12" cy="19.5" r="1" fill="currentColor" stroke="none" />
+          </svg>
+          <svg id="pill-audio-hp" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 15v-3a8 8 0 0 1 16 0v3" />
+            <rect x="3" y="14" width="4" height="6" rx="1.5" />
+            <rect x="17" y="14" width="4" height="6" rx="1.5" />
+          </svg>
+          <svg id="pill-audio-sp" class="hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+            <path d="M15.5 9a4 4 0 0 1 0 6" />
+          </svg>
+          <svg id="pill-battery" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="7" width="17" height="10" rx="2.5" />
+            <path d="M22 10.5v3" />
+            <path d="M12 9.2 9.5 12.4h3l-2.5 3.2" stroke-width="1.6" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 4. POPOVERS DÉCOUPLÉS (Notifications SEUL ou Centre de contrôle SEUL + Mixeur) -->
+  <div id="popover-anchor" class="popover-anchor is-hidden">
+    <!-- Popover principal (soit Notifications, soit Centre de contrôle) -->
+    <div id="popover-body" class="coquille-popover liquid-strong"></div>
+    <!-- Panneau Mixeur par application (existant coquille, à côté du Centre de contrôle) -->
+    <div id="mixer-panel" class="coquille-mixer liquid-strong hidden"></div>
+  </div>
+
+  <!-- 5. MENU CONTEXTUEL CLIC DROIT (conservé) -->
+  <div id="context-menu" class="liquid-strong hidden"></div>
+
+  <!-- 6. SCÈNE PRINCIPALE (hors barre 56 px) -->
+  <main id="stage">
+    <!-- Fenêtre maximisée bord à bord (quand l'écran a une fenêtre ouverte non réduite) -->
+    <section id="maximized-view" class="hidden">
+      <div class="max-bar">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+          <span id="max-icon" style="display:flex;"></span>
+          <strong id="max-title" style="font-size:13.5px;font-weight:600;"></strong>
+          <span id="max-screen-badge" class="cc-pill-badge" style="font-size:11px;padding:3px 9px;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button class="cc-pill-badge" onclick="minimizeActiveApp()" title="Réduire : si aucune autre fenêtre n'est visible, le Lanceur Spatial apparaît automatiquement">Réduire</button>
+          <button class="cc-pill-badge" style="background:var(--danger-soft);color:var(--danger);" onclick="closeActiveApp()">Fermer</button>
+        </div>
+      </div>
+      <div id="max-body" class="max-body"></div>
+    </section>
+
+    <!-- LANCEUR SPATIAL :
+         - mode-bottom : ouvert AUTOMATIQUEMENT sur tout écran sans fenêtre visible
+         - mode-overlay : ouvert par-dessus une fenêtre maximisée avec floutage complet -->
+    <section id="spatial-launcher" class="mode-bottom">
+      <!-- Barre de recherche centrée -->
+      <div class="search-wrap liquid-panel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="7" />
+          <path d="M20.5 20.5 16 16" />
+        </svg>
+        <input id="search-input" class="search-input" type="text" placeholder="Rechercher une application ou un jeu…" oninput="onSearch(this.value)" onkeydown="onSearchKey(event)" />
+        <button id="search-clear" class="hidden" onclick="clearSearch()" style="color:var(--muted);display:flex;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <!-- 2 colonnes asymétriques : Vie quotidienne / Tâches des projets | Jeux / Agenda 7 jours -->
+      <div class="spatial-grid">
+        <div class="spatial-col">
+          <!-- Vie quotidienne -->
+          <div class="widget-card liquid-panel">
+            <div class="widget-head">
+              <div class="widget-title-row">
+                <span class="widget-dot"></span>
+                <span class="widget-title">Vie quotidienne</span>
+              </div>
+              <span id="tasks-meta" class="widget-meta tabular"></span>
+            </div>
+            <div id="tasks-list" style="display:flex;flex-direction:column;gap:2px;"></div>
+          </div>
+
+          <!-- Tâches des projets -->
+          <div class="widget-card liquid-panel">
+            <div class="widget-head">
+              <div class="widget-title-row">
+                <span class="widget-dot"></span>
+                <span class="widget-title">Tâches des projets</span>
+              </div>
+              <span class="widget-meta">Données simulées</span>
+            </div>
+            <div id="projects-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+          </div>
+        </div>
+
+        <div class="spatial-col">
+          <!-- Jeux (avec édition à la volée du commentaire) -->
+          <div class="widget-card liquid-panel">
+            <div class="widget-head">
+              <div class="widget-title-row">
+                <span class="widget-dot"></span>
+                <span class="widget-title">Jeux</span>
+              </div>
+              <span class="widget-meta">Clic sur le commentaire pour éditer</span>
+            </div>
+            <div id="games-grid" class="games-grid"></div>
+          </div>
+
+          <!-- Agenda · 7 jours -->
+          <div class="widget-card liquid-panel">
+            <div class="widget-head">
+              <div class="widget-title-row">
+                <span class="widget-dot"></span>
+                <span class="widget-title">Agenda · 7 jours</span>
+              </div>
+              <span id="cal-range" class="widget-meta tabular"></span>
+            </div>
+            <div id="cal-grid" class="cal-grid"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grille flottante GNOME (zéro carte au repos) -->
+      <div class="apps-section">
+        <div id="apps-grid" class="apps-grid"></div>
+        <div id="apps-empty" class="hidden" style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">
+          Aucune application ne correspond à cette recherche.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="liquid-strong"></div>
+
+  <script>
+    /* --- Icônes Reversal-like (gabarit carré arrondi unifié icons::tile) --- */
+    function iconSvg(id, size = 24) {
+      const a = `width="${size}" height="${size}" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"`;
+      const tile = (c1, c2, inner) => `
+        <svg ${a}>
+          <defs><linearGradient id="g-${id}-${size}" x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>
+          <rect x="4" y="4" width="56" height="56" rx="15" fill="url(#g-${id}-${size})"/>
+          ${inner}
+        </svg>`;
+      switch (id) {
+        case 'orca': return tile('#8b5cf6', '#3b82f6', '<path d="M32 15 47 23.6v16.8L32 49 17 40.4V23.6L32 15Z" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="M32 32 47 23.6M32 32v17M32 32 17 23.6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>');
+        case 'zen': return tile('#fb923c', '#7c3aed', '<circle cx="32" cy="32" r="16" stroke="#fff" stroke-width="3.4"/><circle cx="32" cy="32" r="8.5" stroke="#fff" stroke-width="3"/><circle cx="32" cy="32" r="3" fill="#fff"/>');
+        case 'webstorm': return tile('#06b6d4', '#4f46e5', '<rect x="14" y="14" width="36" height="36" rx="7" fill="#11131f"/><text x="19" y="34" fill="#fff" font-family="Figtree,sans-serif" font-weight="700" font-size="14">WS</text><rect x="19" y="40" width="15" height="3" rx="1.5" fill="#fff"/>');
+        case 'discord': return tile('#7289ff', '#4e5de0', '<path d="M44 22a24 24 0 0 0-6.5-2l-.8 1.6a22 22 0 0 0-9.4 0L26.5 20A24 24 0 0 0 20 22c-4.2 6.2-5.3 12.2-4.8 18.1a24 24 0 0 0 7.8 3.9l1.7-2.7-2.6-1.2.6-.5a17 17 0 0 0 18.6 0l.6.5-2.6 1.2 1.7 2.7a24 24 0 0 0 7.8-3.9c.6-6.9-1-12.8-4.8-18.1ZM26.5 36.2c-1.5 0-2.8-1.4-2.8-3.1s1.2-3.1 2.8-3.1 2.8 1.4 2.8 3.1-1.2 3.1-2.8 3.1Zm11 0c-1.5 0-2.8-1.4-2.8-3.1s1.2-3.1 2.8-3.1 2.8 1.4 2.8 3.1-1.2 3.1-2.8 3.1Z" fill="#fff"/>');
+        case 'steam': return tile('#1e3a5f', '#38bdf8', '<circle cx="39" cy="24" r="7" stroke="#fff" stroke-width="3.2"/><circle cx="39" cy="24" r="2.8" fill="#fff"/><circle cx="24" cy="40" r="5.2" stroke="#fff" stroke-width="3"/><path d="M12 35 22.5 40M34 29 27.5 36.5" stroke="#fff" stroke-width="3.8" stroke-linecap="round"/>');
+        case 'godot': return tile('#58b4f6', '#2563eb', '<circle cx="23" cy="33" r="5" fill="#fff"/><circle cx="41" cy="33" r="5" fill="#fff"/><circle cx="24" cy="33" r="2.3" fill="#1e293b"/><circle cx="40" cy="33" r="2.3" fill="#1e293b"/><path d="M22 44c3.5 2.5 16.5 2.5 20 0" stroke="#fff" stroke-width="3" stroke-linecap="round"/>');
+        case 'kitty': return tile('#312e47', '#1a1826', '<path d="M18 26 26 33l-8 7" stroke="#8f97ff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="31" y1="40" x2="45" y2="40" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>');
+        case 'files': return tile('#60a5fa', '#2563eb', '<path d="M14 21h14l4 4h18v19a4 4 0 0 1-4 4H18a4 4 0 0 1-4-4V21Z" fill="rgba(255,255,255,0.9)"/><path d="M24 35h16" stroke="#2563eb" stroke-width="3" stroke-linecap="round"/>');
+        case 'homeassistant': return tile('#38bdf8', '#0284c7', '<path d="M32 16 17 30h5v16h20V30h5L32 16Z" fill="#fff"/><circle cx="32" cy="35" r="3" fill="#0284c7"/>');
+        case 'argocd': return tile('#fb923c', '#ea580c', '<circle cx="32" cy="28" r="10" fill="#fff"/><circle cx="28" cy="27" r="2.2" fill="#1e293b"/><circle cx="36" cy="27" r="2.2" fill="#1e293b"/><path d="M22 44c3-4 17-4 20 0" stroke="#fff" stroke-width="3" stroke-linecap="round"/>');
+        case 'nas': return tile('#34d399', '#059669', '<rect x="15" y="17" width="34" height="12" rx="4" fill="rgba(255,255,255,0.92)"/><rect x="15" y="35" width="34" height="12" rx="4" fill="rgba(255,255,255,0.72)"/>');
+        case 'lmstudio': return tile('#ec4899', '#6366f1', '<rect x="20" y="20" width="24" height="24" rx="5" stroke="#fff" stroke-width="3"/><rect x="27" y="27" width="10" height="10" rx="2" fill="#fff"/>');
+        case 'settings': return tile('#94a3b8', '#475569', '<circle cx="32" cy="32" r="12" stroke="#fff" stroke-width="4" stroke-dasharray="5 4"/><circle cx="32" cy="32" r="5" fill="#fff"/>');
+        case 'calculator': return tile('#64748b', '#334155', '<rect x="18" y="15" width="28" height="10" rx="3" fill="#fff"/><circle cx="23" cy="34" r="3" fill="#fff"/><circle cx="32" cy="34" r="3" fill="#fff"/><circle cx="41" cy="34" r="3" fill="#fb923c"/><circle cx="23" cy="44" r="3" fill="#fff"/><circle cx="32" cy="44" r="3" fill="#fff"/><circle cx="41" cy="44" r="3" fill="#fb923c"/>');
+        case 'btop': return tile('#ef4444', '#991b1b', '<path d="M16 42 25 28l7 8 8-14 8 10" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>');
+        case 'nvidia': return tile('#84cc16', '#4d7c0f', '<path d="M15 33c5-9 13-13 22-13 6 0 11 3 13 8-5 9-13 14-23 14-5 0-9-3-12-9Z" fill="#fff"/><circle cx="34" cy="31" r="4" fill="#4d7c0f"/>');
+        default: return tile('#5b63e6', '#3b82f6', '<circle cx="32" cy="32" r="12" fill="#fff"/>');
+      }
+    }
+
+    const savedGameNotes = JSON.parse(localStorage.getItem('coquille_proto_game_notes') || '{}');
+
+    const state = {
+      theme: 'dark',
+      side: 'left',
+      host: 'zenbook',
+      currentScreen: 'center',
+      /* Chaque écran maintient sa pile de fenêtres maximisées (null = aucune visible -> Lanceur Spatial permanent) */
+      screens: {
+        left:   { label: 'Écran gauche',  overlayOpen: false },
+        center: { label: 'Centre 21:9',   overlayOpen: false },
+        right:  { label: 'Écran droit',   overlayOpen: false }
+      },
+      pinned: ['orca', 'zen', 'webstorm', 'discord', 'steam'],
+      /* Fenêtres ouvertes (minimized: true cache la fenêtre; si toutes sont réduites, l'écran affiche le Lanceur Spatial) */
+      windows: [
+        { id: 'orca', name: 'orca.dev', subtitle: 'Workspace principal · 2 agents actifs', screen: 'right', minimized: false, active: true },
+        { id: 'discord', name: 'Discord', subtitle: 'Salon vocal · Guilde FFXIV', screen: 'left', minimized: false, active: true }
+      ],
+      search: '',
+      popover: null, // null | 'notifications' | 'controls'
+      mixerOpen: false,
+      confirmAction: null,
+      audioSink: 'Casque USB',
+      volume: 68,
+      muted: false,
+      brightness: 88,
+      switches: {
+        network: true,
+        bluetooth: true,
+        dnd: false,
+        nightlight: false
+      },
+      mixerStreams: [
+        { id: 'discord', name: 'Discord', state: 'Vocal du raid', volume: 78, muted: false, level: 0.62 },
+        { id: 'zen', name: 'Zen Browser', state: 'YouTube', volume: 54, muted: false, level: 0.34 },
+        { id: 'steam', name: 'Final Fantasy XIV', state: 'Jeu', volume: 70, muted: false, level: 0.48 }
+      ],
+      notifications: [
+        { id: 'n1', appId: 'orca', app: 'orca.dev', time: 'il y a 2 min', title: 'Claude Code · Validation requise', body: '4 modifications prêtes sur auth.service.ts.', unread: true },
+        { id: 'n2', appId: 'orca', app: 'orca.dev', time: 'il y a 6 min', title: 'Gemini CLI · Tests unitaires passés', body: '18/18 tests OK sur fix/worker-mem.', unread: true },
+        { id: 'n3', appId: 'discord', app: 'Discord', time: 'il y a 14 min', title: 'Guilde FFXIV · #raids', body: 'Kael : On démarre le pull à 21h15 ?', unread: true },
+        { id: 'n4', appId: null, app: 'Système', time: 'il y a 1 h', title: 'Mises à jour prêtes', body: 'Snapshot Btrfs prêt avant mise à jour.', unread: false }
+      ],
+      tasks: [
+        { id: 't1', title: 'Prendre rendez-vous dentiste', meta: 'Aujourd’hui', done: false },
+        { id: 't2', title: 'Commander filtre à eau frigo', meta: 'Maison', done: false },
+        { id: 't3', title: 'Valider virement assurance auto', meta: 'Avant vendredi', done: false },
+        { id: 't4', title: 'Vérifier sauvegarde mensuelle NAS', meta: 'Fait', done: true }
+      ],
+      projects: [
+        { id: 'DEV-412', project: 'kama-hub', title: 'Refactor authentification OAuth2 API', status: 'En cours' },
+        { id: 'DEV-418', project: 'proto-arena', title: 'Pipeline build Godot 4.4 WebGL', status: 'Prêt à tester' },
+        { id: 'DEV-421', project: 'kama-sync', title: 'Fix fuite mémoire worker TypeScript', status: 'À revoir' },
+        { id: 'DEV-425', project: 'coquille', title: 'Mode spatial maximisé & téléportation', status: 'Planifié' }
+      ],
+      editingGameId: null,
+      games: [
+        {
+          id: 'ffxiv',
+          title: 'Final Fantasy XIV: Dawntrail',
+          note: savedGameNotes['ffxiv'] ?? 'Raid hebdomadaire · Tuliyollal',
+          lastPlayed: 'Hier · 142 h',
+          bg: 'linear-gradient(135deg, #273d88 0%, #3d3288 52%, #191a30 100%)'
+        },
+        {
+          id: 'factorio',
+          title: 'Factorio',
+          note: savedGameNotes['factorio'] ?? 'Space Age · Nauvis → Vulcanus',
+          lastPlayed: 'Il y a 2 j · 310 h',
+          bg: 'linear-gradient(135deg, #9a441e 0%, #6d3a1f 52%, #1e1824 100%)'
+        },
+        {
+          id: 'gw2',
+          title: 'Guild Wars 2',
+          note: savedGameNotes['gw2'] ?? 'Janthir Wilds · Méta-événement',
+          lastPlayed: 'Il y a 4 j · 96 h',
+          bg: 'linear-gradient(135deg, #7d263a 0%, #52287a 55%, #1c182a 100%)'
+        }
+      ],
+      calendar: [
+        { id: 'c1', dayOffset: 0, time: '14:30', title: 'Rendez-vous dentiste', color: 'var(--accent)' },
+        { id: 'c2', dayOffset: 0, time: '21:15', title: 'Raid hebdomadaire FFXIV', color: '#3fb950' },
+        { id: 'c3', dayOffset: 1, time: '10:00', title: 'Point archi · coquille', color: '#a78bfa' },
+        { id: 'c4', dayOffset: 2, time: '19:00', title: 'Dîner chez Alex', color: '#f59e0b' },
+        { id: 'c5', dayOffset: 4, time: '18:00', title: 'Maintenance cluster k3s', color: '#fb923c' },
+        { id: 'c6', dayOffset: 6, time: '11:00', title: 'Contrôle technique auto', color: '#38bdf8' }
+      ],
+      catalog: [
+        { id: 'orca', name: 'orca.dev', sub: 'Workspace & agents IA', kw: 'dev ia claude' },
+        { id: 'webstorm', name: 'WebStorm', sub: 'IDE JetBrains', kw: 'code ide ts' },
+        { id: 'godot', name: 'Godot', sub: 'Moteur de jeu 4.4', kw: 'jeu gamedev' },
+        { id: 'zen', name: 'Zen Browser', sub: 'Navigateur web', kw: 'web firefox' },
+        { id: 'discord', name: 'Discord', sub: 'Vocal & guilde', kw: 'chat vocal' },
+        { id: 'steam', name: 'Steam', sub: 'Bibliothèque de jeux', kw: 'jeux proton' },
+        { id: 'kitty', name: 'Terminal', sub: 'Kitty · Fish', kw: 'cli console' },
+        { id: 'files', name: 'Fichiers', sub: 'Explorateur local', kw: 'dossiers' },
+        { id: 'homeassistant', name: 'Home Assistant', sub: 'Domotique', kw: 'maison iot' },
+        { id: 'argocd', name: 'ArgoCD', sub: 'Cluster k3s', kw: 'kube infra' },
+        { id: 'nas', name: 'NAS local', sub: 'Médias & sauvegardes', kw: 'serveur' },
+        { id: 'lmstudio', name: 'LM Studio', sub: 'LLM locaux', kw: 'ia llm' },
+        { id: 'settings', name: 'Paramètres', sub: 'Réglages coquille', kw: 'config' },
+        { id: 'calculator', name: 'Calculatrice', sub: 'Calcul rapide', kw: 'maths' },
+        { id: 'btop', name: 'Btop++', sub: 'Moniteur système', kw: 'cpu ram gpu' },
+        { id: 'nvidia', name: 'NVIDIA', sub: 'RTX 4070 Ti · VRR', kw: 'gpu vrr' }
+      ]
+    };
+
+    let toastTimer = null;
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 2300);
+    }
+
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('clock-time').textContent =
+        `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const dayShort = now.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').slice(0, 3).toUpperCase();
+      document.getElementById('clock-date').textContent = `${dayShort} ${String(now.getDate()).padStart(2, '0')}`;
+      const full = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      document.getElementById('clock-box').setAttribute('data-tip', full[0].toUpperCase() + full.slice(1));
+    }
+
+    function visibleWindowOn(screen) {
+      return state.windows.find(w => w.screen === screen && !w.minimized && w.active)
+        || state.windows.find(w => w.screen === screen && !w.minimized)
+        || null;
+    }
+
+    function unreadCountFor(appId) {
+      if (state.switches.dnd) return 0;
+      return state.notifications.filter(n => n.appId === appId && n.unread).length;
+    }
+
+    function appMeta(id) {
+      return state.windows.find(w => w.id === id) || state.catalog.find(a => a.id === id);
+    }
+
+    /* --- Contrôles de simulation --- */
+    function setScreen(scr) {
+      state.currentScreen = scr;
+      ['left', 'center', 'right'].forEach(k => document.getElementById(`scr-${k}`).classList.toggle('active', k === scr));
+      closeContextMenu();
+      renderAll();
+    }
+
+    function setTheme(theme) {
+      state.theme = theme;
+      document.documentElement.setAttribute('data-theme', theme);
+      document.getElementById('th-dark').classList.toggle('active', theme === 'dark');
+      document.getElementById('th-light').classList.toggle('active', theme === 'light');
+      if (state.popover === 'controls') renderPopover();
+    }
+
+    function setSide(side) {
+      state.side = side;
+      document.documentElement.setAttribute('data-side', side);
+      document.getElementById('side-left').classList.toggle('active', side === 'left');
+      document.getElementById('side-right').classList.toggle('active', side === 'right');
+      closeContextMenu();
+    }
+
+    function setHost(host) {
+      state.host = host;
+      document.getElementById('host-zenbook').classList.toggle('active', host === 'zenbook');
+      document.getElementById('host-titan').classList.toggle('active', host === 'titan');
+      document.getElementById('pill-battery').classList.toggle('hidden', host === 'titan');
+      if (state.popover === 'controls') renderPopover();
+      toast(host === 'zenbook' ? 'Profil Zenbook (batterie + luminosité)' : 'Profil TITAN (PC fixe)');
+    }
+
+    /* --- Gestion des fenêtres maximisées + téléportation --- */
+    function activateOrTeleport(appId, targetScreen = state.currentScreen) {
+      closePopover();
+      closeContextMenu();
+      const meta = appMeta(appId);
+      if (!meta) return;
+
+      let win = state.windows.find(w => w.id === appId);
+      if (!win) {
+        win = { id: appId, name: meta.name, subtitle: meta.sub || 'Application active', screen: targetScreen, minimized: false, active: true };
+        state.windows.push(win);
+      } else {
+        if (win.screen !== targetScreen) {
+          const prevScreen = win.screen;
+          win.screen = targetScreen;
+          win.minimized = false;
+          // Active la fenêtre suivante sur l'ancien écran s'il en reste une
+          const fallback = state.windows.find(w => w.screen === prevScreen && !w.minimized);
+          if (fallback) fallback.active = true;
+          toast(`${win.name} téléporté vers ${state.screens[targetScreen].label}`);
+        } else if (win.minimized) {
+          win.minimized = false;
+        }
+      }
+
+      // Met cette fenêtre au sommet de la pile maximisée de targetScreen
+      state.windows.forEach(w => { if (w.screen === targetScreen) w.active = (w.id === appId); });
+      state.screens[targetScreen].overlayOpen = false;
+
+      // Marque comme lues les notifications de cette appli
+      state.notifications.forEach(n => { if (n.appId === appId) n.unread = false; });
+
+      renderAll();
+    }
+
+    function handleTaskbarClick(appId) {
+      const win = state.windows.find(w => w.id === appId);
+      const vis = visibleWindowOn(state.currentScreen);
+      if (win && win.screen === state.currentScreen && !win.minimized && vis && vis.id === appId && !state.screens[state.currentScreen].overlayOpen) {
+        // Déjà active sur cet écran -> ouvre le Lanceur Spatial flouté par-dessus
+        state.screens[state.currentScreen].overlayOpen = true;
+        renderAll();
+        return;
+      }
+      activateOrTeleport(appId, state.currentScreen);
+    }
+
+    function toggleHomeOverlay() {
+      closePopover();
+      closeContextMenu();
+      const vis = visibleWindowOn(state.currentScreen);
+      if (!vis) {
+        // Déjà sur le Lanceur Spatial permanent (aucune fenêtre visible)
+        document.getElementById('search-input').focus();
+        toast('Accueil spatial déjà affiché (aucune fenêtre ouverte sur cet écran)');
+        return;
+      }
+      state.screens[state.currentScreen].overlayOpen = !state.screens[state.currentScreen].overlayOpen;
+      renderAll();
+      if (state.screens[state.currentScreen].overlayOpen) {
+        setTimeout(() => document.getElementById('search-input').focus(), 40);
+      }
+    }
+
+    function minimizeActiveApp() {
+      const vis = visibleWindowOn(state.currentScreen);
+      if (!vis) return;
+      vis.minimized = true;
+      vis.active = false;
+      const next = state.windows.find(w => w.screen === state.currentScreen && !w.minimized);
+      if (next) next.active = true;
+      else toast('Toutes les fenêtres réduites : Lanceur Spatial affiché automatiquement');
+      renderAll();
+    }
+
+    function closeApp(appId) {
+      closeContextMenu();
+      const win = state.windows.find(w => w.id === appId);
+      if (!win) return;
+      const scr = win.screen;
+      state.windows = state.windows.filter(w => w.id !== appId);
+      const next = state.windows.find(w => w.screen === scr && !w.minimized);
+      if (next) next.active = true;
+      toast(`${win.name} fermé`);
+      renderAll();
+    }
+
+    function closeActiveApp() {
+      const vis = visibleWindowOn(state.currentScreen);
+      if (vis) closeApp(vis.id);
+    }
+
+    function togglePin(appId) {
+      closeContextMenu();
+      const meta = appMeta(appId);
+      if (state.pinned.includes(appId)) {
+        state.pinned = state.pinned.filter(x => x !== appId);
+        toast(`${meta.name} retirée des favoris`);
+      } else {
+        state.pinned.push(appId);
+        toast(`${meta.name} épinglée à la barre`);
+      }
+      renderAll();
+    }
+
+    /* --- Menu contextuel clic droit (conservé à l'identique) --- */
+    function openContextMenu(event, appId) {
+      event.preventDefault();
+      event.stopPropagation();
+      closePopover();
+      const meta = appMeta(appId);
+      if (!meta) return;
+      const win = state.windows.find(w => w.id === appId);
+      const isPinned = state.pinned.includes(appId);
+      const menu = document.getElementById('context-menu');
+
+      menu.innerHTML = `
+        <div class="ctx-head">
+          <div style="font-size:13px;font-weight:600;">${meta.name}</div>
+          <div style="font-size:11px;color:var(--muted);">${win ? (win.minimized ? 'Réduite · ' : '') + state.screens[win.screen].label : 'Fermée'}</div>
+        </div>
+        <div style="font-size:10.5px;color:var(--muted);padding:2px 8px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Ouvrir / téléporter sur</div>
+        <div class="ctx-screens">
+          <button class="ctx-screen-btn" onclick="activateOrTeleport('${appId}','left')">Gauche</button>
+          <button class="ctx-screen-btn" onclick="activateOrTeleport('${appId}','center')">Centre</button>
+          <button class="ctx-screen-btn" onclick="activateOrTeleport('${appId}','right')">Droite</button>
+        </div>
+        <button class="ctx-item" onclick="activateOrTeleport('${appId}');toast('Nouvelle fenêtre : ${meta.name}')">Nouvelle fenêtre</button>
+        <button class="ctx-item" onclick="togglePin('${appId}')">${isPinned ? 'Retirer des favoris' : 'Épingler à la barre'}</button>
+        ${win ? `<button class="ctx-item danger" onclick="closeApp('${appId}')">Fermer</button>` : ''}
+      `;
+      menu.classList.remove('hidden');
+
+      const x = state.side === 'left' ? 64 : window.innerWidth - 64 - 224;
+      const y = Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 16);
+      menu.style.left = `${x}px`;
+      menu.style.top = `${Math.max(12, y)}px`;
+    }
+
+    function closeContextMenu() {
+      document.getElementById('context-menu').classList.add('hidden');
+    }
+
+    /* --- Popovers découplés : Notifications SEUL ou Centre de contrôle SEUL + Mixeur --- */
+    function togglePopover(kind) {
+      closeContextMenu();
+      if (state.popover === kind) {
+        closePopover();
+        return;
+      }
+      state.popover = kind;
+      if (kind !== 'controls') state.mixerOpen = false;
+      state.confirmAction = null;
+      renderPopover();
+      renderSidebarPill();
+    }
+
+    function closePopover() {
+      state.popover = null;
+      state.mixerOpen = false;
+      state.confirmAction = null;
+      document.getElementById('popover-anchor').classList.add('is-hidden');
+      document.getElementById('mixer-panel').classList.add('hidden');
+      renderSidebarPill();
+    }
+
+    function renderSidebarPill() {
+      document.getElementById('pill-notifs').classList.toggle('is-open', state.popover === 'notifications');
+      document.getElementById('pill-controls').classList.toggle('is-open', state.popover === 'controls');
+      const unread = state.notifications.filter(n => n.unread).length;
+      document.getElementById('pill-notif-dot').classList.toggle('hidden', unread === 0 || state.switches.dnd);
+      document.getElementById('pill-wifi').style.opacity = state.switches.network ? '1' : '0.35';
+      document.getElementById('pill-audio-hp').classList.toggle('hidden', state.audioSink !== 'Casque USB');
+      document.getElementById('pill-audio-sp').classList.toggle('hidden', state.audioSink === 'Casque USB');
+    }
+
+    function renderPopover() {
+      const anchor = document.getElementById('popover-anchor');
+      const body = document.getElementById('popover-body');
+      const mixer = document.getElementById('mixer-panel');
+
+      if (!state.popover) {
+        anchor.classList.add('is-hidden');
+        return;
+      }
+      anchor.classList.remove('is-hidden');
+
+      if (state.popover === 'notifications') {
+        mixer.classList.add('hidden');
+        const list = state.notifications;
+        body.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:baseline;gap:8px;">
+              <strong style="font-size:14px;font-weight:600;">Notifications</strong>
+              <span style="font-size:12px;color:var(--muted);" class="tabular">${list.length || ''}</span>
+            </div>
+            ${list.length ? `<button onclick="clearNotifications()" style="font-size:12px;font-weight:500;color:var(--muted);padding:4px 8px;border-radius:8px;">Tout effacer</button>` : ''}
+          </div>
+          ${list.length === 0 ? `
+            <div style="padding:36px 12px;text-align:center;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:8px;">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>
+              <div style="font-size:13px;font-weight:500;">Aucune notification</div>
+              ${state.switches.dnd ? `<div style="font-size:11px;">Ne pas déranger : elles attendent ici.</div>` : ''}
+            </div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              ${list.map(n => `
+                <div class="notice-card" onclick="clickNotification('${n.id}')">
+                  <div class="notice-top">
+                    <div style="display:flex;align-items:center;gap:7px;min-width:0;">
+                      ${n.unread ? `<span style="width:7px;height:7px;border-radius:999px;background:var(--accent);flex-shrink:0;"></span>` : ''}
+                      <span style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${n.title}</span>
+                    </div>
+                    <button class="notice-close" onclick="event.stopPropagation();dismissNotification('${n.id}')">×</button>
+                  </div>
+                  <div style="font-size:11px;color:var(--muted);">${n.app} · ${n.time}</div>
+                  <div style="font-size:12px;color:var(--text);opacity:0.86;line-height:1.35;">${n.body}</div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        `;
+        return;
+      }
+
+      /* Centre de contrôle existant coquille (ui/drawer.rs : switches 2×N, volume + chevron mixeur, luminosité, session) */
+      const sw = (key, title, sub, active) => `
+        <button class="cc-switch ${active ? 'on' : ''}" onclick="toggleSwitch('${key}')">
+          <div style="min-width:0;">
+            <div class="cc-switch-title">${title}</div>
+            <div class="cc-switch-sub">${sub}</div>
+          </div>
+        </button>`;
+
+      const foot = state.confirmAction ? `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="font-size:13.5px;font-weight:600;">${state.confirmAction} ?</div>
+          <div style="display:flex;gap:8px;">
+            <button class="cc-pill-badge" style="flex:1;text-align:center;" onclick="state.confirmAction=null;renderPopover()">Annuler</button>
+            <button class="cc-pill-badge" style="flex:1;text-align:center;background:var(--danger);color:#fff;" onclick="toast('${state.confirmAction} (simulé)');state.confirmAction=null;closePopover()">Confirmer</button>
+          </div>
+        </div>
+      ` : `
+        <div class="cc-session-who">
+          <div class="cc-avatar">J</div>
+          <div style="min-width:0;">
+            <div style="font-size:13.5px;font-weight:600;">Jimmy</div>
+            <div style="font-size:11.5px;color:var(--muted);">${state.host === 'zenbook' ? 'Batterie 96 % · Sur secteur' : 'KAMA-TITAN · Compte local'}</div>
+          </div>
+        </div>
+        <div class="cc-session-actions">
+          <button class="cc-session-btn" title="Capture d'écran" onclick="toast('Capture d’écran (région / écran)')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>
+          <button class="cc-session-btn" title="Paramètres" onclick="activateOrTeleport('settings')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+          </button>
+          <button class="cc-session-btn" title="Se déconnecter" onclick="state.confirmAction='Se déconnecter';renderPopover()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="m15 8 4 4-4 4"/><path d="M19 12H9"/></svg>
+          </button>
+          <button class="cc-session-btn" title="Mettre en veille" onclick="state.confirmAction='Mettre en veille';renderPopover()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a6.8 6.8 0 0 0 10 10z"/></svg>
+          </button>
+          <button class="cc-session-btn" title="Redémarrer" onclick="state.confirmAction='Redémarrer l’ordinateur';renderPopover()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg>
+          </button>
+          <button class="cc-session-btn danger" title="Éteindre" onclick="state.confirmAction='Éteindre l’ordinateur';renderPopover()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v9"/><path d="M17.7 6.8a8 8 0 1 1-11.4 0"/></svg>
+          </button>
+        </div>
+      `;
+
+      body.innerHTML = `
+        <div class="cc-card">
+          <div class="cc-switches">
+            ${sw('network', 'Réseau', state.switches.network ? (state.host === 'titan' ? 'Ethernet' : 'Freebox-CC81') : 'Désactivé', state.switches.network)}
+            ${sw('bluetooth', 'Bluetooth', state.switches.bluetooth ? 'Casque' : 'Désactivé', state.switches.bluetooth)}
+            ${sw('dnd', 'Ne pas déranger', state.switches.dnd ? 'Activé' : 'Désactivé', state.switches.dnd)}
+            ${sw('nightlight', 'Éclairage nocturne', state.switches.nightlight ? 'Activé' : 'Désactivé', state.switches.nightlight)}
+            ${sw('dark', 'Thème sombre', state.theme === 'dark' ? 'Activé' : 'Désactivé', state.theme === 'dark')}
+          </div>
+
+          <!-- Volume + chevron Mixeur par application -->
+          <div class="cc-slider-row">
+            <button class="cc-icon-btn" style="${state.muted ? 'color:var(--danger)' : ''}" onclick="state.muted=!state.muted;renderPopover()" title="Couper le son">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>${state.muted ? '<path d="m16 9.5 5 5M21 9.5l-5 5"/>' : '<path d="M15.5 9a4 4 0 0 1 0 6"/>'}</svg>
+            </button>
+            <input class="coquille-slider" type="range" min="0" max="100" value="${state.volume}" oninput="state.volume=Number(this.value);if(state.mixerOpen)renderMixer()" />
+            <button class="cc-icon-btn ${state.mixerOpen ? 'on' : ''}" onclick="state.mixerOpen=!state.mixerOpen;renderPopover()" title="Mixeur par application">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="${state.side === 'left' ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'}"/></svg>
+            </button>
+          </div>
+
+          <!-- Luminosité -->
+          <div class="cc-slider-row">
+            <span class="cc-icon-btn" style="background:transparent;cursor:default;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2"/></svg>
+            </span>
+            ${state.host === 'zenbook'
+              ? `<input class="coquille-slider" type="range" min="20" max="100" value="${state.brightness}" oninput="state.brightness=Number(this.value)" /><span class="cc-pill-badge">1 écran</span>`
+              : `<div style="flex:1;"></div><span class="cc-pill-badge" style="color:var(--muted);">indisponible</span>`
+            }
+          </div>
+
+          <div style="height:1px;background:var(--separator);"></div>
+          ${foot}
+        </div>
+      `;
+
+      if (state.mixerOpen) {
+        mixer.classList.remove('hidden');
+        renderMixer();
+      } else {
+        mixer.classList.add('hidden');
+      }
+    }
+
+    function renderMixer() {
+      const mixer = document.getElementById('mixer-panel');
+      mixer.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <strong style="font-size:13.5px;font-weight:600;">Volume par application</strong>
+          <button class="cc-pill-badge" onclick="cycleAudioSink()" title="Changer la sortie audio">${state.audioSink} ▾</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:10px;background:var(--card);">
+          <span style="font-size:12.5px;font-weight:600;width:54px;">Général</span>
+          <input class="coquille-slider" type="range" min="0" max="100" value="${state.volume}" oninput="state.volume=Number(this.value);renderPopover()" />
+          <span style="font-size:11.5px;color:var(--muted);width:26px;text-align:right;" class="tabular">${state.volume}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${state.mixerStreams.map((s, idx) => `
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${iconSvg(s.id, 26)}
+              <div style="width:78px;min-width:0;">
+                <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.name}</div>
+                <div style="font-size:10.5px;color:${s.muted ? 'var(--danger)' : 'var(--muted)'};">${s.muted ? 'Coupé' : s.state}</div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
+                <input class="coquille-slider" type="range" min="0" max="100" value="${s.volume}" oninput="state.mixerStreams[${idx}].volume=Number(this.value)" />
+                <div style="height:2px;background:var(--separator);border-radius:99px;overflow:hidden;">
+                  <div style="height:100%;width:${s.muted ? 0 : Math.round(s.level * s.volume)}%;background:var(--level);"></div>
+                </div>
+              </div>
+              <button class="cc-icon-btn" style="width:26px;height:26px;${s.muted ? 'background:var(--danger-soft);color:var(--danger)' : ''}" onclick="state.mixerStreams[${idx}].muted=!state.mixerStreams[${idx}].muted;renderMixer()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/>${s.muted ? '<path d="m16 9.5 5 5M21 9.5l-5 5"/>' : '<path d="M15.5 9a4 4 0 0 1 0 6"/>'}</svg>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+        <div style="height:1px;background:var(--separator);"></div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.35;">Chaque appli retrouve son volume à la prochaine ouverture.</div>
+      `;
+    }
+
+    function cycleAudioSink() {
+      state.audioSink = state.audioSink === 'Casque USB' ? 'Haut-parleurs' : 'Casque USB';
+      renderMixer();
+      renderSidebarPill();
+      toast(`Sortie audio : ${state.audioSink}`);
+    }
+
+    function toggleSwitch(key) {
+      if (key === 'dark') {
+        setTheme(state.theme === 'dark' ? 'light' : 'dark');
+        return;
+      }
+      state.switches[key] = !state.switches[key];
+      renderPopover();
+      renderSidebarPill();
+      renderTaskbar();
+    }
+
+    function clickNotification(id) {
+      const n = state.notifications.find(x => x.id === id);
+      if (!n) return;
+      n.unread = false;
+      if (n.appId) activateOrTeleport(n.appId, state.currentScreen);
+      else { renderPopover(); renderSidebarPill(); }
+    }
+
+    function dismissNotification(id) {
+      state.notifications = state.notifications.filter(x => x.id !== id);
+      renderPopover();
+      renderSidebarPill();
+      renderTaskbar();
+    }
+
+    function clearNotifications() {
+      state.notifications = [];
+      renderPopover();
+      renderSidebarPill();
+      renderTaskbar();
+    }
+
+    /* --- Rendu Barre des tâches (alignée en haut) --- */
+    function renderTaskbar() {
+      const vis = visibleWindowOn(state.currentScreen);
+      const launcherVisible = !vis || state.screens[state.currentScreen].overlayOpen;
+      document.getElementById('btn-home').classList.toggle('is-active', launcherVisible);
+      document.getElementById('home-mark').classList.toggle('hidden', !launcherVisible);
+
+      const pinnedItems = state.pinned.map(appMeta).filter(Boolean);
+      const unpinnedOpen = state.windows.filter(w => !state.pinned.includes(w.id));
+
+      const itemHtml = (app) => {
+        const win = state.windows.find(w => w.id === app.id);
+        const onThis = Boolean(win && win.screen === state.currentScreen);
+        const onOther = Boolean(win && win.screen !== state.currentScreen);
+        const isActive = Boolean(vis && vis.id === app.id && !launcherVisible);
+        const unread = unreadCountFor(app.id);
+
+        let mark = '';
+        if (isActive) mark = '<span class="sb-mark sb-mark-bar"></span>';
+        else if (onThis) mark = '<span class="sb-mark sb-mark-dot"></span>';
+        else if (onOther) mark = '<span class="sb-mark sb-mark-ring"></span>';
+
+        let tip = app.name;
+        if (!win) tip += ' · Épinglée';
+        else if (onOther) tip += ` · ${state.screens[win.screen].label} (clic pour téléporter)`;
+        else if (win.minimized) tip += ' · Réduite';
+        else tip += ' · Sur cet écran';
+        if (unread > 0) tip += ` · ${unread} non lue${unread > 1 ? 's' : ''}`;
+
+        return `
+          <button
+            class="sb-btn has-tip ${isActive ? 'is-active' : win ? 'is-running' : ''}"
+            data-tip="${tip}"
+            onclick="handleTaskbarClick('${app.id}')"
+            oncontextmenu="openContextMenu(event, '${app.id}')"
+            onauxclick="if(event.button===1){event.preventDefault();closeApp('${app.id}');}"
+          >
+            ${mark}
+            ${iconSvg(app.id, 24)}
+            ${unread > 0 ? `<span class="sb-badge tabular">${unread}</span>` : ''}
+          </button>`;
+      };
+
+      let html = pinnedItems.map(itemHtml).join('');
+      if (unpinnedOpen.length) {
+        html += '<div class="sb-sep" style="margin:2px 0;"></div>';
+        html += unpinnedOpen.map(itemHtml).join('');
+      }
+      document.getElementById('taskbar').innerHTML = html;
+    }
+
+    /* --- Rendu Scène : Fenêtre maximisée vs Lanceur Spatial (Bottom ou Overlay flouté) --- */
+    function renderStage() {
+      const vis = visibleWindowOn(state.currentScreen);
+      const maxEl = document.getElementById('maximized-view');
+      const launcher = document.getElementById('spatial-launcher');
+
+      if (!vis) {
+        // Aucune fenêtre visible -> Lanceur Spatial permanent directement sur le fond d'écran
+        maxEl.classList.add('hidden');
+        launcher.classList.remove('hidden', 'mode-overlay');
+        launcher.classList.add('mode-bottom');
+        return;
+      }
+
+      // Fenêtre maximisée bord à bord
+      maxEl.classList.remove('hidden');
+      document.getElementById('max-icon').innerHTML = iconSvg(vis.id, 22);
+      document.getElementById('max-title').textContent = vis.name;
+      document.getElementById('max-screen-badge').textContent = state.screens[state.currentScreen].label;
+      document.getElementById('max-body').innerHTML = `
+        <div class="liquid-panel" style="max-width:480px;width:100%;border-radius:20px;padding:30px;text-align:center;">
+          <div style="display:flex;justify-content:center;margin-bottom:14px;">${iconSvg(vis.id, 58)}</div>
+          <div style="font-size:20px;font-weight:700;">${vis.name}</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:4px;">${vis.subtitle}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:16px;line-height:1.5;">
+            Fenêtre systématiquement maximisée bord à bord sur <strong>${state.screens[state.currentScreen].label}</strong>.<br/>
+            Clique <strong>Accueil</strong> (haut de barre) pour ouvrir le Lanceur Spatial flouté par-dessus, ou <strong>Réduire</strong> pour voir l'accueil permanent réapparaître.
+          </div>
+        </div>
+      `;
+
+      if (state.screens[state.currentScreen].overlayOpen) {
+        launcher.classList.remove('hidden', 'mode-bottom');
+        launcher.classList.add('mode-overlay');
+      } else {
+        launcher.classList.add('hidden');
+      }
+    }
+
+    /* --- Rendu des 4 panneaux informatifs --- */
+    function renderTasks() {
+      const rem = state.tasks.filter(t => !t.done).length;
+      document.getElementById('tasks-meta').textContent = `${rem} restante${rem > 1 ? 's' : ''}`;
+      document.getElementById('tasks-list').innerHTML = state.tasks.map(t => `
+        <button class="task-row ${t.done ? 'done' : ''}" onclick="toggleTask('${t.id}')">
+          <span style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <span class="task-check">${t.done ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : ''}</span>
+            <span style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done ? 'text-decoration:line-through;' : ''}">${t.title}</span>
+          </span>
+          <span style="font-size:11.5px;color:var(--muted);flex-shrink:0;">${t.meta}</span>
+        </button>
+      `).join('');
+    }
+
+    function toggleTask(id) {
+      const t = state.tasks.find(x => x.id === id);
+      if (t) { t.done = !t.done; renderTasks(); }
+    }
+
+    function renderProjects() {
+      document.getElementById('projects-list').innerHTML = state.projects.map(p => `
+        <button class="ticket-row" onclick="toast('Ouverture de ${p.id} (${p.project})')">
+          <div style="min-width:0;">
+            <div style="font-size:11.5px;color:var(--muted);display:flex;gap:6px;align-items:center;">
+              <span style="font-weight:600;color:var(--accent);">${p.id}</span>
+              <span>·</span>
+              <span>${p.project}</span>
+            </div>
+            <div style="font-size:13px;font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.title}</div>
+          </div>
+          <span class="status-pill">${p.status}</span>
+        </button>
+      `).join('');
+    }
+
+    /* Jeux + édition à la volée du commentaire */
+    function renderGames() {
+      document.getElementById('games-grid').innerHTML = state.games.map(g => {
+        const editing = state.editingGameId === g.id;
+        return `
+          <div class="game-card" style="background:${g.bg};" onclick="launchGame('${g.id}')">
+            <div class="game-top">
+              <span class="game-pill tabular">${g.lastPlayed}</span>
+              <span class="game-play" title="Lancer ${g.title}">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="margin-left:1px;"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              </span>
+            </div>
+            <div class="game-bottom">
+              <div style="font-size:14px;font-weight:700;line-height:1.25;">${g.title}</div>
+              ${editing ? `
+                <input
+                  id="game-note-input-${g.id}"
+                  class="game-note-input"
+                  value="${g.note.replace(/"/g, '&quot;')}"
+                  placeholder="Ajouter un commentaire…"
+                  onclick="event.stopPropagation()"
+                  onkeydown="onGameNoteKey(event, '${g.id}')"
+                  onblur="saveGameNote('${g.id}', this.value)"
+                />
+              ` : `
+                <div class="game-note-row" onclick="startEditGameNote(event, '${g.id}')" title="Cliquer pour modifier le commentaire">
+                  <span class="game-note-text">${g.note || 'Ajouter un commentaire…'}</span>
+                  <svg class="game-note-edit-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                  </svg>
+                </div>
+              `}
+            </div>
+          </div>`;
+      }).join('');
+
+      if (state.editingGameId) {
+        const input = document.getElementById(`game-note-input-${state.editingGameId}`);
+        if (input) { input.focus(); input.select(); }
+      }
+    }
+
+    function launchGame(id) {
+      if (state.editingGameId) return;
+      const g = state.games.find(x => x.id === id);
+      if (g) toast(`Lancement de ${g.title} (plein écran ancré au centre)`);
+    }
+
+    function startEditGameNote(event, id) {
+      event.stopPropagation();
+      state.editingGameId = id;
+      renderGames();
+    }
+
+    function saveGameNote(id, value) {
+      if (state.editingGameId !== id) return;
+      const g = state.games.find(x => x.id === id);
+      if (g) {
+        g.note = value.trim();
+        savedGameNotes[id] = g.note;
+        localStorage.setItem('coquille_proto_game_notes', JSON.stringify(savedGameNotes));
+      }
+      state.editingGameId = null;
+      renderGames();
+      toast('Commentaire enregistré');
+    }
+
+    function onGameNoteKey(event, id) {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveGameNote(id, event.target.value);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        state.editingGameId = null;
+        renderGames();
+      }
+    }
+
+    function renderCalendar() {
+      const today = new Date();
+      const end = new Date(today);
+      end.setDate(today.getDate() + 6);
+      const fmt = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }).replace('.', '');
+      document.getElementById('cal-range').textContent = `${fmt(today)} — ${fmt(end)}`;
+
+      document.getElementById('cal-grid').innerHTML = state.calendar.map(ev => {
+        const d = new Date(today);
+        d.setDate(today.getDate() + ev.dayOffset);
+        const day = ev.dayOffset === 0 ? 'Aujourd’hui'
+          : ev.dayOffset === 1 ? 'Demain'
+          : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '');
+        return `
+          <button class="cal-item ${ev.dayOffset === 0 ? 'today' : ''}" onclick="toast('${day} · ${ev.time} — ${ev.title}')">
+            <span class="cal-stripe" style="background:${ev.color};"></span>
+            <div style="min-width:0;flex:1;">
+              <div style="display:flex;justify-content:space-between;gap:6px;font-size:11px;">
+                <span style="font-weight:600;color:${ev.dayOffset === 0 ? 'var(--accent)' : 'var(--muted)'};text-transform:capitalize;">${day}</span>
+                <span class="tabular" style="color:var(--muted);">${ev.time}</span>
+              </div>
+              <div style="font-size:12.5px;font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ev.title}</div>
+            </div>
+          </button>`;
+      }).join('');
+    }
+
+    /* --- Grille flottante GNOME --- */
+    function filteredApps() {
+      const q = state.search.trim().toLowerCase();
+      if (!q) return state.catalog;
+      return state.catalog.filter(a => a.name.toLowerCase().includes(q) || a.sub.toLowerCase().includes(q) || a.kw.includes(q));
+    }
+
+    function renderApps() {
+      const apps = filteredApps();
+      const grid = document.getElementById('apps-grid');
+      const empty = document.getElementById('apps-empty');
+      if (!apps.length) {
+        grid.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      grid.innerHTML = apps.map(a => {
+        const win = state.windows.find(w => w.id === a.id);
+        const dotClass = !win ? 'none' : (win.screen === state.currentScreen ? 'here' : 'elsewhere');
+        return `
+          <button class="app-tile" onclick="activateOrTeleport('${a.id}')" oncontextmenu="openContextMenu(event, '${a.id}')" title="${a.name} — ${a.sub}">
+            <span class="app-icon-box">${iconSvg(a.id, 52)}</span>
+            <span class="app-label">${a.name}</span>
+            <span class="app-dot ${dotClass}"></span>
+          </button>`;
+      }).join('');
+    }
+
+    function onSearch(v) {
+      state.search = v;
+      document.getElementById('search-clear').classList.toggle('hidden', !v);
+      renderApps();
+    }
+
+    function clearSearch() {
+      const inp = document.getElementById('search-input');
+      inp.value = '';
+      state.search = '';
+      document.getElementById('search-clear').classList.add('hidden');
+      renderApps();
+      inp.focus();
+    }
+
+    function onSearchKey(e) {
+      if (e.key === 'Escape') {
+        if (state.search) clearSearch();
+        else if (state.screens[state.currentScreen].overlayOpen) {
+          state.screens[state.currentScreen].overlayOpen = false;
+          renderAll();
+        }
+      } else if (e.key === 'Enter') {
+        const list = filteredApps();
+        if (list.length) {
+          activateOrTeleport(list[0].id);
+          clearSearch();
+        }
+      }
+    }
+
+    function renderAll() {
+      renderTaskbar();
+      renderSidebarPill();
+      renderStage();
+      renderApps();
+      if (state.popover) renderPopover();
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#context-menu')) closeContextMenu();
+      if (state.popover && !e.target.closest('#popover-anchor') && !e.target.closest('.sb-pill')) {
+        closePopover();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (state.editingGameId) return;
+        if (!document.getElementById('context-menu').classList.contains('hidden')) closeContextMenu();
+        else if (state.popover) closePopover();
+        else if (state.screens[state.currentScreen].overlayOpen) {
+          state.screens[state.currentScreen].overlayOpen = false;
+          renderAll();
+        }
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      updateClock();
+      setInterval(updateClock, 15000);
+      renderTasks();
+      renderProjects();
+      renderGames();
+      renderCalendar();
+      renderAll();
+    });
+  </script>
+</body>
+</html>

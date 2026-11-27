@@ -22,6 +22,36 @@ même aspect : dans le tiroir vertical, ils se partagent son pied
 de la barre) ; dans le lanceur horizontal, ce sont ses deux dernières
 colonnes.
 
+### Mode spatial (`mode = "spatial"`)
+
+Lorsque `mode = "spatial"` est activé dans `config.toml` (ou `--spatial` passé
+au compositeur, appliqué au démarrage de la session ; choix dans « Paramètres »
+→ *Écrans et dock*), le dock adopte une présentation alternative :
+
+- **Barre verticale permanente (56 px)** : bord à bord sur toute la hauteur à
+  gauche ou à droite (en miroir ; le mode horizontal est rabattu en vertical à
+  gauche), sans dépliage au survol (infobulles au survol). En haut : bouton
+  Accueil, heure et date courte (`VEN 27`), séparateur, puis icônes de la barre
+  des tâches (barre latérale d'accent pour l'active, point plein si ouverte sur
+  cet écran, anneau creux si ouverte sur un autre écran, pastille de non-lus).
+  Clic gauche lance, active, téléporte depuis un autre écran (`MoveToScreen`) ou
+  bascule vers l'accueil ; clic milieu ferme ; clic droit ouvre le menu
+  contextuel complet (sans « Oublier sa place »).
+- **Zone de notification compacte et pilule scindée** : en bas de la barre,
+  grille 2 colonnes d'icônes SNI/XEmbed au-dessus d'une pilule en deux zones —
+  la **cloche** ouvre uniquement le panneau Notifications, le **reste** (réseau,
+  son, batterie) ouvre uniquement le Centre de contrôle et son mixeur par
+  application (`coquille-controls`).
+- **Lanceur spatial permanent** : chaque écran sans fenêtre visible affiche en
+  permanence le lanceur (`coquille-home`, calque `Bottom`) ; sur un écran qui
+  porte une fenêtre maximisée, `Super` ou le bouton Accueil ouvre le même
+  lanceur en surimpression plein écran floutée (`coquille-drawer`, calque
+  `Overlay`). Il rassemble la recherche centrée, quatre cartes en verre liquide
+  (« Vie quotidienne », « Tâches des projets », « Jeux » avec ludothèque Steam,
+  temps de jeu lu dans `localconfig.vdf` et commentaires éditables enregistrés
+  dans `~/.local/state/coquille/game_notes.json`, et « Agenda · 7 jours ») et
+  la grille flottante des applications.
+
 Il tourne **dans coquille** : il lui faut le protocole layer-shell et, pour
 montrer les vraies fenêtres, le socket du compositeur (`COQUILLE_SOCKET`,
 transmis aux programmes que coquille lance).

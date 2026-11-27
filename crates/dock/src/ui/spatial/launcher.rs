@@ -111,7 +111,31 @@ pub fn view<'a>(
         left: layout.padding_x,
     }))
     .width(Length::Fill)
-    .height(Length::Fill);
+    .height(Length::Fill)
+    .direction(scrollable::Direction::Vertical(
+        scrollable::Scrollbar::new()
+            .width(4)
+            .scroller_width(4)
+            .margin(3),
+    ))
+    .style(move |theme, status| {
+        let mut s = scrollable::default(theme, status);
+        let alpha = match status {
+            scrollable::Status::Active { .. } => 0.14,
+            scrollable::Status::Hovered { .. } => 0.28,
+            scrollable::Status::Dragged { .. } => 0.42,
+        };
+        s.vertical_rail.background = None;
+        s.vertical_rail.border = Border::default();
+        s.vertical_rail.scroller = scrollable::Scroller {
+            background: style::alpha(palette.text, alpha).into(),
+            border: Border {
+                radius: 2.0.into(),
+                ..Border::default()
+            },
+        };
+        s
+    });
 
     let backdrop = match mode {
         LauncherMode::Home => Color::TRANSPARENT,

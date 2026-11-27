@@ -69,7 +69,11 @@ pub fn height(menu: &Menu) -> u32 {
 
 pub fn view<'a>(dock: &'a Dock, entry: &'a Entry) -> Element<'a, Message> {
     let palette = dock.palette();
-    let menu = bar::menu(entry, &dock.present_screens());
+    let mut menu = bar::menu(entry, &dock.present_screens());
+    if dock.is_spatial() {
+        menu.actions
+            .retain(|action| !matches!(action, MenuAction::Forget));
+    }
 
     let title = text(menu.title.clone())
         .size(14)

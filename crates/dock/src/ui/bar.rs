@@ -663,7 +663,7 @@ fn hovered_entry<'a>(dock: &Dock, state: &'a BarState) -> Option<(usize, &'a Ent
     let has_menu = dock
         .menu
         .as_ref()
-        .is_some_and(|(_, bar, _)| *bar == state.id);
+        .is_some_and(|(_, bar, ..)| *bar == state.id);
     let index = state.hover_entry.filter(|_| !has_menu)?;
     Some((index, state.entries.get(index)?))
 }
@@ -672,7 +672,7 @@ fn hovered_tray<'a>(dock: &'a Dock, state: &BarState) -> Option<(usize, &'a Tray
     let has_menu = dock
         .tray_menu
         .as_ref()
-        .is_some_and(|(_, bar, _)| *bar == state.id);
+        .is_some_and(|(_, bar, ..)| *bar == state.id);
     let index = state.hover_tray.filter(|_| !has_menu)?;
     Some((index, dock.tray.get(index)?))
 }

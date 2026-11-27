@@ -20,6 +20,7 @@ const POPOVER_PADDING: f32 = 14.0;
 
 /// Returns the left-to-right visual order of panels inside the spatial popover
 /// row for the given sidebar `side` and `mixer_open` state.
+#[cfg(test)]
 pub fn popover_order(side: Side, mixer_open: bool) -> &'static [&'static str] {
     match (side, mixer_open) {
         (_, false) => &["popover"],
