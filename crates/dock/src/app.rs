@@ -3453,13 +3453,11 @@ impl Dock {
                     }
                     Err(error) => {
                         warn!(?error, "failed to load daily tasks");
-                        if matches!(error, TasksError::Unauthorized)
-                            || self.widgets.daily_tasks.is_empty()
-                        {
+                        if matches!(error, TasksError::Unauthorized) {
                             self.widgets.daily_tasks.clear();
-                            self.widgets.daily_tasks_status =
-                                DailyTasksStatus::Error(error.user_message().to_owned());
                         }
+                        self.widgets.daily_tasks_status =
+                            DailyTasksStatus::Error(error.user_message().to_owned());
                     }
                 }
                 Task::none()
@@ -3477,13 +3475,11 @@ impl Dock {
                     }
                     Err(error) => {
                         warn!(?error, "failed to load Kama-Foundry tickets");
-                        if matches!(error, FoundryError::Unauthorized)
-                            || self.widgets.project_tasks.is_empty()
-                        {
+                        if matches!(error, FoundryError::Unauthorized) {
                             self.widgets.project_tasks.clear();
-                            self.widgets.project_tasks_status =
-                                ProjectTasksStatus::Error(error.user_message().to_owned());
                         }
+                        self.widgets.project_tasks_status =
+                            ProjectTasksStatus::Error(error.user_message().to_owned());
                     }
                 }
                 Task::none()

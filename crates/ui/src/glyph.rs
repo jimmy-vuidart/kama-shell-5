@@ -50,6 +50,7 @@ pub enum Glyph {
     Wifi,
     Speakers,
     Edit,
+    Warning,
 }
 
 impl Glyph {
@@ -146,6 +147,9 @@ impl Glyph {
             Self::Edit => {
                 r#"<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>"#
             }
+            Self::Warning => {
+                r#"<path d="M10.3 3.9 2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17" r=".8" fill="black" stroke="none"/>"#
+            }
         }
     }
 
@@ -213,6 +217,7 @@ mod tests {
             Glyph::Wifi,
             Glyph::Speakers,
             Glyph::Edit,
+            Glyph::Warning,
         ];
         for glyph in glyphs {
             let shapes = glyph.shapes();

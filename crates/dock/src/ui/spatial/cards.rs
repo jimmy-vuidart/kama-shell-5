@@ -84,6 +84,36 @@ fn paginate<T>(items: Vec<T>, page: usize, size: usize) -> (Vec<T>, usize, usize
     (visible, page, pages)
 }
 
+/// Subtle orange tint for the fetch-error warning triangle in card headers.
+const WARNING_COLOR: Color = Color::from_rgba(0.95, 0.58, 0.16, 0.85);
+
+/// Combines an optional fetch-error warning triangle and a refresh button for
+/// the top-right corner of a service card.
+fn card_header_actions<'a>(
+    warning: bool,
+    refresh: Option<Element<'a, Message>>,
+) -> Option<Element<'a, Message>> {
+    let warning_badge: Option<Element<'a, Message>> = warning.then(|| {
+        container(icons::glyph(Glyph::Warning, 13.0, WARNING_COLOR))
+            .width(20)
+            .height(22)
+            .center_x(20)
+            .center_y(22)
+            .into()
+    });
+    match (warning_badge, refresh) {
+        (None, None) => None,
+        (Some(badge), None) => Some(badge),
+        (None, Some(btn)) => Some(btn),
+        (Some(badge), Some(btn)) => Some(
+            row![badge, btn]
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .into(),
+        ),
+    }
+}
+
 fn glass_card<'a>(
     title: &'a str,
     meta: String,
@@ -200,7 +230,8 @@ pub fn daily_tasks_card<'a>(
         }
     };
 
-    glass_card("VIE QUOTIDIENNE", meta, refresh, body, fill_height, palette)
+    let actions = card_header_actions(matches!(status, DailyTasksStatus::Error(_)), refresh);
+    glass_card("VIE QUOTIDIENNE", meta, actions, body, fill_height, palette)
 }
 
 fn remaining_label(remaining: usize) -> String {
@@ -344,10 +375,11 @@ pub fn project_tasks_card<'a>(
         }
     };
 
+    let actions = card_header_actions(matches!(status, ProjectTasksStatus::Error(_)), refresh);
     glass_card(
         "TÂCHES DES PROJETS",
         meta,
-        refresh,
+        actions,
         body,
         fill_height,
         palette,
