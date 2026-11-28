@@ -40,6 +40,7 @@ pub struct Config {
     pub drawer: Ignored,
     pub audio: Ignored,
     pub widgets: Ignored,
+    pub spatial: Ignored,
     /// Command of the terminal opened by the shortcut.
     pub terminal: Option<String>,
     /// Whether X11 applications can run, through XWayland; they can unless
@@ -584,6 +585,7 @@ mod tests {
             Change::Animations(false),
             Change::Dock(OutputRole::Center, DockPlace::Horizontal),
             Change::Dock(OutputRole::Right, DockPlace::VerticalRight),
+            Change::DockIconSize(32),
             Change::Layout(OutputRole::Left, LayoutKind::MainSide),
             Change::Layout(OutputRole::Center, LayoutKind::ThreeColumns),
             Change::Scale(OutputRole::Center, Scale::new(1.75)),
@@ -609,7 +611,48 @@ mod tests {
                 device: "alsa_output.hdmi".into(),
                 visible: false,
             },
+            Change::TasksToken(Some("kama_test_token".into())),
+            Change::FoundryToken(Some("kma_test_token".into())),
         ];
+        // Exhaustive match so adding a new `Change` variant reminds us to
+        // cover it in `changes` above and verify the compositor accepts it.
+        for change in &changes {
+            match change {
+                Change::Theme(_)
+                | Change::Accent(_)
+                | Change::Terminal(_)
+                | Change::Xwayland(_)
+                | Change::ShellMode(_)
+                | Change::Outputs(_)
+                | Change::Keyboard { .. }
+                | Change::StickyEdges(_)
+                | Change::DirectScanout(_)
+                | Change::Vrr(_)
+                | Change::Animations(_)
+                | Change::Dock(_, _)
+                | Change::Layout(_, _)
+                | Change::Scale(_, _)
+                | Change::DockIconSize(_)
+                | Change::MouseAccelSpeed(_)
+                | Change::MouseAccelProfile(_)
+                | Change::MouseNaturalScroll(_)
+                | Change::MouseLeftHanded(_)
+                | Change::TouchpadTap(_)
+                | Change::TouchpadTapDrag(_)
+                | Change::TouchpadDisableWhileTyping(_)
+                | Change::TouchpadNaturalScroll(_)
+                | Change::TouchpadAccelSpeed(_)
+                | Change::TouchpadClick(_)
+                | Change::WallpaperPath(_)
+                | Change::Wallpaper(_, _)
+                | Change::WallpaperMode(_)
+                | Change::WallpaperDefinition(_)
+                | Change::AudioNick { .. }
+                | Change::AudioVisibility { .. }
+                | Change::TasksToken(_)
+                | Change::FoundryToken(_) => {}
+            }
+        }
         let mut text = SAMPLE.to_owned();
         for change in &changes {
             text = apply(&text, change).unwrap();
@@ -726,7 +769,10 @@ mod tests {
         assert!(!classic.is_spatial());
         assert_eq!(classic.mode, Some(ShellMode::Classic));
 
-        let spatial = parse("mode = \"spatial\"\n[widgets]\nclock = true\n").unwrap();
+        let spatial = parse(
+            "mode = \"spatial\"\n[widgets]\nclock = true\n[spatial]\ntasks_token = \"kama_abc\"\nfoundry_token = \"kma_def\"\n",
+        )
+        .unwrap();
         assert!(spatial.is_spatial());
         assert_eq!(spatial.mode, Some(ShellMode::Spatial));
     }
