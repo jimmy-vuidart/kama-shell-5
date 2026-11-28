@@ -256,7 +256,7 @@ pub fn view<'a>(dock: &'a Dock, bar: &'a BarState, palette: Palette) -> Element<
     .align_x(rim_align);
 
     let sidebar: Element<'a, Message> = stack![bar_bg, inner_rim].into();
-    let tooltip_area = hover_tooltip(bar, side, launcher_visible, metrics, palette);
+    let tooltip_area = hover_tooltip(bar, side, metrics, palette);
 
     let layout = match side {
         Side::Left => row![sidebar, tooltip_area],
@@ -798,7 +798,6 @@ fn is_headphones(dock: &Dock) -> bool {
 fn hover_tooltip<'a>(
     bar: &'a BarState,
     side: Side,
-    launcher_visible: bool,
     metrics: Metrics,
     palette: Palette,
 ) -> Element<'a, Message> {
@@ -815,10 +814,8 @@ fn hover_tooltip<'a>(
             .into();
     };
 
-    let state_label = tooltip_state(entry, bar.screen, launcher_visible);
-    let label = format!("{} · {state_label}", entry.identity.name);
     let pill = container(
-        text(label)
+        text(&entry.identity.name)
             .size(11.5)
             .font(style::MEDIUM)
             .color(palette.text),
@@ -851,28 +848,6 @@ fn hover_tooltip<'a>(
         .align_x(align_x)
         .align_y(Vertical::Top)
         .into()
-}
-
-fn tooltip_state(entry: &Entry, here: OutputRole, launcher_visible: bool) -> String {
-    match spatial_indicator(entry, here, launcher_visible) {
-        SpatialIndicator::None => "Épinglée".to_owned(),
-        SpatialIndicator::ActiveHere | SpatialIndicator::Here => "Sur cet écran".to_owned(),
-        SpatialIndicator::Elsewhere => {
-            let screen = entry
-                .windows
-                .first()
-                .map_or("un autre écran", |win| screen_name(win.screen));
-            format!("Sur {screen} · clic pour téléporter")
-        }
-    }
-}
-
-fn screen_name(screen: OutputRole) -> &'static str {
-    match screen {
-        OutputRole::Left => "Écran gauche",
-        OutputRole::Center => "Écran central",
-        OutputRole::Right => "Écran droit",
-    }
 }
 
 #[cfg(test)]
