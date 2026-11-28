@@ -396,6 +396,25 @@ impl std::fmt::Display for OutputChoice {
     }
 }
 
+enum PendingPopup {
+    Entry {
+        settings: IcedNewPopupSettings,
+        bar_id: window::Id,
+        key: String,
+    },
+    Tray {
+        settings: IcedNewPopupSettings,
+        bar_id: window::Id,
+        address: String,
+    },
+    SpatialApp {
+        settings: IcedNewPopupSettings,
+        surface_id: window::Id,
+        key: String,
+        entry: Box<Entry>,
+    },
+}
+
 pub struct Dock {
     pub options: Options,
     pub config: Config,
@@ -432,6 +451,10 @@ pub struct Dock {
     pub menu: Option<(window::Id, window::Id, String, Option<Entry>)>,
     pub tray: Vec<TrayItem>,
     pub tray_menu: Option<(window::Id, window::Id, String)>,
+    /// Popups whose close was requested and whose `Closed` event has not arrived yet.
+    closing_popups: Vec<window::Id>,
+    /// Next popup to open once every closing popup has been destroyed.
+    pending_popup: Option<PendingPopup>,
     pub drawer: Option<Drawer>,
     pub toasts: Option<ToastSurface>,
 
@@ -536,6 +559,8 @@ impl Dock {
                 Vec::new()
             },
             tray_menu: None,
+            closing_popups: Vec::new(),
+            pending_popup: None,
             options,
             config,
             catalog,
@@ -1936,16 +1961,63 @@ impl Dock {
     }
 
     fn close_menu(&mut self) -> Task<Message> {
+        self.pending_popup = None;
         match self.menu.take() {
-            Some((id, ..)) => window::close(id),
+            Some((id, ..)) => {
+                self.closing_popups.push(id);
+                window::close(id)
+            }
             None => Task::none(),
         }
     }
 
     fn close_tray_menu(&mut self) -> Task<Message> {
+        self.pending_popup = None;
         match self.tray_menu.take() {
-            Some((id, ..)) => window::close(id),
+            Some((id, ..)) => {
+                self.closing_popups.push(id);
+                window::close(id)
+            }
             None => Task::none(),
+        }
+    }
+
+    /// Opens a popup only once no previous popup is still tearing down, so the
+    /// compositor never receives a second `xdg_popup.grab` while the first is alive.
+    fn open_popup(&mut self, pending: PendingPopup) -> Task<Message> {
+        if !self.closing_popups.is_empty() {
+            self.pending_popup = Some(pending);
+            return Task::none();
+        }
+        match pending {
+            PendingPopup::Entry {
+                settings,
+                bar_id,
+                key,
+            } => {
+                let (popup, open) = Message::popup_open(settings);
+                self.menu = Some((popup, bar_id, key, None));
+                open
+            }
+            PendingPopup::Tray {
+                settings,
+                bar_id,
+                address,
+            } => {
+                let (popup, open) = Message::popup_open(settings);
+                self.tray_menu = Some((popup, bar_id, address));
+                open
+            }
+            PendingPopup::SpatialApp {
+                settings,
+                surface_id,
+                key,
+                entry,
+            } => {
+                let (popup, open) = Message::popup_open(settings);
+                self.menu = Some((popup, surface_id, key, Some(*entry)));
+                open
+            }
         }
     }
 
@@ -2527,6 +2599,15 @@ impl Dock {
             }
             Message::Closed(id) => {
                 self.leaving.take_if(|drawer| drawer.id == id);
+                self.closing_popups.retain(|closing| *closing != id);
+                let pending_open = if self.closing_popups.is_empty() {
+                    self.pending_popup
+                        .take()
+                        .map(|pending| self.open_popup(pending))
+                        .unwrap_or_else(Task::none)
+                } else {
+                    Task::none()
+                };
                 // A click outside the menu closes it without telling more;
                 // the bar, kept as it was for it, folds again.
                 if let Some((_, bar, ..)) = self.menu.take_if(|(menu, ..)| *menu == id) {
@@ -2534,13 +2615,13 @@ impl Dock {
                         bar.hovered = false;
                         bar.hover_entry = None;
                     }
-                    return self.input_region(bar);
+                    return self.input_region(bar).chain(pending_open);
                 }
                 if let Some((_, bar, _)) = self.tray_menu.take_if(|(menu, ..)| *menu == id) {
                     if let Some(bar) = self.bar_mut(bar) {
                         bar.hover_tray = None;
                     }
-                    return self.input_region(bar);
+                    return self.input_region(bar).chain(pending_open);
                 }
                 let drawer = self.drawer.as_ref().is_some_and(|drawer| drawer.id == id);
                 if drawer {
@@ -2562,9 +2643,9 @@ impl Dock {
                 }
                 self.bars.retain(|bar| bar.id != id);
                 if drawer || popover {
-                    return self.sync_toasts();
+                    return self.sync_toasts().chain(pending_open);
                 }
-                Task::none()
+                pending_open
             }
             Message::BarHover(id, hovered) => {
                 // The menu keeps its bar as it is while it is open.
@@ -2726,8 +2807,11 @@ impl Dock {
                     .gravity(grows);
                 let key = entry.identity.key.clone();
                 let close = self.close_menu().chain(self.close_tray_menu());
-                let (popup, open) = Message::popup_open(settings);
-                self.menu = Some((popup, id, key, None));
+                let open = self.open_popup(PendingPopup::Entry {
+                    settings,
+                    bar_id: id,
+                    key,
+                });
                 self.drag = None;
                 close.chain(open)
             }
@@ -2809,8 +2893,11 @@ impl Dock {
                     .gravity(grows);
                 let address = item.address.clone();
                 let close = self.close_tray_menu().chain(self.close_menu());
-                let (popup, open) = Message::popup_open(settings);
-                self.tray_menu = Some((popup, id, address));
+                let open = self.open_popup(PendingPopup::Tray {
+                    settings,
+                    bar_id: id,
+                    address,
+                });
                 close.chain(open)
             }
             Message::TrayMenuItemClick {
@@ -3389,9 +3476,13 @@ impl Dock {
                     .anchor(PopupAnchor::TopLeft)
                     .gravity(PopupGravity::BottomRight);
                 let close = self.close_menu().chain(self.close_tray_menu());
-                let (popup, open) = Message::popup_open(settings);
                 let entry_key = entry.identity.key.clone();
-                self.menu = Some((popup, surface_id, entry_key, Some(entry)));
+                let open = self.open_popup(PendingPopup::SpatialApp {
+                    settings,
+                    surface_id,
+                    key: entry_key,
+                    entry: Box::new(entry),
+                });
                 close.chain(open)
             }
             Message::DailyTaskToggle(id) => {

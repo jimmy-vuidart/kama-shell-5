@@ -1,4 +1,4 @@
-use smithay::desktop::{LayerSurface, layer_map_for_output};
+use smithay::desktop::{LayerSurface, PopupKind, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::wayland::shell::wlr_layer::{
@@ -53,6 +53,9 @@ impl WlrLayerShellHandler for State {
     /// A menu of a panel: it stays on the screen of the panel.
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
         self.unconstrain_popup(&popup);
+        if let Err(error) = self.popups.track_popup(PopupKind::Xdg(popup)) {
+            tracing::warn!(%error, "cannot track a popup");
+        }
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {

@@ -665,6 +665,7 @@ impl State {
         for index in due {
             self.render_screen(index);
         }
+        self.popups.cleanup();
     }
 
     /// Draws one screen and sends the frame on its way.
