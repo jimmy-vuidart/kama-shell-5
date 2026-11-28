@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KAMA-TITAN — Prototype Shell 21:9</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --sidebar-w: 56px;
+      --glass-bg: rgba(15, 19, 29, 0.54);
+      --glass-bg-strong: rgba(14, 18, 28, 0.82);
+      --glass-border: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #090d16;
+      color: #f4f6fb;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* =========================================================
+       Fonds d'écran 21:9 profonds et atmosphériques
+       ========================================================= */
+    #wallpaper-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      transition: background 600ms ease, filter 400ms ease;
+    }
+
+    /* 1. Midnight Aurora */
+    .wp-aurora {
+      background:
+        radial-gradient(ellipse 72% 62% at 16% 20%, rgba(56, 130, 246, 0.34) 0%, transparent 62%),
+        radial-gradient(ellipse 65% 58% at 84% 26%, rgba(16, 185, 129, 0.24) 0%, transparent 60%),
+        radial-gradient(ellipse 78% 68% at 52% 92%, rgba(99, 102, 241, 0.26) 0%, transparent 65%),
+        linear-gradient(135deg, #070b14 0%, #0e1729 48%, #0a1220 100%);
+    }
+
+    /* 2. Deep Obsidian Ocean */
+    .wp-ocean {
+      background:
+        radial-gradient(ellipse 75% 55% at 22% 18%, rgba(14, 165, 233, 0.26) 0%, transparent 60%),
+        radial-gradient(ellipse 65% 65% at 78% 82%, rgba(30, 64, 175, 0.32) 0%, transparent 62%),
+        radial-gradient(ellipse 50% 45% at 50% 50%, rgba(6, 182, 212, 0.12) 0%, transparent 65%),
+        linear-gradient(155deg, #04070e 0%, #091322 50%, #050a14 100%);
+    }
+
+    /* 3. Alpine Dusk */
+    .wp-alpine {
+      background:
+        radial-gradient(ellipse 70% 58% at 20% 22%, rgba(234, 88, 12, 0.24) 0%, transparent 60%),
+        radial-gradient(ellipse 68% 62% at 82% 74%, rgba(168, 85, 247, 0.22) 0%, transparent 62%),
+        radial-gradient(ellipse 75% 55% at 55% 15%, rgba(56, 189, 248, 0.14) 0%, transparent 62%),
+        linear-gradient(145deg, #0d0c16 0%, #171626 50%, #0d101b 100%);
+    }
+
+    /* Grain subtil pour donner de la matière au verre */
+    .noise-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      opacity: 0.032;
+      background-image: radial-gradient(rgba(255, 255, 255, 0.75) 0.5px, transparent 0.5px);
+      background-size: 6px 6px;
+    }
+
+    /* =========================================================
+       Surfaces Liquid Glass
+       ========================================================= */
+    .glass-sidebar {
+      background: rgba(11, 15, 24, 0.68);
+      backdrop-filter: blur(22px) saturate(160%);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      border-right: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .glass-surface {
+      background: var(--glass-bg);
+      backdrop-filter: blur(22px) saturate(160%);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      border: 1px solid var(--glass-border);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.09),
+        0 18px 42px -16px rgba(0, 0, 0, 0.52);
+    }
+
+    .glass-popover {
+      background: var(--glass-bg-strong);
+      backdrop-filter: blur(30px) saturate(170%);
+      -webkit-backdrop-filter: blur(30px) saturate(170%);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 26px 60px -12px rgba(0, 0, 0, 0.72);
+    }
+
+    /* =========================================================
+       Grille d'applications flottante (style GNOME natif)
+       Aucune carte ni bordure au repos — uniquement sur le wallpaper
+       ========================================================= */
+    .launcher-tile {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      padding: 12px 8px 10px;
+      border-radius: 16px;
+      background: transparent;
+      border: 1px solid transparent;
+      transition: background 170ms ease, transform 170ms cubic-bezier(0.22, 1, 0.36, 1);
+      cursor: pointer;
+    }
+
+    .launcher-tile:hover {
+      background: rgba(255, 255, 255, 0.10);
+      transform: translateY(-2px);
+    }
+
+    .launcher-tile:active {
+      transform: translateY(0) scale(0.96);
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .launcher-icon-wrap {
+      width: 52px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.42));
+      transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .launcher-tile:hover .launcher-icon-wrap {
+      transform: scale(1.06);
+    }
+
+    .launcher-label {
+      font-size: 12px;
+      font-weight: 450;
+      color: rgba(255, 255, 255, 0.92);
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.78), 0 0 10px rgba(0, 0, 0, 0.45);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.25;
+      text-align: center;
+    }
+
+    /* Animation d'apparition du panneau latéral */
+    .fade-panel {
+      transition: opacity 180ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+      transform-origin: left bottom;
+    }
+
+    .hidden-panel {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-8px) scale(0.98);
+    }
+
+    /* Tooltips sobres sur la sidebar */
+    .sb-btn {
+      position: relative;
+    }
+
+    .sb-btn[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: calc(100% + 12px);
+      top: 50%;
+      transform: translateY(-50%) translateX(-4px);
+      background: rgba(14, 18, 28, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 11.5px;
+      font-weight: 500;
+      white-space: nowrap;
+      padding: 5px 10px;
+      border-radius: 9px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+      z-index: 80;
+    }
+
+    .sb-btn[data-tooltip]:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    /* Sliders natifs épurés */
+    .os-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .os-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      transition: transform 120ms ease;
+    }
+
+    .os-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.12);
+    }
+
+    /* Scrollbar discrète */
+    .subtle-scroll::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    .subtle-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .subtle-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+    }
+    .subtle-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* Overlays luminosité (Zenbook) & mode nuit */
+    #brightness-overlay {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 90;
+      transition: opacity 120ms linear;
+    }
+
+    #nightlight-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255, 146, 56, 0.14);
+      mix-blend-mode: multiply;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 89;
+      transition: opacity 320ms ease;
+    }
+
+    /* Pilules Quick Settings (façon GNOME, adaptées verre KAMA-TITAN) */
+    .qs-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.065);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.84);
+      transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 120ms ease;
+      text-align: left;
+    }
+
+    .qs-pill:hover {
+      background: rgba(255, 255, 255, 0.11);
+    }
+
+    .qs-pill:active {
+      transform: scale(0.98);
+    }
+
+    .qs-pill.is-active {
+      background: rgba(56, 140, 245, 0.82);
+      border-color: rgba(147, 197, 253, 0.38);
+      color: #ffffff;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+    }
+
+    .qs-pill.is-active:hover {
+      background: rgba(70, 150, 250, 0.9);
+    }
+  </style>
+</head>
+<body class="overflow-hidden">
+  <!-- =========================================================
+       1. FOND D'ÉCRAN & TEXTURE
+       ========================================================= -->
+  <div id="wallpaper-layer" class="wp-aurora"></div>
+  <div class="noise-overlay"></div>
+
+  <!-- =========================================================
+       2. SIDEBAR PERMANENTE PLEINE HAUTEUR (56 px)
+       ========================================================= -->
+  <aside class="glass-sidebar fixed top-0 left-0 bottom-0 w-[56px] z-40 flex flex-col items-center justify-between py-3">
+
+    <!-- HAUT : Bouton Accueil + Horloge & Date + Barre des tâches -->
+    <div class="flex flex-col items-center gap-3 w-full">
+      <!-- Bouton Accueil (Spatial 21:9) -->
+      <button
+        id="btn-home"
+        onclick="goHome()"
+        data-tooltip="Accueil KAMA-TITAN"
+        class="sb-btn relative w-9 h-9 rounded-xl flex items-center justify-center bg-white/14 text-white border border-white/20 transition-all hover:bg-white/18 active:scale-95"
+        aria-label="Accueil"
+      >
+        <span id="home-active-bar" class="absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-white transition-all"></span>
+        <svg class="w-[17px] h-[17px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.8" />
+          <rect x="14" y="3" width="7" height="7" rx="1.8" />
+          <rect x="3" y="14" width="7" height="7" rx="1.8" />
+          <rect x="14" y="14" width="7" height="7" rx="1.8" />
+        </svg>
+      </button>
+
+      <!-- Horloge compacte & date du jour -->
+      <div id="clock-widget" data-tooltip="Date du jour" class="sb-btn flex flex-col items-center leading-none tracking-tight select-none cursor-default">
+        <span id="clock-time" class="text-[12.5px] font-semibold text-white/95 tabular-nums">13:09</span>
+        <span id="clock-date" class="text-[9.5px] font-medium uppercase tracking-wider text-white/45 mt-1 tabular-nums">VEN 27</span>
+      </div>
+
+      <div class="w-5 h-px bg-white/10"></div>
+
+      <!-- Barre des tâches verticale (Épinglées + Lancées) -->
+      <div id="taskbar-list" class="flex flex-col items-center gap-2 w-full">
+        <!-- Rempli dynamiquement en JS -->
+      </div>
+    </div>
+
+    <!-- BAS : Pilule Centre de Contrôle & Notifications (4 icônes visibles) -->
+    <div class="flex flex-col items-center gap-2 pb-0.5">
+      <button
+        id="btn-quick-controls"
+        onclick="toggleSidebarPanel('controls')"
+        data-tooltip="Centre de contrôle & notifications"
+        class="sb-btn w-9 py-2.5 rounded-2xl flex flex-col items-center gap-3 bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-white/85 transition-all duration-200 active:scale-[0.97]"
+        aria-label="Ouvrir le centre de contrôle et de notifications"
+      >
+        <!-- 1. Notifications (point vert lumineux si non lues) -->
+        <span class="relative flex items-center justify-center">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <span id="sb-notif-dot" class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-[#111521] shadow-[0_0_8px_rgba(52,211,153,0.95)] transition-opacity duration-200"></span>
+        </span>
+
+        <!-- 2. Wi-Fi -->
+        <span id="sb-wifi-icon" class="flex items-center justify-center transition-opacity duration-200">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+            <circle cx="12" cy="19.5" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </span>
+
+        <!-- 3. Sortie Audio (Casque / Haut-parleurs dynamique) -->
+        <span class="flex items-center justify-center">
+          <svg id="icon-headphones" class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
+          </svg>
+          <svg id="icon-speakers" class="w-[15px] h-[15px] hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+          </svg>
+        </span>
+
+        <!-- 4. Batterie (visible sur Zenbook, masquée sur TITAN) -->
+        <span id="sb-battery-icon" class="flex items-center justify-center text-white/80">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="7" width="16.5" height="10" rx="2" />
+            <line x1="21.5" y1="10.5" x2="21.5" y2="13.5" />
+            <path d="M11 9.5L8.5 12.5h3L10 15" stroke-width="1.6" />
+          </svg>
+        </span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- =========================================================
+       3. CENTRE DE CONTRÔLE & NOTIFICATIONS (façon GNOME)
+       ========================================================= -->
+  <div id="popover-controls" class="glass-popover fade-panel hidden-panel fixed left-[68px] bottom-4 w-[364px] max-h-[calc(100vh-32px)] overflow-y-auto subtle-scroll rounded-3xl p-4 z-50 flex flex-col gap-4">
+
+    <!-- En-tête : Batterie (Zenbook) ou Hôte (TITAN) + 4 actions système -->
+    <div class="flex items-center justify-between gap-2">
+      <div id="qc-battery-pill" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.08] border border-white/[0.08] text-[12px] font-medium text-white/90">
+        <svg class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="7" width="16.5" height="10" rx="2" />
+          <line x1="21.5" y1="10.5" x2="21.5" y2="13.5" />
+          <path d="M11 9.5L8.5 12.5h3L10 15" stroke-width="1.6" />
+        </svg>
+        <span class="tabular-nums">96 %</span>
+      </div>
+      <div id="qc-host-pill" class="hidden flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[11.5px] font-medium text-white/75">
+        <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+        <span>KAMA-TITAN</span>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <button onclick="showMicroFeedback('Capture d’écran enregistrée')" title="Capture d'écran" class="w-8 h-8 rounded-full bg-white/[0.07] hover:bg-white/[0.14] flex items-center justify-center text-white/75 hover:text-white transition-colors">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2m8-16h2a2 2 0 0 1 2 2v2m-4 12h2a2 2 0 0 0 2-2v-2" />
+            <circle cx="12" cy="12" r="2.5" />
+          </svg>
+        </button>
+        <button onclick="launchAppById('settings')" title="Paramètres" class="w-8 h-8 rounded-full bg-white/[0.07] hover:bg-white/[0.14] flex items-center justify-center text-white/75 hover:text-white transition-colors">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+        <button onclick="showMicroFeedback('Session verrouillée')" title="Verrouiller" class="w-8 h-8 rounded-full bg-white/[0.07] hover:bg-white/[0.14] flex items-center justify-center text-white/75 hover:text-white transition-colors">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="11" width="14" height="10" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+        </button>
+        <button onclick="showMicroFeedback('Menu d’alimentation')" title="Alimentation" class="w-8 h-8 rounded-full bg-white/[0.07] hover:bg-white/[0.14] flex items-center justify-center text-white/75 hover:text-white transition-colors">
+          <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Sliders Volume (+ switch 1 clic Casque/HP) & Luminosité (Zenbook) -->
+    <div class="flex flex-col gap-3 px-0.5">
+      <div class="flex items-center gap-3">
+        <button onclick="toggleAudioOutput()" title="Basculer Casque / Haut-parleurs" class="w-7 h-7 rounded-full bg-white/[0.08] hover:bg-white/[0.16] flex items-center justify-center text-white/85 shrink-0 transition-colors">
+          <svg id="qc-icon-headphones" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
+          </svg>
+          <svg id="qc-icon-speakers" class="w-3.5 h-3.5 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+          </svg>
+        </button>
+        <input id="slider-volume" type="range" min="0" max="100" value="68" class="os-slider flex-1" oninput="updateVolume(this.value)" />
+        <span id="vol-value" class="tabular-nums text-white/55 text-[11px] w-8 text-right">68%</span>
+      </div>
+
+      <div id="qc-brightness-row" class="flex items-center gap-3">
+        <span class="w-7 h-7 rounded-full flex items-center justify-center text-white/70 shrink-0">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+          </svg>
+        </span>
+        <input id="slider-brightness" type="range" min="45" max="100" value="100" class="os-slider flex-1" oninput="updateBrightness(this.value)" />
+        <span id="bright-value" class="tabular-nums text-white/55 text-[11px] w-8 text-right">100%</span>
+      </div>
+    </div>
+
+    <!-- Grille 2 colonnes de Quick Toggles -->
+    <div class="grid grid-cols-2 gap-2">
+      <button id="tile-audio" onclick="toggleAudioOutput()" class="qs-pill is-active">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[12px] font-medium truncate">Sortie audio</div>
+          <div id="qc-audio-label" class="text-[10.5px] opacity-80 truncate">Casque</div>
+        </div>
+      </button>
+
+      <button id="tile-wifi" onclick="toggleQuickSetting('wifi')" class="qs-pill is-active">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+          <circle cx="12" cy="19.5" r="1" fill="currentColor" stroke="none" />
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[12px] font-medium truncate">Wi-Fi</div>
+          <div id="tile-wifi-sub" class="text-[10.5px] opacity-80 truncate">Freebox-CC81…</div>
+        </div>
+      </button>
+
+      <button id="tile-bluetooth" onclick="toggleQuickSetting('bluetooth')" class="qs-pill is-active">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5" />
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[12px] font-medium truncate">Bluetooth</div>
+          <div id="tile-bluetooth-sub" class="text-[10.5px] opacity-80 truncate">Activé</div>
+        </div>
+      </button>
+
+      <button id="tile-nightlight" onclick="toggleQuickSetting('nightlight')" class="qs-pill">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[12px] font-medium truncate">Mode nuit</div>
+        </div>
+      </button>
+
+      <button id="tile-dnd" onclick="toggleQuickSetting('dnd')" class="qs-pill">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+          <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+          <path d="M18 8a6 6 0 0 0-9.33-5" />
+          <line x1="2" y1="2" x2="22" y2="22" />
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[12px] font-medium truncate">Ne pas déranger</div>
+        </div>
+      </button>
+
+      <button id="tile-caffeine" onclick="toggleQuickSetting('caffeine')" class="qs-pill">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 8h1a4 4 0 0 1 0 8h-1" />
+          <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
+          <line x1="6" y1="2" x2="6" y2="4" />
+          <line x1="10" y1="2" x2="10" y2="4" />
+          <line x1="14" y1="2" x2="14" y2="4" />
+        </svg>
+        <div class="min-w-0 leading-tight">
+          <div class="text-[12px] font-medium truncate">Caféine</div>
+        </div>
+      </button>
+    </div>
+
+    <!-- Section Notifications -->
+    <div class="pt-3 border-t border-white/10 flex flex-col gap-2.5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-semibold tracking-[0.14em] uppercase text-white/50">Notifications</span>
+          <span id="notif-unread-badge" class="px-1.5 py-0.5 rounded-full bg-emerald-400/15 text-emerald-300 text-[10px] font-medium tabular-nums">3 non lues</span>
+        </div>
+        <button id="btn-clear-notifs" onclick="clearAllNotifications()" class="text-[11px] text-white/45 hover:text-white/85 transition-colors">
+          Tout effacer
+        </button>
+      </div>
+
+      <div id="notification-list" class="flex flex-col gap-2">
+        <!-- Rempli dynamiquement en JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       4. BARRE DE SIMULATION DISCRÈTE (Coin supérieur droit)
+       ========================================================= -->
+  <div class="fixed top-4 right-5 z-30 flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-full glass-surface text-[11px]">
+    <!-- Moniteur actif -->
+    <div class="flex items-center gap-0.5 bg-white/[0.06] rounded-full p-0.5">
+      <button onclick="setScreen('left')" id="scr-btn-left" class="px-2 py-0.5 rounded-full text-white/55 hover:text-white transition-colors">Gauche</button>
+      <button onclick="setScreen('center')" id="scr-btn-center" class="px-2 py-0.5 rounded-full bg-white/15 text-white font-medium transition-colors">Centre 21:9</button>
+      <button onclick="setScreen('right')" id="scr-btn-right" class="px-2 py-0.5 rounded-full text-white/55 hover:text-white transition-colors">Droite</button>
+    </div>
+
+    <span class="w-px h-3.5 bg-white/15"></span>
+
+    <!-- Profil machine -->
+    <div class="flex items-center gap-0.5 bg-white/[0.06] rounded-full p-0.5">
+      <button onclick="setHostProfile('zenbook')" id="host-btn-zenbook" class="px-2 py-0.5 rounded-full bg-white/15 text-white font-medium transition-colors">Zenbook</button>
+      <button onclick="setHostProfile('titan')" id="host-btn-titan" class="px-2 py-0.5 rounded-full text-white/55 hover:text-white transition-colors">TITAN</button>
+    </div>
+
+    <span class="w-px h-3.5 bg-white/15"></span>
+
+    <!-- Fonds d'écran -->
+    <div class="flex items-center gap-1.5 pl-0.5">
+      <button onclick="setWallpaper('aurora')" id="wp-btn-aurora" title="Midnight Aurora" class="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-blue-500 to-emerald-400 ring-2 ring-white/80 transition-transform hover:scale-110"></button>
+      <button onclick="setWallpaper('ocean')" id="wp-btn-ocean" title="Deep Obsidian Ocean" class="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-sky-400 to-blue-900 ring-1 ring-white/25 transition-transform hover:scale-110"></button>
+      <button onclick="setWallpaper('alpine')" id="wp-btn-alpine" title="Alpine Dusk" class="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-orange-500 to-purple-600 ring-1 ring-white/25 transition-transform hover:scale-110"></button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       5. ZONE PRINCIPALE (Hors sidebar 56 px)
+       ========================================================= -->
+  <main class="relative z-10 ml-[56px] h-screen flex flex-col overflow-hidden">
+
+    <!-- ÉCRAN D'ACCUEIL SPATIAL 21:9 -->
+    <div id="home-screen" class="flex-1 flex flex-col gap-6 px-6 md:px-10 lg:px-12 pt-14 xl:pt-6 pb-8 overflow-y-auto subtle-scroll">
+
+      <!-- HAUT : Barre de recherche centrée (filtre la grille en temps réel) -->
+      <div class="w-full max-w-[460px] mx-auto relative z-30 shrink-0">
+        <div class="glass-surface rounded-2xl px-4 py-2.5 flex items-center gap-3 focus-within:border-white/30 focus-within:bg-white/[0.09] transition-all">
+          <svg class="w-4 h-4 text-white/45 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7.5" />
+            <line x1="20" y1="20" x2="16.4" y2="16.4" />
+          </svg>
+          <input
+            id="app-search-input"
+            type="text"
+            autocomplete="off"
+            placeholder="Rechercher une application…"
+            class="w-full bg-transparent border-0 outline-none text-[13.5px] text-white/95 placeholder:text-white/40 select-text"
+            oninput="handleSearchInput(this.value)"
+            onkeydown="handleSearchKeydown(event)"
+          />
+          <button
+            id="app-search-clear"
+            onclick="clearSearchInput()"
+            class="hidden w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/65 transition-colors"
+            aria-label="Effacer la recherche"
+          >
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- MILIEU : Zone d'action Spatial 21:9 (2 colonnes asymétriques 42% / 58%) -->
+      <section id="view-spatial" class="w-full max-w-[1480px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-5 items-start shrink-0">
+
+        <!-- COLONNE GAUCHE (~42% -> 5/12) : Google Tasks + Tickets Perso -->
+        <div class="lg:col-span-5 flex flex-col gap-4">
+
+          <!-- Google Tasks -->
+          <div class="glass-surface rounded-3xl p-5">
+            <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2 h-2 rounded-full bg-sky-400"></span>
+                <h2 class="text-[11.5px] font-semibold tracking-[0.14em] uppercase text-white/60">Google Tasks</h2>
+              </div>
+              <span id="spatial-tasks-remaining" class="text-[11px] text-white/40 tabular-nums">3 restantes</span>
+            </div>
+            <div id="spatial-tasks-list" class="flex flex-col gap-1"></div>
+          </div>
+
+          <!-- Tickets Perso (indépendant d'orca.dev) -->
+          <div class="glass-surface rounded-3xl p-5">
+            <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2 h-2 rounded-full bg-violet-400"></span>
+                <h2 class="text-[11.5px] font-semibold tracking-[0.14em] uppercase text-white/60">Tickets Perso</h2>
+              </div>
+              <span class="text-[11px] text-white/40">API web</span>
+            </div>
+            <div id="spatial-tickets-list" class="flex flex-col gap-2"></div>
+          </div>
+
+        </div>
+
+        <!-- COLONNE DROITE (~58% -> 7/12) : Jeux commencés + Agenda 7 jours -->
+        <div class="lg:col-span-7 flex flex-col gap-4">
+
+          <!-- Jeux commencés -->
+          <div class="glass-surface rounded-3xl p-5">
+            <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <h2 class="text-[11.5px] font-semibold tracking-[0.14em] uppercase text-white/60">Jeux commencés</h2>
+              </div>
+              <span class="text-[11px] text-white/40">Reprise 1 clic · 21:9</span>
+            </div>
+            <div id="spatial-games-grid" class="grid grid-cols-1 sm:grid-cols-3 gap-3"></div>
+          </div>
+
+          <!-- Agenda · 7 jours -->
+          <div class="glass-surface rounded-3xl p-5">
+            <div class="flex items-center justify-between mb-3.5">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                <h2 class="text-[11.5px] font-semibold tracking-[0.14em] uppercase text-white/60">Agenda · 7 jours</h2>
+              </div>
+              <span id="calendar-range-label" class="text-[11px] text-white/40 tabular-nums">Prochains 7 jours</span>
+            </div>
+            <div id="spatial-calendar-list" class="grid grid-cols-1 md:grid-cols-2 gap-2"></div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- BAS : GRILLE FLOTTANTE D'APPLICATIONS FAÇON GNOME (directement sur le wallpaper, zéro carte) -->
+      <section aria-label="Lanceur d'applications" class="w-full max-w-[1140px] mx-auto pt-2 pb-4 shrink-0">
+        <div id="app-launcher-grid" class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-x-3 gap-y-4">
+          <!-- Rempli dynamiquement en JS -->
+        </div>
+        <div id="app-launcher-empty" class="hidden py-8 text-center text-[13px] text-white/55 drop-shadow">
+          Aucune application ne correspond à cette recherche.
+        </div>
+      </section>
+
+    </div>
+
+    <!-- VUE D'APPLICATION MAXIMISÉE (laisse la sidebar 56 px toujours visible) -->
+    <div id="maximized-app-view" class="hidden flex-1 flex flex-col bg-[#0c1019]/95 backdrop-blur-xl">
+      <div class="h-12 px-5 pr-[380px] border-b border-white/[0.08] flex items-center justify-between gap-4 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <span id="max-app-icon" class="w-6 h-6 flex items-center justify-center shrink-0"></span>
+          <span id="max-app-title" class="text-[13.5px] font-semibold text-white/95 truncate">Application</span>
+          <span id="max-app-monitor-badge" class="px-2 py-0.5 rounded-full bg-white/[0.07] border border-white/[0.09] text-[10.5px] text-white/65 shrink-0">Centre 21:9</span>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="goHome()" class="px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-[11px] text-white/75 transition-colors">
+            Accueil
+          </button>
+          <button onclick="closeActiveApp()" class="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-[11px] text-rose-200 transition-colors">
+            Fermer
+          </button>
+        </div>
+      </div>
+
+      <div id="max-app-body" class="flex-1 p-6 md:p-10 flex items-center justify-center overflow-y-auto">
+        <!-- Rempli dynamiquement en JS -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Toast micro-feedback centré en bas -->
+  <div id="micro-feedback" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full glass-popover text-[12px] text-white/92 opacity-0 pointer-events-none translate-y-2 transition-all duration-200"></div>
+
+  <!-- Overlays simulation luminosité & mode nuit -->
+  <div id="brightness-overlay"></div>
+  <div id="nightlight-overlay"></div>
+
+  <!-- =========================================================
+       6. LOGIQUE INTERACTIVE & ICÔNES NATIVES 52x52 SVG
+       ========================================================= -->
+  <script>
+    /* --- Icônes vectorielles natives 52×52 variées (style Linux / GNOME / macOS) --- */
+    function getNativeIconSvg(appId, size = 52) {
+      const s = `width="${size}" height="${size}" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"`;
+      switch (appId) {
+        case 'orca':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-orca" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>
+            <path d="M32 5L55 18.2V45.8L32 59L9 45.8V18.2L32 5Z" fill="url(#g-orca)"/>
+            <path d="M32 14L47 22.7V40.3L32 49L17 40.3V22.7L32 14Z" fill="rgba(255,255,255,0.14)"/>
+            <path d="M32 19L43 25.4V38.2L32 44.6L21 38.2V25.4L32 19Z" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/>
+            <path d="M32 32L43 25.4M32 32V44.6M32 32L21 25.4" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'webstorm':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-ws" x1="4" y1="6" x2="60" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#00cdd7"/><stop offset="0.55" stop-color="#2086d7"/><stop offset="1" stop-color="#6b57ff"/></linearGradient></defs>
+            <rect x="6" y="6" width="52" height="52" rx="13" fill="url(#g-ws)"/>
+            <rect x="14" y="14" width="36" height="36" rx="6" fill="#0d111a"/>
+            <text x="19" y="34" fill="#ffffff" font-family="Inter, sans-serif" font-weight="700" font-size="14.5">WS</text>
+            <rect x="19" y="40" width="16" height="3" rx="1.5" fill="#ffffff"/>
+          </svg>`;
+
+        case 'godot':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-gd" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#58b4f6"/><stop offset="1" stop-color="#2b6cb0"/></linearGradient></defs>
+            <path d="M22 10L26 16H38L42 10L49 14L47 21L54 25V39C54 49 44 55 32 55C20 55 10 49 10 39V25L17 21L15 14L22 10Z" fill="url(#g-gd)"/>
+            <circle cx="23" cy="34" r="5.2" fill="#fff"/>
+            <circle cx="41" cy="34" r="5.2" fill="#fff"/>
+            <circle cx="24" cy="34" r="2.6" fill="#1e293b"/>
+            <circle cx="40" cy="34" r="2.6" fill="#1e293b"/>
+            <path d="M22 45C25.5 47.5 38.5 47.5 42 45" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'zen':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-zen" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#fb923c"/><stop offset="0.55" stop-color="#f43f5e"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs>
+            <circle cx="32" cy="32" r="26" fill="url(#g-zen)"/>
+            <circle cx="32" cy="32" r="16.5" stroke="#fff" stroke-width="3.6" opacity="0.92"/>
+            <circle cx="32" cy="32" r="8.5" stroke="#fff" stroke-width="3.2" opacity="0.88"/>
+            <circle cx="32" cy="32" r="2.8" fill="#fff"/>
+          </svg>`;
+
+        case 'discord':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-dc" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#7289ff"/><stop offset="1" stop-color="#4e5de0"/></linearGradient></defs>
+            <rect x="6" y="6" width="52" height="52" rx="16" fill="url(#g-dc)"/>
+            <path d="M44.3 21.3A27.2 27.2 0 0 0 37.5 19.2c-.3.5-.6 1.2-.8 1.8a25.3 25.3 0 0 0-9.4 0c-.2-.6-.6-1.3-.9-1.8a27.1 27.1 0 0 0-6.8 2.1C15.3 27.7 14.1 33.9 14.7 40a27.4 27.4 0 0 0 8.3 4.2c.7-.9 1.3-1.9 1.8-2.9a17.6 17.6 0 0 1-2.8-1.3l.7-.5a19.3 19.3 0 0 0 16.6 0l.7.5a17.6 17.6 0 0 1-2.8 1.3c.5 1 1.1 2 1.8 2.9a27.3 27.3 0 0 0 8.3-4.2c.7-7.1-1.2-13.2-5-18.7ZM26.2 36.2c-1.6 0-3-1.5-3-3.3s1.3-3.3 3-3.3 3 1.5 3 3.3-1.3 3.3-3 3.3Zm11.6 0c-1.6 0-3-1.5-3-3.3s1.3-3.3 3-3.3 3 1.5 3 3.3-1.3 3.3-3 3.3Z" fill="#fff"/>
+          </svg>`;
+
+        case 'steam':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-st" x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#1b2838"/><stop offset="0.55" stop-color="#1e4b7a"/><stop offset="1" stop-color="#38bdf8"/></linearGradient></defs>
+            <circle cx="32" cy="32" r="26" fill="url(#g-st)"/>
+            <circle cx="40" cy="24" r="7.5" stroke="#fff" stroke-width="3.4"/>
+            <circle cx="40" cy="24" r="3" fill="#fff"/>
+            <circle cx="24" cy="40" r="5.5" stroke="#fff" stroke-width="3"/>
+            <path d="M8 34L22.5 40.5M34.5 29L27.5 36.5" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'terminal':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-term" x1="6" y1="8" x2="58" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#272f40"/><stop offset="1" stop-color="#111520"/></linearGradient></defs>
+            <rect x="6" y="9" width="52" height="46" rx="11" fill="url(#g-term)" stroke="rgba(255,255,255,0.22)" stroke-width="2"/>
+            <circle cx="15" cy="17" r="2.2" fill="#f87171"/>
+            <circle cx="22.5" cy="17" r="2.2" fill="#fbbf24"/>
+            <circle cx="30" cy="17" r="2.2" fill="#34d399"/>
+            <path d="M16 30L24 36.5L16 43" stroke="#38bdf8" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <line x1="29" y1="43" x2="43" y2="43" stroke="#e2e8f0" stroke-width="3.4" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'files':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-fl" x1="8" y1="14" x2="56" y2="54" gradientUnits="userSpaceOnUse"><stop stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs>
+            <path d="M8 18C8 14.7 10.7 12 14 12H25L30 18H50C53.3 18 56 20.7 56 24V46C56 49.3 53.3 52 50 52H14C10.7 52 8 49.3 8 46V18Z" fill="#1d4ed8"/>
+            <rect x="8" y="21" width="48" height="31" rx="7" fill="url(#g-fl)"/>
+            <path d="M22 35H42" stroke="rgba(255,255,255,0.55)" stroke-width="2.8" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'homeassistant':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-ha" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#41bdf5"/><stop offset="1" stop-color="#0284c7"/></linearGradient></defs>
+            <rect x="6" y="6" width="52" height="52" rx="15" fill="url(#g-ha)"/>
+            <path d="M32 14L15 29.5H20V48H44V29.5H49L32 14Z" fill="#fff"/>
+            <circle cx="32" cy="36" r="3" fill="#0284c7"/>
+            <path d="M32 48V39M32 43L26 37M32 43L38 37" stroke="#0284c7" stroke-width="2.4" stroke-linecap="round"/>
+            <circle cx="25.5" cy="36.5" r="2" fill="#0284c7"/>
+            <circle cx="38.5" cy="36.5" r="2" fill="#0284c7"/>
+          </svg>`;
+
+        case 'argocd':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-ar" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#fb923c"/><stop offset="1" stop-color="#ea580c"/></linearGradient></defs>
+            <circle cx="32" cy="32" r="26" fill="url(#g-ar)"/>
+            <circle cx="32" cy="27" r="11" fill="#fff"/>
+            <circle cx="28" cy="26" r="2.4" fill="#1e293b"/>
+            <circle cx="36" cy="26" r="2.4" fill="#1e293b"/>
+            <path d="M21 43C24 38.5 40 38.5 43 43" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M24 46L21 51M32 45V52M40 46L43 51" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'nas':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-nas" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#34d399"/><stop offset="1" stop-color="#059669"/></linearGradient></defs>
+            <rect x="9" y="10" width="46" height="20" rx="6" fill="url(#g-nas)"/>
+            <rect x="9" y="34" width="46" height="20" rx="6" fill="#065f46" stroke="#34d399" stroke-width="1.8"/>
+            <circle cx="18" cy="20" r="2.6" fill="#fff"/>
+            <rect x="25" y="18.2" width="21" height="3.6" rx="1.8" fill="rgba(255,255,255,0.45)"/>
+            <circle cx="18" cy="44" r="2.6" fill="#6ee7b7"/>
+            <rect x="25" y="42.2" width="21" height="3.6" rx="1.8" fill="rgba(255,255,255,0.35)"/>
+          </svg>`;
+
+        case 'lmstudio':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-lm" x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#ec4899"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+            <rect x="7" y="7" width="50" height="50" rx="15" fill="url(#g-lm)"/>
+            <rect x="20" y="20" width="24" height="24" rx="5" stroke="#fff" stroke-width="2.8"/>
+            <rect x="26" y="26" width="12" height="12" rx="2.5" fill="#fff"/>
+            <path d="M26 13V20M38 13V20M26 44V51M38 44V51M13 26H20M13 38H20M44 26H51M44 38H51" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+          </svg>`;
+
+        case 'settings':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-set" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#cbd5e1"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs>
+            <circle cx="32" cy="32" r="24" fill="#334155"/>
+            <path d="M32 13L35.5 18.5L42 16.5L43 23L49.5 25L47.5 31.5L51.5 36.5L46 40.5L47 47L40.5 47.5L38 53.5L32 50L26 53.5L23.5 47.5L17 47L18 40.5L12.5 36.5L16.5 31.5L14.5 25L21 23L22 16.5L28.5 18.5L32 13Z" fill="url(#g-set)"/>
+            <circle cx="32" cy="32" r="8.5" fill="#1e293b"/>
+          </svg>`;
+
+        case 'calculator':
+          return `<svg ${s}>
+            <rect x="12" y="7" width="40" height="50" rx="9" fill="#e2e8f0"/>
+            <rect x="17" y="13" width="30" height="12" rx="3" fill="#0f172a"/>
+            <rect x="33" y="17" width="10" height="3" rx="1.5" fill="#38bdf8"/>
+            <rect x="17" y="30" width="7.5" height="6.5" rx="2" fill="#94a3b8"/>
+            <rect x="28.2" y="30" width="7.5" height="6.5" rx="2" fill="#94a3b8"/>
+            <rect x="39.5" y="30" width="7.5" height="6.5" rx="2" fill="#f97316"/>
+            <rect x="17" y="40" width="7.5" height="6.5" rx="2" fill="#94a3b8"/>
+            <rect x="28.2" y="40" width="7.5" height="6.5" rx="2" fill="#94a3b8"/>
+            <rect x="39.5" y="40" width="7.5" height="12" rx="2" fill="#f97316"/>
+            <rect x="17" y="49" width="18.7" height="3" rx="1.5" fill="#64748b"/>
+          </svg>`;
+
+        case 'btop':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-bt" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#ef4444"/><stop offset="0.55" stop-color="#dc2626"/><stop offset="1" stop-color="#7f1d1d"/></linearGradient></defs>
+            <rect x="11" y="7" width="42" height="50" rx="10" fill="#18181b" stroke="#ef4444" stroke-width="2"/>
+            <path d="M21 15H36C41 15 44 18 44 22.5C44 25.8 42 28 39 29.2C42.5 30.2 45 33 45 37C45 42.2 41 46 35.5 46H21V15Z" fill="url(#g-bt)"/>
+            <rect x="27" y="20" width="10" height="6.5" rx="2" fill="#18181b"/>
+            <rect x="27" y="33" width="11" height="7.5" rx="2" fill="#18181b"/>
+          </svg>`;
+
+        case 'nvidia':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-nv" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#84cc16"/><stop offset="1" stop-color="#4d7c0f"/></linearGradient></defs>
+            <rect x="6" y="6" width="52" height="52" rx="15" fill="url(#g-nv)"/>
+            <path d="M13 33C17.5 23.5 26 19 36.5 19C43 19 48.5 22 52 27C47.5 36.5 39 42 28.5 42C22 42 16.5 38.5 13 33Z" fill="#fff"/>
+            <path d="M22 32.5C24.5 27.5 29.5 25 35.5 25C39.5 25 43 26.8 45.2 29.5C42.2 34.5 37.2 37.5 31 37.5C27 37.5 24 35.6 22 32.5Z" fill="#4d7c0f"/>
+            <circle cx="34" cy="31.2" r="3.4" fill="#fff"/>
+          </svg>`;
+
+        case 'tickets':
+          return `<svg ${s}>
+            <defs><linearGradient id="g-tk" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#a78bfa"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs>
+            <rect x="10" y="8" width="44" height="48" rx="11" fill="url(#g-tk)"/>
+            <rect x="22" y="14" width="20" height="5" rx="2.5" fill="rgba(255,255,255,0.45)"/>
+            <path d="M19 29H45M19 37H45M19 45H35" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>
+          </svg>`;
+
+        default:
+          return `<svg ${s}>
+            <rect x="6" y="6" width="52" height="52" rx="15" fill="#334155"/>
+            <circle cx="32" cy="32" r="13" fill="#38bdf8"/>
+          </svg>`;
+      }
+    }
+
+    /* --- État global du shell --- */
+    const state = {
+      hostProfile: 'zenbook',    // 'zenbook' | 'titan'
+      currentScreen: 'center',   // 'left' | 'center' | 'right'
+      screens: {
+        left: { label: 'Gauche', activeAppId: 'discord' },
+        center: { label: 'Centre 21:9', activeAppId: null },
+        right: { label: 'Droite', activeAppId: 'orca' }
+      },
+      pinnedAppIds: ['orca', 'zen', 'webstorm', 'discord', 'steam'],
+      searchQuery: '',
+      wallpaper: 'aurora',       // 'aurora' | 'ocean' | 'alpine'
+      audioOutput: 'headphones', // 'headphones' | 'speakers'
+      openPopover: null,
+      quickSettings: {
+        wifi: true,
+        bluetooth: true,
+        nightlight: false,
+        dnd: false,
+        caffeine: false
+      },
+      notifications: [
+        {
+          id: 'n-1',
+          appId: 'orca',
+          app: 'orca.dev',
+          time: 'il y a 2 min',
+          title: 'Claude Code · Validation requise',
+          body: '4 modifications prêtes sur auth.service.ts.',
+          unread: true
+        },
+        {
+          id: 'n-2',
+          appId: 'orca',
+          app: 'orca.dev',
+          time: 'il y a 6 min',
+          title: 'Gemini CLI · Tests unitaires passés',
+          body: '18/18 tests OK sur fix/worker-mem.',
+          unread: true
+        },
+        {
+          id: 'n-3',
+          appId: 'discord',
+          app: 'Discord',
+          time: 'il y a 14 min',
+          title: 'Guilde FFXIV · #raids',
+          body: 'Kael : On démarre le pull à 21h15 ?',
+          unread: true
+        },
+        {
+          id: 'n-4',
+          appId: null,
+          app: 'Système',
+          time: 'il y a 1 h',
+          title: 'Snapshot Btrfs + mises à jour prêts',
+          body: 'Pilote NVIDIA 580 & Wayfire synchronisés.',
+          unread: false
+        }
+      ],
+      runningApps: [
+        {
+          id: 'orca',
+          name: 'orca.dev',
+          subtitle: 'Workspace principal · 2 agents actifs',
+          accent: '#8b5cf6',
+          screen: 'right'
+        },
+        {
+          id: 'discord',
+          name: 'Discord',
+          subtitle: 'Salon Vocal · Guilde FFXIV',
+          accent: '#6366f1',
+          screen: 'left'
+        }
+      ],
+      tasks: [
+        { id: 't-1', title: 'Prendre rendez-vous dentiste', meta: 'Aujourd’hui', done: false },
+        { id: 't-2', title: 'Commander filtre à eau frigo', meta: 'Maison', done: false },
+        { id: 't-3', title: 'Valider virement assurance auto', meta: 'Avant vendredi', done: false },
+        { id: 't-4', title: 'Vérifier sauvegarde mensuelle NAS', meta: 'Fait', done: true }
+      ],
+      tickets: [
+        { id: 'DEV-412', title: 'Refactor authentification OAuth2 API', project: 'kama-hub', status: 'En cours' },
+        { id: 'DEV-418', title: 'Pipeline build Godot 4.4 WebGL', project: 'proto-arena', status: 'Prêt à tester' },
+        { id: 'DEV-421', title: 'Fix fuite mémoire worker TypeScript', project: 'kama-sync', status: 'À revoir' },
+        { id: 'DEV-425', title: 'Mode VRR automatique Wayfire IPC', project: 'kama-shell', status: 'Backlog' }
+      ],
+      games: [
+        {
+          id: 'game-ffxiv',
+          title: 'Final Fantasy XIV: Dawntrail',
+          subtitle: 'Raid hebdomadaire · Tuliyollal',
+          lastPlayed: 'Hier · 142 h',
+          gradient: 'linear-gradient(135deg, #1e3a8a 0%, #312e81 48%, #0f172a 100%)',
+          accent: '#60a5fa'
+        },
+        {
+          id: 'game-factorio',
+          title: 'Factorio',
+          subtitle: 'Space Age · Nauvis → Vulcanus',
+          lastPlayed: 'Il y a 2 j · 310 h',
+          gradient: 'linear-gradient(135deg, #9a3412 0%, #78350f 52%, #141218 100%)',
+          accent: '#fb923c'
+        },
+        {
+          id: 'game-gw2',
+          title: 'Guild Wars 2',
+          subtitle: 'Janthir Wilds · Méta-événement',
+          lastPlayed: 'Il y a 4 j · 96 h',
+          gradient: 'linear-gradient(135deg, #7f1d1d 0%, #581c87 55%, #12101c 100%)',
+          accent: '#f87171'
+        }
+      ],
+      calendarEvents: [
+        { id: 'ev-1', dayOffset: 0, time: '14:30', title: 'Rendez-vous dentiste', accent: '#38bdf8' },
+        { id: 'ev-2', dayOffset: 0, time: '21:15', title: 'Raid hebdomadaire FFXIV', accent: '#34d399' },
+        { id: 'ev-3', dayOffset: 1, time: '10:00', title: 'Point archi · kama-shell', accent: '#a78bfa' },
+        { id: 'ev-4', dayOffset: 2, time: '19:00', title: 'Dîner chez Alex', accent: '#fbbf24' },
+        { id: 'ev-5', dayOffset: 4, time: '18:00', title: 'Maintenance cluster k3s', accent: '#fb923c' },
+        { id: 'ev-6', dayOffset: 6, time: '11:00', title: 'Contrôle technique auto', accent: '#38bdf8' }
+      ],
+      /* Les 16 applications unifiées de la grille flottante façon GNOME */
+      appsCatalog: [
+        { id: 'orca', name: 'orca.dev', subtitle: 'Workspace & agents IA', keywords: 'dev ia claude gemini', accent: '#8b5cf6' },
+        { id: 'webstorm', name: 'WebStorm', subtitle: 'IDE JetBrains · TypeScript', keywords: 'ide code jetbrains ts', accent: '#38bdf8' },
+        { id: 'godot', name: 'Godot', subtitle: 'Moteur de jeu 4.4', keywords: 'gamedev moteur jeu', accent: '#60a5fa' },
+        { id: 'zen', name: 'Zen Browser', subtitle: 'Navigateur web', keywords: 'web internet firefox', accent: '#f97316' },
+        { id: 'discord', name: 'Discord', subtitle: 'Vocal & guilde FFXIV', keywords: 'chat vocal social', accent: '#6366f1' },
+        { id: 'steam', name: 'Steam', subtitle: 'Bibliothèque de jeux', keywords: 'jeux gaming proton', accent: '#34d399' },
+        { id: 'terminal', name: 'Terminal', subtitle: 'Shell Zsh · Local', keywords: 'cli bash zsh console', accent: '#94a3b8' },
+        { id: 'files', name: 'Fichiers', subtitle: 'Explorateur local', keywords: 'dossiers explorateur nautilus', accent: '#3b82f6' },
+        { id: 'homeassistant', name: 'Home Assistant', subtitle: 'Domotique maison', keywords: 'maison iot domotique infra', accent: '#0ea5e9' },
+        { id: 'argocd', name: 'ArgoCD', subtitle: 'Cluster k3s · GitOps', keywords: 'k3s kubernetes kube infra', accent: '#f97316' },
+        { id: 'nas', name: 'NAS local', subtitle: 'Médias & sauvegardes', keywords: 'stockage serveur medias infra', accent: '#10b981' },
+        { id: 'lmstudio', name: 'LM Studio', subtitle: 'Modèles IA locaux', keywords: 'ia llm ollama local', accent: '#ec4899' },
+        { id: 'settings', name: 'Paramètres', subtitle: 'Configuration système', keywords: 'config systeme preferences', accent: '#94a3b8' },
+        { id: 'calculator', name: 'Calculatrice', subtitle: 'Calcul rapide', keywords: 'maths calc nombres', accent: '#f59e0b' },
+        { id: 'btop', name: 'Btop++', subtitle: 'Moniteur ressources', keywords: 'cpu ram gpu systeme', accent: '#ef4444' },
+        { id: 'nvidia', name: 'NVIDIA', subtitle: 'RTX 4070 Ti · VRR & pilotes', keywords: 'gpu vrr gsync rtx', accent: '#84cc16' }
+      ]
+    };
+
+    const initialNotificationsSnapshot = JSON.parse(JSON.stringify(state.notifications));
+    let feedbackTimer = null;
+
+    /* --- Horloge & date du jour (sidebar) --- */
+    function updateClock() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const dayShort = now.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').slice(0, 3).toUpperCase();
+      const dayNum = String(now.getDate()).padStart(2, '0');
+      const fullDate = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      document.getElementById('clock-time').textContent = `${hh}:${mm}`;
+      document.getElementById('clock-date').textContent = `${dayShort} ${dayNum}`;
+      document.getElementById('clock-widget').setAttribute('data-tooltip', fullDate.charAt(0).toUpperCase() + fullDate.slice(1));
+    }
+
+    /* --- Micro-feedback centré en bas --- */
+    function showMicroFeedback(message) {
+      const el = document.getElementById('micro-feedback');
+      el.textContent = message;
+      el.classList.remove('opacity-0', 'translate-y-2');
+      el.classList.add('opacity-100', 'translate-y-0');
+      clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => {
+        el.classList.add('opacity-0', 'translate-y-2');
+        el.classList.remove('opacity-100', 'translate-y-0');
+      }, 2200);
+    }
+
+    /* --- Profil machine (Zenbook vs TITAN) --- */
+    function setHostProfile(profile) {
+      state.hostProfile = profile;
+      const isLaptop = profile === 'zenbook';
+
+      document.getElementById('sb-battery-icon').classList.toggle('hidden', !isLaptop);
+      document.getElementById('qc-battery-pill').classList.toggle('hidden', !isLaptop);
+      document.getElementById('qc-host-pill').classList.toggle('hidden', isLaptop);
+      document.getElementById('qc-brightness-row').classList.toggle('hidden', !isLaptop);
+
+      if (!isLaptop) {
+        document.getElementById('brightness-overlay').style.opacity = '0';
+      }
+
+      ['zenbook', 'titan'].forEach(key => {
+        const btn = document.getElementById(`host-btn-${key}`);
+        if (!btn) return;
+        btn.classList.toggle('bg-white/15', key === profile);
+        btn.classList.toggle('text-white', key === profile);
+        btn.classList.toggle('font-medium', key === profile);
+        btn.classList.toggle('text-white/55', key !== profile);
+      });
+
+      showMicroFeedback(isLaptop ? 'Profil Zenbook : batterie et luminosité visibles' : 'Profil TITAN : batterie et luminosité masquées');
+    }
+
+    /* --- Simulation multi-écrans --- */
+    function setScreen(screenId) {
+      if (!state.screens[screenId]) return;
+      state.currentScreen = screenId;
+
+      ['left', 'center', 'right'].forEach(key => {
+        const btn = document.getElementById(`scr-btn-${key}`);
+        if (!btn) return;
+        btn.classList.toggle('bg-white/15', key === screenId);
+        btn.classList.toggle('text-white', key === screenId);
+        btn.classList.toggle('font-medium', key === screenId);
+        btn.classList.toggle('text-white/55', key !== screenId);
+      });
+
+      renderCurrentScreenView();
+      renderTaskbar();
+      renderAppLauncherGrid();
+    }
+
+    /* --- Fonds d'écran --- */
+    function setWallpaper(name) {
+      state.wallpaper = name;
+      document.getElementById('wallpaper-layer').className = `wp-${name}`;
+
+      ['aurora', 'ocean', 'alpine'].forEach(key => {
+        const btn = document.getElementById(`wp-btn-${key}`);
+        if (!btn) return;
+        btn.classList.toggle('ring-2', key === name);
+        btn.classList.toggle('ring-white/80', key === name);
+        btn.classList.toggle('ring-1', key !== name);
+        btn.classList.toggle('ring-white/25', key !== name);
+      });
+    }
+
+    /* --- Helpers apps & notifications --- */
+    function getAppUnreadCount(appId) {
+      if (state.quickSettings.dnd) return 0;
+      return state.notifications.filter(n => n.appId === appId && n.unread).length;
+    }
+
+    function getAppMeta(appId) {
+      return state.runningApps.find(a => a.id === appId) || state.appsCatalog.find(a => a.id === appId);
+    }
+
+    /* --- Barre des tâches verticale (sidebar) --- */
+    function renderTaskbar() {
+      const container = document.getElementById('taskbar-list');
+      const homeBtn = document.getElementById('btn-home');
+      const homeBar = document.getElementById('home-active-bar');
+
+      const activeId = state.screens[state.currentScreen].activeAppId;
+      const isHome = activeId === null;
+      homeBtn.classList.toggle('bg-white/14', isHome);
+      homeBtn.classList.toggle('border-white/20', isHome);
+      homeBtn.classList.toggle('text-white', isHome);
+      homeBtn.classList.toggle('bg-white/[0.04]', !isHome);
+      homeBtn.classList.toggle('border-transparent', !isHome);
+      homeBtn.classList.toggle('text-white/55', !isHome);
+      homeBar.classList.toggle('opacity-100', isHome);
+      homeBar.classList.toggle('opacity-0', !isHome);
+
+      const pinnedItems = state.pinnedAppIds.map(id => getAppMeta(id)).filter(Boolean);
+      const unpinnedRunning = state.runningApps.filter(a => !state.pinnedAppIds.includes(a.id));
+
+      const renderItem = (app) => {
+        const running = state.runningApps.find(a => a.id === app.id);
+        const onThisScreen = Boolean(running && running.screen === state.currentScreen);
+        const onOtherScreen = Boolean(running && running.screen !== state.currentScreen);
+        const isActive = onThisScreen && activeId === app.id;
+        const unread = getAppUnreadCount(app.id);
+
+        let tooltip = `${app.name}`;
+        if (!running) {
+          tooltip += ' · Épinglée (clic pour lancer, clic droit pour désépingler)';
+        } else if (onOtherScreen) {
+          tooltip += ` · Sur ${state.screens[running.screen].label} (clic pour téléporter)`;
+        } else {
+          tooltip += ' · Sur cet écran (clic molette pour fermer)';
+        }
+        if (unread > 0) {
+          tooltip += ` · ${unread} non lue${unread > 1 ? 's' : ''}`;
+        }
+
+        let indicatorHtml = '';
+        if (isActive) {
+          indicatorHtml = '<span class="absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-white transition-all"></span>';
+        } else if (onThisScreen) {
+          indicatorHtml = '<span class="absolute -left-[9px] top-1/2 -translate-y-1/2 w-[4px] h-[4px] rounded-full bg-white/80 transition-all"></span>';
+        } else if (onOtherScreen) {
+          indicatorHtml = '<span class="absolute -left-[9px] top-1/2 -translate-y-1/2 w-[6px] h-[6px] rounded-full border-[1.5px] border-[#60a5fa] bg-transparent transition-all"></span>';
+        }
+
+        const btnStyle = isActive
+          ? 'bg-white/16 border border-white/20 shadow-sm'
+          : running
+            ? 'bg-white/[0.06] border border-white/[0.09] hover:bg-white/[0.12]'
+            : 'bg-transparent border border-transparent hover:bg-white/[0.08] opacity-80 hover:opacity-100';
+
+        return `
+          <button
+            onclick="handleTaskbarClick('${app.id}')"
+            oncontextmenu="event.preventDefault(); togglePinApp('${app.id}');"
+            onauxclick="if(event.button === 1){ event.preventDefault(); closeApp('${app.id}'); }"
+            data-tooltip="${tooltip}"
+            class="sb-btn relative w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-95 ${btnStyle}"
+            aria-label="${app.name}"
+          >
+            ${indicatorHtml}
+            <span class="flex items-center justify-center">${getNativeIconSvg(app.id, 22)}</span>
+            ${unread > 0 ? `
+              <span class="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 rounded-full bg-emerald-400 text-[#071219] text-[9.5px] font-bold flex items-center justify-center tabular-nums ring-2 ring-[#101521] shadow-[0_0_8px_rgba(52,211,153,0.85)]">
+                ${unread}
+              </span>
+            ` : ''}
+          </button>
+        `;
+      };
+
+      let html = pinnedItems.map(renderItem).join('');
+      if (unpinnedRunning.length > 0) {
+        html += '<div class="w-4 h-px bg-white/10 my-0.5"></div>';
+        html += unpinnedRunning.map(renderItem).join('');
+      }
+      container.innerHTML = html;
+    }
+
+    function togglePinApp(appId) {
+      const app = getAppMeta(appId);
+      if (!app) return;
+      if (state.pinnedAppIds.includes(appId)) {
+        state.pinnedAppIds = state.pinnedAppIds.filter(id => id !== appId);
+        showMicroFeedback(`${app.name} désépinglée de la sidebar`);
+      } else {
+        state.pinnedAppIds.push(appId);
+        showMicroFeedback(`${app.name} épinglée à la sidebar`);
+      }
+      renderTaskbar();
+    }
+
+    function handleTaskbarClick(appId) {
+      const running = state.runningApps.find(a => a.id === appId);
+      if (!running) {
+        launchAppById(appId);
+        return;
+      }
+
+      // Téléportation depuis un autre moniteur
+      if (running.screen !== state.currentScreen) {
+        const oldScreen = running.screen;
+        running.screen = state.currentScreen;
+
+        if (state.screens[oldScreen].activeAppId === appId) {
+          const fallback = state.runningApps.find(a => a.screen === oldScreen);
+          state.screens[oldScreen].activeAppId = fallback ? fallback.id : null;
+        }
+
+        focusApp(appId);
+        showMicroFeedback(`${running.name} téléporté vers ${state.screens[state.currentScreen].label}`);
+        return;
+      }
+
+      if (state.screens[state.currentScreen].activeAppId === appId) {
+        goHome();
+      } else {
+        focusApp(appId);
+      }
+    }
+
+    function launchAppById(appId) {
+      const meta = state.appsCatalog.find(a => a.id === appId);
+      if (!meta) return;
+      launchApp(meta.id, meta.name, meta.subtitle, meta.accent);
+    }
+
+    function launchApp(id, name, subtitle, accent = '#38bdf8') {
+      closeAllPopovers();
+      let existing = state.runningApps.find(a => a.id === id);
+      if (!existing) {
+        existing = { id, name, subtitle, accent, screen: state.currentScreen };
+        state.runningApps.push(existing);
+      } else {
+        if (subtitle) existing.subtitle = subtitle;
+        if (existing.screen !== state.currentScreen) {
+          const oldScreen = existing.screen;
+          existing.screen = state.currentScreen;
+          if (state.screens[oldScreen].activeAppId === id) {
+            const fallback = state.runningApps.find(a => a.screen === oldScreen);
+            state.screens[oldScreen].activeAppId = fallback ? fallback.id : null;
+          }
+          showMicroFeedback(`${existing.name} téléporté vers ${state.screens[state.currentScreen].label}`);
+        }
+      }
+      focusApp(id);
+    }
+
+    function focusApp(id) {
+      const app = state.runningApps.find(a => a.id === id);
+      if (!app) return;
+
+      // Efface les notifications non lues de l'app au focus
+      let clearedNotifs = false;
+      state.notifications.forEach(n => {
+        if (n.appId === id && n.unread) {
+          n.unread = false;
+          clearedNotifs = true;
+        }
+      });
+
+      state.screens[state.currentScreen].activeAppId = id;
+      renderCurrentScreenView();
+      renderTaskbar();
+      renderAppLauncherGrid();
+      if (clearedNotifs) renderNotifications();
+    }
+
+    function renderCurrentScreenView() {
+      const activeId = state.screens[state.currentScreen].activeAppId;
+      const app = activeId ? state.runningApps.find(a => a.id === activeId) : null;
+
+      if (!app) {
+        document.getElementById('maximized-app-view').classList.add('hidden');
+        document.getElementById('home-screen').classList.remove('hidden');
+        return;
+      }
+
+      document.getElementById('home-screen').classList.add('hidden');
+      document.getElementById('maximized-app-view').classList.remove('hidden');
+
+      document.getElementById('max-app-icon').innerHTML = getNativeIconSvg(app.id, 22);
+      document.getElementById('max-app-title').textContent = app.name;
+      document.getElementById('max-app-monitor-badge').textContent = state.screens[state.currentScreen].label;
+
+      document.getElementById('max-app-body').innerHTML = `
+        <div class="max-w-lg w-full glass-surface rounded-3xl p-8 text-center">
+          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/[0.09] text-[10.5px] text-white/65 mb-5">
+            <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+            Fenêtre maximisée · ${state.screens[state.currentScreen].label}
+          </div>
+          <div class="flex justify-center mb-4 drop-shadow-lg">
+            ${getNativeIconSvg(app.id, 60)}
+          </div>
+          <h3 class="text-[20px] font-semibold text-white/95">${app.name}</h3>
+          <p class="text-[13px] text-white/55 mt-1.5">${app.subtitle || 'Application active'}</p>
+          <p class="text-[12px] text-white/40 mt-5 leading-relaxed">
+            Change d’écran en haut à droite pour voir l’anneau bleu apparaître dans la sidebar, puis clique l’icône pour téléporter cette fenêtre.
+          </p>
+        </div>
+      `;
+    }
+
+    function goHome() {
+      state.screens[state.currentScreen].activeAppId = null;
+      renderCurrentScreenView();
+      renderTaskbar();
+      renderAppLauncherGrid();
+    }
+
+    function closeActiveApp() {
+      const activeId = state.screens[state.currentScreen].activeAppId;
+      if (activeId) closeApp(activeId);
+    }
+
+    function closeApp(id) {
+      const app = state.runningApps.find(a => a.id === id);
+      if (!app) return;
+      const appScreen = app.screen;
+      state.runningApps = state.runningApps.filter(a => a.id !== id);
+      if (state.screens[appScreen].activeAppId === id) {
+        const fallback = state.runningApps.find(a => a.screen === appScreen);
+        state.screens[appScreen].activeAppId = fallback ? fallback.id : null;
+      }
+      renderCurrentScreenView();
+      renderTaskbar();
+      renderAppLauncherGrid();
+      showMicroFeedback(`${app.name} fermé`);
+    }
+
+    /* --- Grille flottante d'applications façon GNOME (filtrée en temps réel) --- */
+    function getFilteredLauncherApps() {
+      const q = (state.searchQuery || '').trim().toLowerCase();
+      if (!q) return state.appsCatalog;
+      return state.appsCatalog.filter(app =>
+        app.name.toLowerCase().includes(q) ||
+        app.subtitle.toLowerCase().includes(q) ||
+        (app.keywords && app.keywords.toLowerCase().includes(q))
+      );
+    }
+
+    function renderAppLauncherGrid() {
+      const gridEl = document.getElementById('app-launcher-grid');
+      const emptyEl = document.getElementById('app-launcher-empty');
+      const filtered = getFilteredLauncherApps();
+
+      if (filtered.length === 0) {
+        gridEl.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+
+      emptyEl.classList.add('hidden');
+
+      gridEl.innerHTML = filtered.map(app => {
+        const running = state.runningApps.find(a => a.id === app.id);
+        const onThisScreen = Boolean(running && running.screen === state.currentScreen);
+        const onOtherScreen = Boolean(running && running.screen !== state.currentScreen);
+
+        let statusDotHtml = '';
+        if (onThisScreen) {
+          statusDotHtml = '<span title="Lancée sur cet écran" class="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.9)]"></span>';
+        } else if (onOtherScreen) {
+          statusDotHtml = `<span title="Ouverte sur ${state.screens[running.screen].label}" class="w-1.5 h-1.5 rounded-full bg-[#60a5fa] shadow-[0_0_6px_rgba(96,165,250,0.9)]"></span>`;
+        } else {
+          statusDotHtml = '<span class="w-1.5 h-1.5 rounded-full opacity-0"></span>';
+        }
+
+        const titleTip = running
+          ? (onOtherScreen
+              ? `${app.name} — Téléporter depuis ${state.screens[running.screen].label} (clic droit : épingler)`
+              : `${app.name} — Déjà lancée (clic droit : épingler)`)
+          : `${app.name} — ${app.subtitle} (clic droit : épingler)`;
+
+        return `
+          <button
+            type="button"
+            onclick="launchAppById('${app.id}')"
+            oncontextmenu="event.preventDefault(); togglePinApp('${app.id}');"
+            title="${titleTip}"
+            class="launcher-tile"
+          >
+            <span class="launcher-icon-wrap">
+              ${getNativeIconSvg(app.id, 52)}
+            </span>
+            <span class="launcher-label">${app.name}</span>
+            ${statusDotHtml}
+          </button>
+        `;
+      }).join('');
+    }
+
+    /* --- Recherche temps réel --- */
+    function handleSearchInput(value) {
+      state.searchQuery = value;
+      document.getElementById('app-search-clear').classList.toggle('hidden', value.length === 0);
+      renderAppLauncherGrid();
+    }
+
+    function clearSearchInput() {
+      const input = document.getElementById('app-search-input');
+      input.value = '';
+      state.searchQuery = '';
+      document.getElementById('app-search-clear').classList.add('hidden');
+      renderAppLauncherGrid();
+      input.focus();
+    }
+
+    function handleSearchKeydown(event) {
+      if (event.key === 'Escape') {
+        clearSearchInput();
+        event.target.blur();
+      } else if (event.key === 'Enter') {
+        const results = getFilteredLauncherApps();
+        if (results.length > 0) {
+          event.preventDefault();
+          launchAppById(results[0].id);
+          clearSearchInput();
+        }
+      }
+    }
+
+    /* --- Panneau Centre de Contrôle (renommé toggleSidebarPanel) --- */
+    function toggleSidebarPanel(panelName) {
+      if (state.openPopover === panelName) {
+        closeAllPopovers();
+        return;
+      }
+      closeAllPopovers();
+      state.openPopover = panelName;
+      const target = document.getElementById(`popover-${panelName}`);
+      if (target) target.classList.remove('hidden-panel');
+    }
+
+    function closeAllPopovers() {
+      state.openPopover = null;
+      const controlsEl = document.getElementById('popover-controls');
+      if (controlsEl) controlsEl.classList.add('hidden-panel');
+    }
+
+    /* --- Google Tasks --- */
+    function renderTasks() {
+      const listEl = document.getElementById('spatial-tasks-list');
+      const countEl = document.getElementById('spatial-tasks-remaining');
+      const remaining = state.tasks.filter(t => !t.done).length;
+      countEl.textContent = `${remaining} restante${remaining > 1 ? 's' : ''}`;
+
+      listEl.innerHTML = state.tasks.map(task => `
+        <button
+          onclick="toggleTask('${task.id}')"
+          class="w-full px-3 py-2 rounded-2xl flex items-center justify-between gap-3 text-left transition-colors ${
+            task.done ? 'opacity-45 hover:opacity-70' : 'hover:bg-white/[0.06]'
+          }"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
+              task.done ? 'bg-sky-400/80 border-sky-300 text-[#0b101b]' : 'border-white/30'
+            }">
+              ${task.done ? '<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+            </span>
+            <span class="text-[13px] truncate ${task.done ? 'line-through text-white/60' : 'text-white/90'}">${task.title}</span>
+          </div>
+          <span class="text-[11px] text-white/40 shrink-0">${task.meta}</span>
+        </button>
+      `).join('');
+    }
+
+    function toggleTask(id) {
+      const task = state.tasks.find(t => t.id === id);
+      if (!task) return;
+      task.done = !task.done;
+      renderTasks();
+    }
+
+    /* --- Tickets Perso --- */
+    function renderTickets() {
+      const listEl = document.getElementById('spatial-tickets-list');
+      listEl.innerHTML = state.tickets.map(ticket => `
+        <button
+          onclick="launchApp('tickets', 'Tickets Perso', '${ticket.id} · ${ticket.title.replace(/'/g, "\\'")}', '#a78bfa')"
+          class="w-full px-3.5 py-2.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.06] flex items-center justify-between gap-3 text-left transition-all"
+        >
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-mono text-violet-300/90">${ticket.id}</span>
+              <span class="text-[11px] text-white/35">·</span>
+              <span class="text-[11px] text-white/45 truncate">${ticket.project}</span>
+            </div>
+            <div class="text-[13px] font-medium text-white/90 truncate mt-0.5">${ticket.title}</div>
+          </div>
+          <span class="px-2 py-0.5 rounded-full bg-white/[0.07] text-[10.5px] text-white/65 shrink-0">${ticket.status}</span>
+        </button>
+      `).join('');
+    }
+
+    /* --- Jeux commencés --- */
+    function renderGames() {
+      const gridEl = document.getElementById('spatial-games-grid');
+      gridEl.innerHTML = state.games.map(game => `
+        <button
+          onclick="launchApp('${game.id}', '${game.title.replace(/'/g, "\\'")}', '${game.subtitle.replace(/'/g, "\\'")}', '${game.accent}')"
+          class="group relative h-[152px] rounded-2xl overflow-hidden border border-white/[0.11] text-left p-3.5 flex flex-col justify-between transition-all duration-200 hover:scale-[1.015] hover:border-white/25 active:scale-[0.99]"
+          style="background: ${game.gradient};"
+        >
+          <div class="absolute inset-0 bg-gradient-to-t from-black/78 via-black/22 to-transparent pointer-events-none"></div>
+          <div class="relative z-10 flex items-center justify-between w-full gap-2">
+            <span class="px-2 py-0.5 rounded-full bg-black/35 backdrop-blur-md border border-white/10 text-[10px] text-white/75 truncate">
+              ${game.lastPlayed}
+            </span>
+            <span class="w-7 h-7 rounded-full bg-white/15 backdrop-blur-md border border-white/20 flex items-center justify-center text-white opacity-85 group-hover:opacity-100 group-hover:bg-white/25 transition-all shrink-0">
+              <svg class="w-3 h-3 translate-x-[1px]" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="6 4 20 12 6 20 6 4" />
+              </svg>
+            </span>
+          </div>
+          <div class="relative z-10">
+            <div class="text-[14px] font-semibold text-white leading-snug line-clamp-2">${game.title}</div>
+            <div class="text-[11px] text-white/70 mt-0.5 truncate">${game.subtitle}</div>
+          </div>
+        </button>
+      `).join('');
+    }
+
+    /* --- Agenda 7 jours --- */
+    function renderCalendar() {
+      const listEl = document.getElementById('spatial-calendar-list');
+      const rangeEl = document.getElementById('calendar-range-label');
+      const today = new Date();
+      const endDate = new Date(today);
+      endDate.setDate(today.getDate() + 6);
+
+      const fmtShort = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }).replace('.', '');
+      if (rangeEl) {
+        rangeEl.textContent = `${fmtShort(today)} — ${fmtShort(endDate)}`;
+      }
+
+      listEl.innerHTML = state.calendarEvents.map(ev => {
+        const d = new Date(today);
+        d.setDate(today.getDate() + ev.dayOffset);
+        const dayLabel = ev.dayOffset === 0
+          ? 'Aujourd’hui'
+          : ev.dayOffset === 1
+            ? 'Demain'
+            : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '');
+        const isToday = ev.dayOffset === 0;
+
+        return `
+          <button
+            onclick="launchApp('calendar', 'Calendrier', '${dayLabel} · ${ev.time} — ${ev.title.replace(/'/g, "\\'")}', '${ev.accent}')"
+            class="w-full px-3.5 py-2.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.09] border ${isToday ? 'border-amber-300/25' : 'border-white/[0.06]'} flex items-center gap-3 text-left transition-all"
+          >
+            <span class="w-1 h-8 rounded-full shrink-0" style="background: ${ev.accent};"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[10.5px] font-medium ${isToday ? 'text-amber-300/95' : 'text-white/45'} capitalize truncate">${dayLabel}</span>
+                <span class="text-[11px] font-mono text-white/55 tabular-nums shrink-0">${ev.time}</span>
+              </div>
+              <div class="text-[12.5px] font-medium text-white/90 truncate mt-0.5">${ev.title}</div>
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    /* --- Audio 1-clic Casque / Haut-parleurs --- */
+    function toggleAudioOutput() {
+      state.audioOutput = state.audioOutput === 'headphones' ? 'speakers' : 'headphones';
+      const isHp = state.audioOutput === 'headphones';
+
+      document.getElementById('icon-headphones').classList.toggle('hidden', !isHp);
+      document.getElementById('icon-speakers').classList.toggle('hidden', isHp);
+      document.getElementById('qc-icon-headphones').classList.toggle('hidden', !isHp);
+      document.getElementById('qc-icon-speakers').classList.toggle('hidden', isHp);
+      document.getElementById('qc-audio-label').textContent = isHp ? 'Casque' : 'Haut-parleurs';
+      showMicroFeedback(isHp ? 'Sortie audio : Casque' : 'Sortie audio : Haut-parleurs');
+    }
+
+    /* --- Quick Settings --- */
+    function toggleQuickSetting(key) {
+      state.quickSettings[key] = !state.quickSettings[key];
+      const active = state.quickSettings[key];
+      const tile = document.getElementById(`tile-${key}`);
+      if (tile) tile.classList.toggle('is-active', active);
+
+      if (key === 'wifi') {
+        document.getElementById('tile-wifi-sub').textContent = active ? 'Freebox-CC81…' : 'Désactivé';
+        document.getElementById('sb-wifi-icon').classList.toggle('opacity-30', !active);
+        showMicroFeedback(active ? 'Wi-Fi activé' : 'Wi-Fi désactivé');
+      } else if (key === 'bluetooth') {
+        document.getElementById('tile-bluetooth-sub').textContent = active ? 'Activé' : 'Désactivé';
+        showMicroFeedback(active ? 'Bluetooth activé' : 'Bluetooth désactivé');
+      } else if (key === 'nightlight') {
+        document.getElementById('nightlight-overlay').style.opacity = active ? '1' : '0';
+        showMicroFeedback(active ? 'Mode nuit activé' : 'Mode nuit désactivé');
+      } else if (key === 'dnd') {
+        renderNotifications();
+        renderTaskbar();
+        showMicroFeedback(active ? 'Ne pas déranger activé' : 'Ne pas déranger désactivé');
+      } else if (key === 'caffeine') {
+        showMicroFeedback(active ? 'Caféine activée (mise en veille bloquée)' : 'Caféine désactivée');
+      }
+    }
+
+    /* --- Centre de Notifications --- */
+    function renderNotifications() {
+      const listEl = document.getElementById('notification-list');
+      const badgeEl = document.getElementById('notif-unread-badge');
+      const clearBtn = document.getElementById('btn-clear-notifs');
+      const sbDot = document.getElementById('sb-notif-dot');
+
+      const unreadCount = state.notifications.filter(n => n.unread).length;
+      const showGreenDot = unreadCount > 0 && !state.quickSettings.dnd;
+      sbDot.classList.toggle('opacity-0', !showGreenDot);
+
+      if (unreadCount > 0) {
+        badgeEl.textContent = `${unreadCount} non lue${unreadCount > 1 ? 's' : ''}`;
+        badgeEl.classList.remove('hidden');
+      } else {
+        badgeEl.classList.add('hidden');
+      }
+
+      clearBtn.classList.toggle('hidden', state.notifications.length === 0);
+
+      if (state.notifications.length === 0) {
+        listEl.innerHTML = `
+          <div class="py-4 text-center">
+            <p class="text-[12px] text-white/45">Aucune notification.</p>
+            <button onclick="resetNotifications()" class="mt-2.5 px-3 py-1 rounded-lg bg-white/[0.07] hover:bg-white/[0.13] text-[11px] text-white/75 transition-colors">
+              Simuler une notification
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = state.notifications.map(n => `
+        <div
+          onclick="handleNotificationClick('${n.id}')"
+          class="group p-2.5 rounded-2xl bg-white/[0.045] hover:bg-white/[0.08] border border-white/[0.07] transition-colors cursor-pointer"
+        >
+          <div class="flex items-center justify-between gap-2 mb-0.5">
+            <div class="flex items-center gap-1.5 min-w-0">
+              ${n.unread ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>' : ''}
+              <span class="text-[11px] font-medium text-white/60 truncate">${n.app}</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] text-white/35">${n.time}</span>
+              <button
+                onclick="event.stopPropagation(); dismissNotification('${n.id}')"
+                class="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/90 transition-opacity"
+                aria-label="Supprimer la notification"
+              >
+                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="text-[12px] font-medium ${n.unread ? 'text-white/92' : 'text-white/70'} leading-snug">${n.title}</div>
+          <div class="text-[11px] text-white/45 leading-snug mt-0.5">${n.body}</div>
+        </div>
+      `).join('');
+    }
+
+    function handleNotificationClick(id) {
+      const item = state.notifications.find(n => n.id === id);
+      if (!item) return;
+      item.unread = false;
+      renderNotifications();
+      renderTaskbar();
+      if (item.appId) {
+        handleTaskbarClick(item.appId);
+        closeAllPopovers();
+      }
+    }
+
+    function dismissNotification(id) {
+      state.notifications = state.notifications.filter(n => n.id !== id);
+      renderNotifications();
+      renderTaskbar();
+    }
+
+    function clearAllNotifications() {
+      state.notifications = [];
+      renderNotifications();
+      renderTaskbar();
+    }
+
+    function resetNotifications() {
+      state.notifications = JSON.parse(JSON.stringify(initialNotificationsSnapshot));
+      renderNotifications();
+      renderTaskbar();
+    }
+
+    /* --- Sliders --- */
+    function updateVolume(val) {
+      document.getElementById('vol-value').textContent = `${val}%`;
+    }
+
+    function updateBrightness(val) {
+      document.getElementById('bright-value').textContent = `${val}%`;
+      const darkness = (100 - Number(val)) / 100;
+      document.getElementById('brightness-overlay').style.opacity = darkness.toFixed(2);
+    }
+
+    /* --- Fermeture du centre de contrôle au clic extérieur ou Esc --- */
+    document.addEventListener('click', (event) => {
+      const inside = event.target.closest('aside') || event.target.closest('#popover-controls');
+      if (!inside && state.openPopover) {
+        closeAllPopovers();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && state.openPopover) {
+        closeAllPopovers();
+      }
+    });
+
+    /* --- Initialisation --- */
+    window.addEventListener('DOMContentLoaded', () => {
+      updateClock();
+      setInterval(updateClock, 15000);
+      renderTasks();
+      renderTickets();
+      renderGames();
+      renderCalendar();
+      renderAppLauncherGrid();
+      renderCurrentScreenView();
+      renderTaskbar();
+      renderNotifications();
+    });
+  </script>
+</body>
+</html>

@@ -430,12 +430,12 @@ Fait, **vérifié en imbriqué** (essais scriptés, captures relues en clair/som
 
 - **Modèle et compositeur** : toutes les fenêtres normales s'ouvrent maximisées bord à bord (0 px d'écart, 0 bande de capsules) ; les dialogues (`parent` / transitoires) restent flottants et centrés ; mode jeu et règle 7 préservés ; téléportation entre écrans (`MoveToScreen`) et réduction (`Minimize`) via IPC ; barres de titre SSD avec Réduire + Fermer uniquement ; gestes de glisser/redimensionner/séparations neutralisés ; panneaux `coquille-home` (`Layer::Bottom`) et `coquille-controls` (`Layer::Overlay`) pris en charge.
 - **Barre latérale permanente (56 px)** : bord à bord sur toute la hauteur à gauche ou à droite (en miroir), sans dépliage (infobulles au survol) ; bouton Accueil, heure + date courte, barre des tâches avec indicateurs spatiaux (barre active, point ici, anneau ailleurs, non-lus), clic milieu pour fermer, menu contextuel complet (sans « Oublier sa place »), zone de notification compacte SNI/XEmbed et pilule scindée en bas (cloche → Notifications seules, reste → Centre de contrôle + mixeur par appli).
-- **Lanceur spatial permanent** : `coquille-home` en permanence sur tout écran sans fenêtre visible ; `coquille-drawer` en surimpression plein écran floutée (Dual Kawase) par-dessus une fenêtre maximisée via `Super` ou le bouton Accueil ; recherche centrée, 4 cartes en verre liquide (« Vie quotidienne », « Tâches des projets », « Jeux » avec ludothèque Steam + temps de jeu `localconfig.vdf` + commentaires persistés dans `game_notes.json`, « Agenda · 7 jours ») et grille flottante d'applications.
+- **Lanceur spatial permanent** : `coquille-home` en permanence sur tout écran sans fenêtre visible ; `coquille-drawer` en surimpression plein écran floutée (Dual Kawase) par-dessus une fenêtre maximisée via `Super` ou le bouton Accueil ; recherche centrée, 4 cartes en verre liquide (« Vie quotidienne » connectée en `GET` à l'API `https://home.vuidart.com/api/kama/public/tasks` avec token `[spatial] tasks_token` configuré dans Paramètres, « Tâches des projets », « Jeux » avec ludothèque Steam + temps de jeu `localconfig.vdf` + commentaires persistés dans `game_notes.json`, « Agenda · 7 jours ») et grille flottante d'applications.
 
 Limites connues :
 
 - changer entre `classic` et `spatial` prend effet au prochain démarrage de la session ;
-- les cartes « Vie quotidienne », « Tâches des projets » et « Agenda · 7 jours » affichent des données simulées en attente de sources réelles ;
+- les cartes « Tâches des projets » et « Agenda · 7 jours » affichent des données simulées en attente de sources réelles (« Vie quotidienne » est en lecture seule tant que l'API ne propose que `GET`) ;
 - jamais encore exécuté sur les trois écrans réels ni sur le portable.
 
 ### Backend matériel : ce qui est fait et ce qui ne l'est pas
