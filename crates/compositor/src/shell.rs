@@ -320,6 +320,19 @@ impl Shell {
             .collect()
     }
 
+    /// Where a spatial window dragged by its title bar can be released, in the
+    /// global space: the usable area of every other non-anchored screen.
+    pub fn screen_drop_zones(&self, dragged: WindowId) -> Vec<(Rect, OutputId)> {
+        self.desk
+            .screen_drop_zones(dragged)
+            .into_iter()
+            .filter_map(|zone| {
+                let origin = self.screen(zone.output)?.rect.origin();
+                Some((zone.rect.translated(origin), zone.output))
+            })
+            .collect()
+    }
+
     /// Top-left corner, in the global space, of the screen a window is on.
     fn origin_of(&self, geometry: &WindowGeometry) -> ModelPoint {
         self.screen(geometry.output)
@@ -778,6 +791,12 @@ impl State {
     /// A managed window is gone: its place is given back. What it showed
     /// last fades out where it was.
     pub fn remove_window(&mut self, id: WindowId) {
+        if self
+            .gesture
+            .is_some_and(|gesture| gesture.window() == Some(id))
+        {
+            self.gesture = None;
+        }
         if let Some(index) = self
             .shell
             .windows
@@ -997,13 +1016,18 @@ impl State {
         if geometry.floating {
             self.start_moving(window, location, location);
         } else {
-            // In its slot, it leaves only once dragged far enough, as by the
-            // shell's own title bar.
+            // In its slot (or maximized in spatial mode), it leaves only once
+            // dragged far enough, as by the shell's own title bar.
+            let drag = if self.shell.desk.is_spatial() {
+                Drag::MoveScreen
+            } else {
+                Drag::Move
+            };
             self.gesture = Some(Gesture::Pressed {
                 window,
                 at: location,
                 button: None,
-                drag: Drag::Move,
+                drag,
             });
         }
         self.queue_redraw();

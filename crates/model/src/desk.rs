@@ -127,6 +127,15 @@ pub struct DropZone {
     pub occupied: bool,
 }
 
+/// Where a dragged window can be released in spatial mode: another
+/// non-anchored screen, filling its usable area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenDropZone {
+    pub output: OutputId,
+    /// Relative to the screen: the usable area the window will fill.
+    pub rect: Rect,
+}
+
 /// The capsules of a stack: one per window. Those of a slot are above it,
 /// those of the maximized windows at the top of the middle of the screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1109,6 +1118,32 @@ impl Desk {
             }
         }
         zones
+    }
+
+    /// Where `dragged` can be moved by dragging its title bar in spatial mode:
+    /// every other non-anchored screen, filling its usable area.
+    ///
+    /// Returns empty outside spatial mode, for floating dialogs, or for a
+    /// window that anchors its screen.
+    pub fn screen_drop_zones(&self, dragged: WindowId) -> Vec<ScreenDropZone> {
+        if !self.spatial {
+            return Vec::new();
+        }
+        let Some((src_idx, spot)) = self.locate(dragged) else {
+            return Vec::new();
+        };
+        if matches!(spot, Spot::Floating(_)) || self.screens[src_idx].anchored() == Some(dragged) {
+            return Vec::new();
+        }
+        let src_output = self.screens[src_idx].id();
+        self.screens
+            .iter()
+            .filter(|screen| screen.id() != src_output && screen.anchored().is_none())
+            .map(|screen| ScreenDropZone {
+                output: screen.id(),
+                rect: screen.info().usable(),
+            })
+            .collect()
     }
 
     /// Says whether a window draws its own title bar.

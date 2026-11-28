@@ -2938,6 +2938,57 @@ fn spatial_game_mode_and_rule_7() {
 }
 
 #[test]
+fn spatial_screen_drop_zones_lists_other_non_anchored_screens() {
+    let mut desk = desk().with_spatial(true);
+    open(&mut desk, 1, "kitty", LEFT);
+    open(&mut desk, 2, "game", CENTER);
+
+    let zones = desk.screen_drop_zones(WindowId(1));
+    assert_eq!(zones.len(), 2);
+    assert_eq!(zones[0].output, CENTER);
+    assert_eq!(zones[0].rect, desk.screen(CENTER).unwrap().info().usable());
+    assert_eq!(zones[1].output, RIGHT);
+    assert_eq!(zones[1].rect, desk.screen(RIGHT).unwrap().info().usable());
+
+    // An anchored screen is excluded from drop targets.
+    desk.set_anchored(WindowId(2), true).unwrap();
+    let zones = desk.screen_drop_zones(WindowId(1));
+    assert_eq!(zones.len(), 1);
+    assert_eq!(zones[0].output, RIGHT);
+
+    // An anchored window itself offers no screen drop zones.
+    assert!(desk.screen_drop_zones(WindowId(2)).is_empty());
+}
+
+#[test]
+fn spatial_screen_drop_zones_empty_when_not_applicable() {
+    // Classic mode: never offers spatial screen drop zones.
+    let mut classic = desk();
+    open(&mut classic, 1, "kitty", LEFT);
+    assert!(classic.screen_drop_zones(WindowId(1)).is_empty());
+
+    // Spatial floating dialog: moves freely instead of using screen drop zones.
+    let mut spatial = desk().with_spatial(true);
+    open(&mut spatial, 1, "gimp", CENTER);
+    spatial
+        .open_window(
+            WindowId(2),
+            Some(AppKey::new("gimp")),
+            OpenRequest::at(CENTER)
+                .with_parent(WindowId(1))
+                .with_size(Size::new(400, 300)),
+        )
+        .unwrap();
+    assert!(spatial.screen_drop_zones(WindowId(2)).is_empty());
+
+    // Single-screen spatial desk: no other screen to drop onto.
+    let single_output = OutputInfo::new(CENTER, OutputRole::Center, Size::new(1920, 1080));
+    let mut single = Desk::new(vec![single_output], Metrics::default()).with_spatial(true);
+    open(&mut single, 1, "kitty", CENTER);
+    assert!(single.screen_drop_zones(WindowId(1)).is_empty());
+}
+
+#[test]
 fn set_output_roles_reassigns_roles_and_proportions_keeping_windows() {
     let mut desk = desk();
     open_in(&mut desk, 1, "kitty", LEFT, 0);

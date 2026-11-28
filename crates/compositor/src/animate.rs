@@ -44,7 +44,9 @@ impl State {
             .filter(|managed| {
                 let new = managed.geometry;
                 let old = before.iter().find(|(id, ..)| *id == managed.id);
-                new.visible && new.maximized && old.is_some_and(|(_, old, _)| !old.maximized)
+                new.visible
+                    && new.maximized
+                    && old.is_some_and(|(_, old, _)| !old.maximized || old.output != new.output)
             })
             .map(|managed| managed.geometry.output)
             .collect();

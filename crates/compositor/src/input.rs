@@ -107,6 +107,9 @@ pub enum Drag {
     Move,
     /// Drop zones are shown, and releasing on one places the window.
     Place,
+    /// Spatial mode: target screens are shown, and releasing on one moves the
+    /// maximized window there.
+    MoveScreen,
 }
 
 /// What the left mouse button is doing since it went down.
@@ -154,6 +157,24 @@ pub enum Gesture {
         width: i32,
         lifted: Option<Lifted>,
     },
+    /// Spatial mode: dragging a maximized window by its title bar to drop it
+    /// onto another screen.
+    MovingScreen { window: WindowId },
+}
+
+impl Gesture {
+    /// The window this gesture acts on, if any.
+    pub fn window(&self) -> Option<WindowId> {
+        match *self {
+            Self::Pressed { window, .. }
+            | Self::Resizing { window, .. }
+            | Self::Placing { window, .. }
+            | Self::Moving { window, .. }
+            | Self::MovingScreen { window } => Some(window),
+            Self::CapsulePressed { capsule, .. } => Some(capsule.window),
+            Self::Splitting { .. } => None,
+        }
+    }
 }
 
 /// A key that acts on the window switcher while it is shown.
@@ -767,6 +788,7 @@ impl State {
             Some(
                 Gesture::Placing { .. }
                     | Gesture::Moving { .. }
+                    | Gesture::MovingScreen { .. }
                     | Gesture::Resizing { .. }
                     | Gesture::Splitting { .. }
             )
@@ -783,12 +805,14 @@ impl State {
         if self.pointer_freed.is_some() && self.pointer_freed != hit.window {
             self.pointer_freed = None;
         }
-        // Over the shell's own chrome no client sets the cursor: it shows
-        // what a press would grab.
-        if hit.surface.is_none() && !pointer.is_grabbed() {
+        // Over the shell's own chrome (or during a shell drag, even when a CSD
+        // client holds an implicit button grab) no client sets the cursor: it
+        // shows what a press would grab or the drag in progress.
+        if hit.surface.is_none() && (!pointer.is_grabbed() || dragging) {
             let shape = match self.gesture {
                 Some(Gesture::Resizing { edges, .. }) => edges.cursor(),
                 Some(Gesture::Splitting { .. }) => CursorIcon::ColResize,
+                Some(Gesture::MovingScreen { .. }) => CursorIcon::Grabbing,
                 Some(_) => CursorIcon::Default,
                 None => match (hit.resize, self.separator_at(location)) {
                     (Some(edges), _) => edges.cursor(),
@@ -847,6 +871,16 @@ impl State {
                 ) =>
             {
                 self.start_moving(window, at, location)
+            }
+            Some(Gesture::Pressed {
+                window,
+                at,
+                button: None,
+                drag: Drag::MoveScreen,
+            }) if beyond(at, UNTIDY_THRESHOLD) => {
+                if !self.shell.desk.screen_drop_zones(window).is_empty() {
+                    self.gesture = Some(Gesture::MovingScreen { window });
+                }
             }
             Some(
                 Gesture::Pressed {
@@ -1040,12 +1074,39 @@ impl State {
         self.apply_arrangement();
     }
 
+    /// Moves a spatial window to the screen under `location` when released on
+    /// one of its target screens.
+    fn drop_on_screen(&mut self, window: WindowId, location: Point<f64, Logical>) {
+        let point = model_point(location);
+        let Some(target) = self.shell.screen_at(point).map(|screen| screen.id) else {
+            return;
+        };
+        let allowed = self
+            .shell
+            .desk
+            .screen_drop_zones(window)
+            .into_iter()
+            .any(|zone| zone.output == target);
+        if !allowed {
+            return;
+        }
+        if let Err(error) = self.shell.desk.move_to_screen(window, target) {
+            warn!(%error, "cannot move window to screen");
+        }
+        self.apply_arrangement();
+    }
+
     /// `Escape` can end the gesture in progress: a window being moved,
     /// placed or resized.
     fn can_cancel_gesture(&self) -> bool {
         matches!(
             self.gesture,
-            Some(Gesture::Moving { .. } | Gesture::Placing { .. } | Gesture::Resizing { .. })
+            Some(
+                Gesture::Moving { .. }
+                    | Gesture::Placing { .. }
+                    | Gesture::MovingScreen { .. }
+                    | Gesture::Resizing { .. }
+            )
         )
     }
 
@@ -1070,10 +1131,17 @@ impl State {
                 self.apply_arrangement();
             }
             Some(Gesture::Resizing { window, frame, .. }) => self.resize_floating(window, frame),
+            Some(Gesture::MovingScreen { .. }) => {
+                self.set_cursor(CursorImageStatus::Named(CursorIcon::Default));
+            }
             _ => {}
         }
-        // The release that ends the drag belongs to no client.
-        self.swallowed_press = true;
+        // The release that ends the drag belongs to no client, unless a client
+        // holds an implicit button grab (CSD move_request) that needs the
+        // release to clear.
+        if !self.seat.get_pointer().is_some_and(|p| p.is_grabbed()) {
+            self.swallowed_press = true;
+        }
         self.refresh_pointer_focus();
         self.queue_redraw();
     }
@@ -1202,18 +1270,13 @@ impl State {
                 }
             }
         }
-        let Some(Gesture::Placing { window, .. }) = self.gesture else {
-            return Vec::new();
-        };
         let point = model_point(self.pointer_location());
         let radius = self.shell.desk.metrics().corner_radius;
         let accent = self.theme.accent;
         let tint = |alpha: u8| Rgba { a: alpha, ..accent };
 
         let mut shapes = Vec::new();
-        for (rect, ..) in self.shell.drop_zones(window) {
-            let aimed = rect.contains(point);
-            let outline = rect.inset(Insets::uniform(ZONE_INSET));
+        let mut push_zone = |outline: Rect, aimed: bool| {
             let zone = Shape {
                 outline,
                 area: outline,
@@ -1233,6 +1296,24 @@ impl State {
                 border: 0,
                 ..zone
             });
+        };
+
+        match self.gesture {
+            Some(Gesture::Placing { window, .. }) => {
+                for (rect, ..) in self.shell.drop_zones(window) {
+                    let aimed = rect.contains(point);
+                    push_zone(rect.inset(Insets::uniform(ZONE_INSET)), aimed);
+                }
+            }
+            Some(Gesture::MovingScreen { window }) => {
+                let inset = self.shell.desk.metrics().gap;
+                let pointer_output = self.shell.screen_at(point).map(|screen| screen.id);
+                for (rect, output) in self.shell.screen_drop_zones(window) {
+                    let aimed = pointer_output == Some(output);
+                    push_zone(rect.inset(Insets::uniform(inset)), aimed);
+                }
+            }
+            _ => {}
         }
         shapes
     }
@@ -1290,6 +1371,7 @@ impl State {
         }
         let serial = SERIAL_COUNTER.next_serial();
         let mut for_clients = true;
+        let mut ended_screen_drag = false;
         self.mod_tap.disturb();
         if state == ButtonState::Pressed {
             // A click gives the pointer back to the game it was freed from.
@@ -1333,6 +1415,11 @@ impl State {
                         self.click_capsule(capsule, released);
                     }
                     Some(Gesture::Placing { window, .. }) => self.drop_window(window, location),
+                    Some(Gesture::MovingScreen { window }) => {
+                        ended_screen_drag = true;
+                        self.set_cursor(CursorImageStatus::Named(CursorIcon::Default));
+                        self.drop_on_screen(window, location);
+                    }
                     // The client drew during the drag without the frame
                     // following: settle on what it has now.
                     Some(Gesture::Resizing { window, .. }) => {
@@ -1369,6 +1456,8 @@ impl State {
         }
         if state == ButtonState::Pressed {
             self.refresh_constraint();
+        } else if ended_screen_drag {
+            self.refresh_pointer_focus();
         } else {
             self.refresh_pointer_focus_over_panels();
         }
@@ -1432,13 +1521,20 @@ impl State {
                 return true;
             }
         }
-        if hit.titlebar && (hit.button.is_some() || floating || !spatial) {
-            // Dragged by its title bar, it floats and follows the pointer.
+        if hit.titlebar {
+            // Classic mode (or a floating dialog): dragged by its title bar, it
+            // floats and follows the pointer. Spatial maximized windows drag to
+            // move onto another screen.
+            let drag = if spatial && !floating {
+                Drag::MoveScreen
+            } else {
+                Drag::Move
+            };
             self.gesture = Some(Gesture::Pressed {
                 window,
                 at: location,
                 button: hit.button,
-                drag: Drag::Move,
+                drag,
             });
         }
         false
