@@ -51,7 +51,7 @@ pub fn view<'a>(
             } else {
                 NOTIFICATIONS_HEIGHT
             };
-            container(controls::notifications(dock, palette))
+            container(controls::notifications_body(dock, palette))
                 .height(height)
                 .max_height(NOTIFICATIONS_HEIGHT)
                 .into()
@@ -65,7 +65,7 @@ pub fn view<'a>(
                 screenshot_prompt: popover.screenshot_prompt,
                 note: popover.note.as_deref(),
             };
-            controls::control_center(dock, view, palette)
+            controls::control_center_body(dock, view, palette)
         }
     };
 

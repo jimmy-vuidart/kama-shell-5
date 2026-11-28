@@ -166,7 +166,9 @@ fn switch<'a>(
 
 /// The control center: switches two by two, the sliders one under the other,
 /// then the session.
-pub fn control_center<'a>(
+/// Renders the control center switches, sliders, and session footer without
+/// an outer card container (used directly inside spatial popovers).
+pub fn control_center_body<'a>(
     dock: &'a Dock,
     view: ControlView<'a>,
     palette: Palette,
@@ -304,23 +306,31 @@ pub fn control_center<'a>(
         (None, true, _) => screenshot_selector(palette),
         (None, false, note) => session(dock, note, palette),
     };
-    let parts = column![
+    column![
         switches,
         column![volume, light].spacing(8),
         rule(palette),
         foot
     ]
-    .spacing(12);
-    container(parts)
+    .spacing(12)
+    .into()
+}
+
+/// Renders the control center inside a rounded card (for the classic launcher drawer).
+pub fn control_center<'a>(
+    dock: &'a Dock,
+    view: ControlView<'a>,
+    palette: Palette,
+) -> Element<'a, Message> {
+    container(control_center_body(dock, view, palette))
         .padding(12)
         .style(move |_| style::fill(palette.card, 14.0))
         .into()
 }
 
-/// The notices still open, newest first, in a card as high as the control
-/// center beside it: a click opens one, its cross closes it, « Tout
-/// effacer » closes them all.
-pub fn notifications<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+/// Renders the notifications history header and list (or empty state) without
+/// an outer card container (used directly inside spatial popovers).
+pub fn notifications_body<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
     let count = dock.notify.history.len();
     let detail = if count == 0 {
         String::new()
@@ -378,7 +388,14 @@ pub fn notifications<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Messag
             ))
             .into()
     };
-    container(column![header, body].spacing(8))
+    column![header, body].spacing(8).into()
+}
+
+/// The notices still open, newest first, in a card as high as the control
+/// center beside it: a click opens one, its cross closes it, « Tout
+/// effacer » closes them all.
+pub fn notifications<'a>(dock: &'a Dock, palette: Palette) -> Element<'a, Message> {
+    container(notifications_body(dock, palette))
         .height(Length::Fill)
         .padding(12)
         .style(move |_| style::fill(palette.card, 14.0))
